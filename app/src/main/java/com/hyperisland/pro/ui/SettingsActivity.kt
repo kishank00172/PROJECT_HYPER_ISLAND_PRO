@@ -10,6 +10,7 @@ import android.widget.Switch
 import android.widget.TextView
 import com.hyperisland.pro.R
 import com.hyperisland.pro.core.AppSettings
+import com.hyperisland.pro.services.HyperAccessibilityService
 import com.hyperisland.pro.services.IslandOverlayService
 
 class SettingsActivity : Activity() {
@@ -26,6 +27,7 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppSettings.ensurePhaseDefaults(this)
         setContentView(R.layout.activity_settings)
 
         findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
@@ -109,6 +111,10 @@ class SettingsActivity : Activity() {
 
     private fun refreshOverlayIfRunning() {
         if (!AppSettings.isIslandEnabled(this)) return
+
+        if (HyperAccessibilityService.refreshIslandFromApp()) {
+            return
+        }
 
         val intent = Intent(this, IslandOverlayService::class.java).apply {
             action = IslandOverlayService.ACTION_REFRESH
