@@ -49,8 +49,10 @@ class IslandOverlayService : Service() {
         when (intent?.action) {
             ACTION_HIDE -> {
                 AppSettings.setIslandEnabled(this, false)
+                AppSettings.setOverlayEngine(this, AppSettings.ENGINE_NONE)
                 removeIsland()
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                cancelForegroundNotification()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -68,6 +70,7 @@ class IslandOverlayService : Service() {
 
             ACTION_SHOW, null -> {
                 AppSettings.setIslandEnabled(this, true)
+                AppSettings.setOverlayEngine(this, AppSettings.ENGINE_APPLICATION)
                 ensureForeground()
                 showIsland()
             }
@@ -80,8 +83,7 @@ class IslandOverlayService : Service() {
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
         } catch (_: Exception) {
-            // If notification permission is restricted, Android may still allow the FGS,
-            // but we do not crash the overlay engine.
+            // Do not crash if notification permission/system policy blocks display.
         }
     }
 
@@ -96,33 +98,39 @@ class IslandOverlayService : Service() {
             return
         }
 
-        val view = View(this)
-        view.background = createIslandBackground()
-        view.elevation = dp(24).toFloat()
-        view.alpha = 1f
+        val view = View(this).apply {
+            background = createIslandBackground()
+            elevation = dp(24).toFloat()
+            alpha = 1f
 
-        view.setOnClickListener {
-            it.animate()
-                .scaleX(0.94f)
-                .scaleY(0.94f)
-                .setDuration(70)
-                .withEndAction {
-                    it.animate()
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .setDuration(110)
-                        .start()
-                }
-                .start()
+            setOnClickListener {
+                it.animate()
+                    .scaleX(0.94f)
+                    .scaleY(0.94f)
+                    .setDuration(70)
+                    .withEndAction {
+                        it.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(110)
+                            .start()
+                    }
+                    .start()
 
-            Toast.makeText(this, "Hyper Island pill tapped", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@IslandOverlayService,
+                    "Application overlay pill tapped",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
 
+        val params = createLayoutParams()
         islandView = view
-        layoutParams = createLayoutParams()
+        layoutParams = params
 
         try {
-            windowManager?.addView(view, layoutParams)
+            windowManager?.addView(view, params)
         } catch (e: Exception) {
             islandView = null
             layoutParams = null
@@ -144,12 +152,13 @@ class IslandOverlayService : Service() {
         try {
             windowManager?.updateViewLayout(view, params)
         } catch (_: Exception) {
-            // Ignore update race if system already removed the window.
+            // Ignore update race.
         }
     }
 
     private fun removeIsland() {
         val view = islandView ?: return
+
         try {
             windowManager?.removeView(view)
         } catch (_: Exception) {
@@ -185,15 +194,16 @@ class IslandOverlayService : Service() {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
 
-            title = "Hyper Island Pro Pill"
+            title = "Hyper Island Pro Application Pill"
         }
     }
 
     private fun createIslandBackground(): GradientDrawable {
         val height = AppSettings.getIslandHeightDp(this)
+
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.BLACK) // Pure AMOLED black. No grey.
+            setColor(Color.BLACK)
             cornerRadius = dp(height / 2).toFloat()
         }
     }
@@ -209,7 +219,7 @@ class IslandOverlayService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_island_logo)
             .setContentTitle("HYPER ISLAND PRO")
-            .setContentText("Island overlay is running")
+            .setContentText("Fallback application overlay is running")
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .build()
@@ -221,12 +231,21 @@ class IslandOverlayService : Service() {
             "Hyper Island Overlay",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Keeps the Hyper Island overlay service alive."
+            description = "Keeps fallback application overlay service alive."
             setShowBadge(false)
         }
 
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(channel)
+    }
+
+    private fun cancelForegroundNotification() {
+        try {
+            getSystemService(NotificationManager::class.java)
+                .cancel(NOTIFICATION_ID)
+        } catch (_: Exception) {
+            // Ignore.
+        }
     }
 
     private fun dp(value: Int): Int {
@@ -235,6 +254,8 @@ class IslandOverlayService : Service() {
 
     override fun onDestroy() {
         removeIsland()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        cancelForegroundNotification()
         isRunning = false
         super.onDestroy()
     }
