@@ -2,6 +2,7 @@ package com.hyperisland.pro
 
 import android.Manifest
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +11,7 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import com.hyperisland.pro.core.AppSettings
+import com.hyperisland.pro.services.HyperAccessibilityService
 import com.hyperisland.pro.services.IslandOverlayService
 import com.hyperisland.pro.ui.PermissionDoctorActivity
 import com.hyperisland.pro.ui.SettingsActivity
@@ -22,6 +24,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppSettings.ensurePhaseDefaults(this)
         setContentView(R.layout.activity_main)
 
         txtIslandStatus = findViewById(R.id.txtIslandStatus)
@@ -60,28 +63,60 @@ class MainActivity : Activity() {
     }
 
     private fun startIsland() {
+        requestPostNotificationIfNeeded()
+
+        if (isAccessibilityServiceEnabled()) {
+            val started = HyperAccessibilityService.showIslandFromApp(this)
+
+            if (started) {
+                stopFallbackService()
+                refreshIslandUi()
+                Toast.makeText(this, "Accessibility overlay started", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            Toast.makeText(
+                this,
+                "Accessibility service enabled but not connected yet. Reopen app or wait a moment.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Grant overlay permission first", Toast.LENGTH_SHORT).show()
             startActivity(Intent(this, PermissionDoctorActivity::class.java))
             return
         }
 
-        requestPostNotificationIfNeeded()
-
         AppSettings.setIslandEnabled(this, true)
-        startIslandService(IslandOverlayService.ACTION_SHOW)
+        AppSettings.setOverlayEngine(this, AppSettings.ENGINE_APPLICATION)
+        startFallbackService(IslandOverlayService.ACTION_SHOW)
         refreshIslandUi()
+        Toast.makeText(this, "Fallback application overlay started", Toast.LENGTH_SHORT).show()
     }
 
     private fun stopIsland() {
         AppSettings.setIslandEnabled(this, false)
-        startIslandService(IslandOverlayService.ACTION_HIDE)
+        AppSettings.setOverlayEngine(this, AppSettings.ENGINE_NONE)
+
+        HyperAccessibilityService.hideIslandFromApp()
+        startFallbackService(IslandOverlayService.ACTION_HIDE)
+
         refreshIslandUi()
     }
 
-    private fun startIslandService(action: String) {
+    private fun stopFallbackService() {
+        startFallbackService(IslandOverlayService.ACTION_HIDE)
+    }
+
+    private fun startFallbackService(action: String) {
         val intent = Intent(this, IslandOverlayService::class.java).apply {
             this.action = action
+        }
+
+        if (action == IslandOverlayService.ACTION_HIDE) {
+            startService(intent)
+            return
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -101,13 +136,36 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val expected = ComponentName(this, HyperAccessibilityService::class.java).flattenToString()
+        val enabled = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+
+        return enabled.split(":").any { it.equals(expected, ignoreCase = true) }
+    }
+
     private fun refreshIslandUi() {
         val enabled = AppSettings.isIslandEnabled(this)
+        val engine = AppSettings.getOverlayEngine(this)
 
         txtIslandStatus.text = if (enabled) {
-            "Phase 1 overlay status: ENABLED\nTap the black pill to verify touch detection."
+            when (engine) {
+                AppSettings.ENGINE_ACCESSIBILITY -> {
+                    "Phase 1.1 status: ENABLED\nEngine: Accessibility Overlay\nGoal: render above status bar/SystemUI where supported."
+                }
+
+                AppSettings.ENGINE_APPLICATION -> {
+                    "Phase 1.1 status: ENABLED\nEngine: Application Overlay fallback\nThis may appear below status bar icons on HyperOS."
+                }
+
+                else -> {
+                    "Phase 1.1 status: ENABLED\nEngine: Unknown"
+                }
+            }
         } else {
-            "Phase 1 overlay status: OFF\nEnable to show the real AMOLED black pill."
+            "Phase 1.1 status: OFF\nEnable to show the real AMOLED black pill."
         }
 
         btnIslandToggle.text = if (enabled) {
