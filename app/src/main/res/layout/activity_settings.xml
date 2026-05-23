@@ -45,9 +45,135 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="Language switch, themes and real island settings start in later phases. Current UI is intentionally honest, not fake-functional."
+                android:text="Phase 1 adds the real AMOLED black pill overlay. Language, themes and advanced island states come later."
                 android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="18dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Island Overlay Calibration"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:textSize="18sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Flat surface mode: the app does not draw any fake camera cutout. Adjust only pill position and size."
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="Width"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/txtWidthValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="126 dp"
+                android:textColor="@color/accent_cyan"
+                android:textSize="13sp" />
+
+            <SeekBar
+                android:id="@+id/seekWidth"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="190" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Height"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/txtHeightValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="34 dp"
+                android:textColor="@color/accent_cyan"
+                android:textSize="13sp" />
+
+            <SeekBar
+                android:id="@+id/seekHeight"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="36" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Y Position"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/txtYValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="12 dp"
+                android:textColor="@color/accent_cyan"
+                android:textSize="13sp" />
+
+            <SeekBar
+                android:id="@+id/seekY"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="120" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="X Offset"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/txtXValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0 dp"
+                android:textColor="@color/accent_cyan"
+                android:textSize="13sp" />
+
+            <SeekBar
+                android:id="@+id/seekX"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="360" />
+
+            <Button
+                android:id="@+id/btnResetOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_button_secondary"
+                android:text="RESET OVERLAY DEFAULTS"
+                android:textColor="@color/text_primary" />
         </LinearLayout>
 
         <Button
@@ -56,7 +182,7 @@
             android:layout_height="54dp"
             android:layout_marginTop="18dp"
             android:background="@drawable/bg_button_secondary"
-            android:text="Back"
+            android:text="BACK"
             android:textColor="@color/text_primary" />
     </LinearLayout>
 </ScrollView>
