@@ -1,0 +1,45 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/amoled_black">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Permission Doctor"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:textSize="28sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="This screen checks real Android permissions. Missing permissions are not hidden."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <include layout="@layout/item_permission_row" android:id="@+id/rowOverlay" />
+        <include layout="@layout/item_permission_row" android:id="@+id/rowNotification" />
+        <include layout="@layout/item_permission_row" android:id="@+id/rowAccessibility" />
+        <include layout="@layout/item_permission_row" android:id="@+id/rowBattery" />
+        <include layout="@layout/item_permission_row" android:id="@+id/rowUsage" />
+        <include layout="@layout/item_permission_row" android:id="@+id/rowAutostart" />
+        <include layout="@layout/item_permission_row" android:id="@+id/rowShizuku" />
+
+        <Button
+            android:id="@+id/btnBack"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/bg_button_secondary"
+            android:text="Back"
+            android:textColor="@color/text_primary" />
+    </LinearLayout>
+</ScrollView>

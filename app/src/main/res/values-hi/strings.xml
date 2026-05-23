@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">HYPER ISLAND PRO</string>
+    <string name="phase_label">फेज 0 — फाउंडेशन</string>
+    <string name="notification_listener_label">Hyper Island Notification Access</string>
+    <string name="accessibility_service_label">Hyper Island Accessibility</string>
+    <string name="accessibility_service_description">आगे के फेज में notification panel awareness, lockscreen state और gesture detection के लिए। Phase 0 में device control नहीं किया जाता।</string>
+    <string name="permission_doctor">Permission Doctor</string>
+    <string name="test_lab">Test Lab</string>
+    <string name="settings">Settings</string>
+    <string name="coming_phase_1">Phase 1 में आएगा</string>
+</resources>

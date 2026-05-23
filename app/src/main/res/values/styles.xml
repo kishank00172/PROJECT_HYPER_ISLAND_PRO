@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.HyperIslandPro" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/amoled_black</item>
+        <item name="android:colorAccent">@color/accent_cyan</item>
+        <item name="android:navigationBarColor">@color/amoled_black</item>
+        <item name="android:statusBarColor">@color/amoled_black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>
