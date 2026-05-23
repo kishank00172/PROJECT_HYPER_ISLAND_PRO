@@ -15,6 +15,10 @@ android {
         versionName = "0.0.1-phase0"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
