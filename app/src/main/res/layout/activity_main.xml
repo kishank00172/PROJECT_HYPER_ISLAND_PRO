@@ -23,7 +23,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Phase 1 — Real Pill Overlay"
+            android:text="Phase 1.1 — Accessibility Overlay"
             android:textColor="@color/accent_cyan"
             android:textSize="14sp" />
 
@@ -57,7 +57,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Phase 1 overlay status: OFF"
+                android:text="Phase 1.1 status: OFF"
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp" />
 
@@ -65,7 +65,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Real WindowManager overlay. Pure AMOLED black pill. No fake punch-hole/cutout drawing."
+                android:text="Primary engine: Accessibility Overlay. Fallback: Application Overlay. Pure AMOLED black pill. No fake cutout."
                 android:textColor="@color/text_muted"
                 android:textSize="13sp" />
         </LinearLayout>
