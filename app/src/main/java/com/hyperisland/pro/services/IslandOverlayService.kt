@@ -163,6 +163,8 @@ class IslandOverlayService : Service() {
     private fun createLayoutParams(): WindowManager.LayoutParams {
         val width = dp(AppSettings.getIslandWidthDp(this))
         val height = dp(AppSettings.getIslandHeightDp(this))
+        val offsetX = dp(AppSettings.getIslandXDp(this))
+        val offsetY = dp(AppSettings.getIslandYDp(this))
 
         return WindowManager.LayoutParams(
             width,
@@ -175,8 +177,8 @@ class IslandOverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            x = dp(AppSettings.getIslandXDp(this))
-            y = dp(AppSettings.getIslandYDp(this))
+            x = offsetX
+            y = offsetY
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
