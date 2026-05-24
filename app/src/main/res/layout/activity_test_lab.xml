@@ -21,7 +21,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Phase 0 does not fake island states. Buttons will activate as their real engines are implemented."
+            android:text="Phase 2 tests use real Accessibility Overlay commands. No fake island state."
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
 
@@ -36,12 +36,40 @@
             android:textSize="15sp" />
 
         <Button
+            android:id="@+id/btnExpandIsland"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/bg_button_primary"
+            android:text="EXPAND ISLAND"
+            android:textColor="@color/amoled_black"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnCollapseIsland"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_button_secondary"
+            android:text="COLLAPSE ISLAND"
+            android:textColor="@color/text_primary" />
+
+        <Button
+            android:id="@+id/btnToggleIsland"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_button_secondary"
+            android:text="TOGGLE EXPAND / COLLAPSE"
+            android:textColor="@color/text_primary" />
+
+        <Button
             android:id="@+id/btnBack"
             android:layout_width="match_parent"
             android:layout_height="54dp"
             android:layout_marginTop="18dp"
             android:background="@drawable/bg_button_secondary"
-            android:text="Back"
+            android:text="BACK"
             android:textColor="@color/text_primary" />
     </LinearLayout>
 </ScrollView>
