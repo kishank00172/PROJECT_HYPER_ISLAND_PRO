@@ -65,13 +65,21 @@ class MainActivity : Activity() {
     }
 
     private fun startIsland() {
-        requestPostNotificationIfNeeded()
-
         if (isAccessibilityServiceEnabled()) {
             val started = HyperAccessibilityService.showIslandFromApp(this)
 
             if (started) {
-                stopFallbackService()
+                /*
+                 * Critical fix:
+                 * Do NOT call ACTION_HIDE here.
+                 * ACTION_HIDE marks AppSettings island_enabled=false.
+                 * We only stop fallback service without changing global island state.
+                 */
+                stopFallbackOnly()
+
+                AppSettings.setIslandEnabled(this, true)
+                AppSettings.setOverlayEngine(this, AppSettings.ENGINE_ACCESSIBILITY)
+
                 refreshIslandUi()
                 Toast.makeText(this, "Accessibility overlay started", Toast.LENGTH_SHORT).show()
                 return
@@ -79,10 +87,13 @@ class MainActivity : Activity() {
 
             Toast.makeText(
                 this,
-                "Accessibility service enabled but not connected yet. Reopen app or wait a moment.",
+                "Accessibility service enabled but not connected yet. Toggle Accessibility OFF/ON once.",
                 Toast.LENGTH_LONG
             ).show()
+            return
         }
+
+        requestPostNotificationIfNeeded()
 
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Grant overlay permission first", Toast.LENGTH_SHORT).show()
@@ -109,8 +120,8 @@ class MainActivity : Activity() {
         Toast.makeText(this, "Island stop command sent", Toast.LENGTH_SHORT).show()
     }
 
-    private fun stopFallbackService() {
-        startFallbackService(IslandOverlayService.ACTION_HIDE)
+    private fun stopFallbackOnly() {
+        startFallbackService(IslandOverlayService.ACTION_STOP_FALLBACK_ONLY)
     }
 
     private fun startFallbackService(action: String) {
@@ -118,7 +129,10 @@ class MainActivity : Activity() {
             this.action = action
         }
 
-        if (action == IslandOverlayService.ACTION_HIDE) {
+        if (
+            action == IslandOverlayService.ACTION_HIDE ||
+            action == IslandOverlayService.ACTION_STOP_FALLBACK_ONLY
+        ) {
             startService(intent)
             return
         }
@@ -157,11 +171,11 @@ class MainActivity : Activity() {
         txtIslandStatus.text = if (enabled) {
             when (engine) {
                 AppSettings.ENGINE_ACCESSIBILITY -> {
-                    "Phase 2 status: ENABLED\nEngine: Accessibility Overlay\nTap the pill to expand/collapse with smooth morph animation."
+                    "Phase 2 status: ENABLED\nEngine: Accessibility Overlay\nTap the pill to expand/collapse."
                 }
 
                 AppSettings.ENGINE_APPLICATION -> {
-                    "Phase 2 status: ENABLED\nEngine: Application Overlay fallback\nFallback may appear below status bar icons and has limited animation."
+                    "Phase 2 status: ENABLED\nEngine: Application Overlay fallback."
                 }
 
                 else -> {
