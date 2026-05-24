@@ -1,11 +1,7 @@
 package com.hyperisland.pro.services
 
 import android.accessibilityservice.AccessibilityService
-import android.animation.ValueAnimator
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -16,28 +12,13 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.Toast
 import com.hyperisland.pro.core.AppSettings
-import kotlin.math.roundToInt
 
 class HyperAccessibilityService : AccessibilityService() {
 
     companion object {
-        const val ACTION_ACCESSIBILITY_SHOW =
-            "com.hyperisland.pro.action.ACCESSIBILITY_SHOW_ISLAND"
-        const val ACTION_ACCESSIBILITY_HIDE =
-            "com.hyperisland.pro.action.ACCESSIBILITY_HIDE_ISLAND"
-        const val ACTION_ACCESSIBILITY_REFRESH =
-            "com.hyperisland.pro.action.ACCESSIBILITY_REFRESH_ISLAND"
-        const val ACTION_ACCESSIBILITY_EXPAND =
-            "com.hyperisland.pro.action.ACCESSIBILITY_EXPAND_ISLAND"
-        const val ACTION_ACCESSIBILITY_COLLAPSE =
-            "com.hyperisland.pro.action.ACCESSIBILITY_COLLAPSE_ISLAND"
-        const val ACTION_ACCESSIBILITY_TOGGLE_EXPAND =
-            "com.hyperisland.pro.action.ACCESSIBILITY_TOGGLE_EXPAND_ISLAND"
-
         @Volatile
         private var instance: HyperAccessibilityService? = null
 
@@ -57,30 +38,35 @@ class HyperAccessibilityService : AccessibilityService() {
 
         fun hideIslandFromApp(context: Context? = null): Boolean {
             val service = instance ?: return false
+
             service.postHideIsland()
             return true
         }
 
         fun refreshIslandFromApp(context: Context): Boolean {
             val service = instance ?: return false
+
             service.postUpdateIsland()
             return true
         }
 
         fun expandIslandFromApp(context: Context): Boolean {
             val service = instance ?: return false
+
             service.postExpandIsland()
             return true
         }
 
         fun collapseIslandFromApp(context: Context): Boolean {
             val service = instance ?: return false
+
             service.postCollapseIsland()
             return true
         }
 
         fun toggleExpandFromApp(context: Context): Boolean {
             val service = instance ?: return false
+
             service.postToggleExpanded()
             return true
         }
@@ -88,41 +74,17 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /*
-     * Smooth but stable curve.
-     * Previous version felt vibratory because scale press + size animation + duplicate commands
-     * could overlap. This version animates only WindowManager size/corner radius.
-     */
-    private val islandInterpolator = PathInterpolator(0.22f, 0.0f, 0.0f, 1.0f)
-
     private var windowManager: WindowManager? = null
     private var islandView: FrameLayout? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var islandBackground: GradientDrawable? = null
-    private var sizeAnimator: ValueAnimator? = null
-    private var receiverRegistered = false
     private var isExpanded = false
-
-    private val commandReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                ACTION_ACCESSIBILITY_SHOW -> postShowIsland()
-                ACTION_ACCESSIBILITY_HIDE -> postHideIsland()
-                ACTION_ACCESSIBILITY_REFRESH -> postUpdateIsland()
-                ACTION_ACCESSIBILITY_EXPAND -> postExpandIsland()
-                ACTION_ACCESSIBILITY_COLLAPSE -> postCollapseIsland()
-                ACTION_ACCESSIBILITY_TOGGLE_EXPAND -> postToggleExpanded()
-            }
-        }
-    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
 
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
-
-        registerCommandReceiver()
 
         if (
             AppSettings.isIslandEnabled(this) &&
@@ -133,47 +95,12 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Phase 2: overlay + expand/collapse engine only.
-        // Later phases will add notification/music/call/download/timer content.
+        // Phase 2 safe mode:
+        // only overlay + direct expand/collapse.
+        // No risky frame animation here.
     }
 
     override fun onInterrupt() = Unit
-
-    private fun registerCommandReceiver() {
-        if (receiverRegistered) return
-
-        val filter = IntentFilter().apply {
-            addAction(ACTION_ACCESSIBILITY_SHOW)
-            addAction(ACTION_ACCESSIBILITY_HIDE)
-            addAction(ACTION_ACCESSIBILITY_REFRESH)
-            addAction(ACTION_ACCESSIBILITY_EXPAND)
-            addAction(ACTION_ACCESSIBILITY_COLLAPSE)
-            addAction(ACTION_ACCESSIBILITY_TOGGLE_EXPAND)
-        }
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(commandReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                registerReceiver(commandReceiver, filter)
-            }
-            receiverRegistered = true
-        } catch (_: Exception) {
-            receiverRegistered = false
-        }
-    }
-
-    private fun unregisterCommandReceiver() {
-        if (!receiverRegistered) return
-
-        try {
-            unregisterReceiver(commandReceiver)
-        } catch (_: Exception) {
-            // Already unregistered.
-        } finally {
-            receiverRegistered = false
-        }
-    }
 
     private fun postShowIsland() {
         mainHandler.post {
@@ -211,14 +138,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 showIslandInternal()
             }
 
-            animateIsland(expand = true)
+            setExpanded(true)
         }
     }
 
     private fun postCollapseIsland() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
-            animateIsland(expand = false)
+
+            setExpanded(false)
         }
     }
 
@@ -230,7 +158,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 showIslandInternal()
             }
 
-            animateIsland(expand = !isExpanded)
+            setExpanded(!isExpanded)
         }
     }
 
@@ -243,7 +171,7 @@ class HyperAccessibilityService : AccessibilityService() {
         isExpanded = false
 
         islandBackground = createIslandBackground(
-            cornerRadiusPx = targetCornerRadiusPx(expanded = false)
+            cornerRadiusPx = compactCornerRadiusPx()
         )
 
         val root = FrameLayout(this).apply {
@@ -252,10 +180,6 @@ class HyperAccessibilityService : AccessibilityService() {
             alpha = 1f
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
 
-            /*
-             * No press-scale here.
-             * Scaling an overlay while WindowManager size is animating can look vibratory.
-             */
             setOnClickListener {
                 postToggleExpanded()
             }
@@ -281,6 +205,13 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun setExpanded(expanded: Boolean) {
+        if (isExpanded == expanded) return
+
+        isExpanded = expanded
+        updateIslandLayoutInternal()
+    }
+
     private fun updateIslandLayoutInternal() {
         val root = islandView ?: return
         val params = layoutParams ?: return
@@ -290,103 +221,24 @@ class HyperAccessibilityService : AccessibilityService() {
         params.x = dp(AppSettings.getIslandXDp(this))
         params.y = dp(AppSettings.getIslandYDp(this))
 
-        islandBackground?.cornerRadius = targetCornerRadiusPx(isExpanded).toFloat()
+        islandBackground?.cornerRadius = if (isExpanded) {
+            dp(34).toFloat()
+        } else {
+            compactCornerRadiusPx().toFloat()
+        }
 
         try {
             windowManager?.updateViewLayout(root, params)
-        } catch (_: Exception) {
-            // Window may already be removed by system.
-        }
-    }
-
-    private fun animateIsland(expand: Boolean) {
-        if (isExpanded == expand && sizeAnimator?.isRunning != true) return
-
-        isExpanded = expand
-
-        val targetWidth = dp(currentTargetWidthDp())
-        val targetHeight = dp(currentTargetHeightDp())
-
-        animateToSize(
-            targetWidth = targetWidth,
-            targetHeight = targetHeight,
-            expanding = expand
-        )
-    }
-
-    private fun animateToSize(
-        targetWidth: Int,
-        targetHeight: Int,
-        expanding: Boolean
-    ) {
-        val view = islandView ?: return
-        val params = layoutParams ?: return
-
-        sizeAnimator?.cancel()
-
-        val startWidth = params.width
-        val startHeight = params.height
-        val startRadius = islandBackground?.cornerRadius
-            ?: targetCornerRadiusPx(expanded = !expanding).toFloat()
-        val endRadius = targetCornerRadiusPx(expanded = expanding).toFloat()
-
-        sizeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = if (expanding) 360L else 300L
-            interpolator = islandInterpolator
-
-            addUpdateListener { animator ->
-                val t = animator.animatedValue as Float
-
-                params.width = lerp(startWidth, targetWidth, t)
-                params.height = lerp(startHeight, targetHeight, t)
-                params.x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService))
-                params.y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService))
-
-                islandBackground?.cornerRadius = lerp(startRadius, endRadius, t).toFloat()
-
-                try {
-                    windowManager?.updateViewLayout(view, params)
-                } catch (_: Exception) {
-                    cancel()
-                }
-            }
-
-            addListener(object : android.animation.Animator.AnimatorListener {
-                private var cancelled = false
-
-                override fun onAnimationStart(animation: android.animation.Animator) {
-                    cancelled = false
-                }
-
-                override fun onAnimationCancel(animation: android.animation.Animator) {
-                    cancelled = true
-                }
-
-                override fun onAnimationRepeat(animation: android.animation.Animator) = Unit
-
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (cancelled) return
-
-                    params.width = targetWidth
-                    params.height = targetHeight
-                    islandBackground?.cornerRadius = endRadius
-
-                    try {
-                        windowManager?.updateViewLayout(view, params)
-                    } catch (_: Exception) {
-                        // Ignore.
-                    }
-                }
-            })
-
-            start()
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Island update failed: ${e.message}",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
     private fun hideIslandInternal() {
-        sizeAnimator?.cancel()
-        sizeAnimator = null
-
         val view = islandView
 
         if (view != null) {
@@ -455,20 +307,8 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun targetCornerRadiusPx(expanded: Boolean): Int {
-        return if (expanded) {
-            dp(34)
-        } else {
-            dp(AppSettings.getIslandHeightDp(this) / 2)
-        }
-    }
-
-    private fun lerp(start: Int, end: Int, progress: Float): Int {
-        return (start + ((end - start) * progress)).roundToInt()
-    }
-
-    private fun lerp(start: Float, end: Float, progress: Float): Float {
-        return start + ((end - start) * progress)
+    private fun compactCornerRadiusPx(): Int {
+        return dp(AppSettings.getIslandHeightDp(this) / 2)
     }
 
     private fun dp(value: Int): Int {
@@ -477,7 +317,6 @@ class HyperAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         hideIslandInternal()
-        unregisterCommandReceiver()
 
         if (instance === this) {
             instance = null
