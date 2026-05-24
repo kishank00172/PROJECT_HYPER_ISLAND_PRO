@@ -157,19 +157,19 @@ class MainActivity : Activity() {
         txtIslandStatus.text = if (enabled) {
             when (engine) {
                 AppSettings.ENGINE_ACCESSIBILITY -> {
-                    "Phase 1.1 status: ENABLED\nEngine: Accessibility Overlay\nStatus bar overdraw test: PASS on your device."
+                    "Phase 2 status: ENABLED\nEngine: Accessibility Overlay\nTap the pill to expand/collapse with smooth morph animation."
                 }
 
                 AppSettings.ENGINE_APPLICATION -> {
-                    "Phase 1.1 status: ENABLED\nEngine: Application Overlay fallback\nThis may appear below status bar icons on HyperOS."
+                    "Phase 2 status: ENABLED\nEngine: Application Overlay fallback\nFallback may appear below status bar icons and has limited animation."
                 }
 
                 else -> {
-                    "Phase 1.1 status: ENABLED\nEngine: Unknown"
+                    "Phase 2 status: ENABLED\nEngine: Unknown"
                 }
             }
         } else {
-            "Phase 1.1 status: OFF\nEnable to show the real AMOLED black pill."
+            "Phase 2 status: OFF\nEnable to show the real AMOLED black pill."
         }
 
         btnIslandToggle.text = if (enabled) {
