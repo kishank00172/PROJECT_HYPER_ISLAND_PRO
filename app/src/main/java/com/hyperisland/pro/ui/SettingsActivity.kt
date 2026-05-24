@@ -27,10 +27,14 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         AppSettings.ensurePhaseDefaults(this)
+
         setContentView(R.layout.activity_settings)
 
-        findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
+        findViewById<Button>(R.id.btnBack).setOnClickListener {
+            finish()
+        }
 
         val developer = findViewById<Switch>(R.id.switchDeveloper)
         developer.isChecked = AppSettings.isDeveloperMode(this)
@@ -112,7 +116,9 @@ class SettingsActivity : Activity() {
     private fun refreshOverlayIfRunning() {
         if (!AppSettings.isIslandEnabled(this)) return
 
-        if (HyperAccessibilityService.refreshIslandFromApp()) {
+        val refreshedAccessibility = HyperAccessibilityService.refreshIslandFromApp(this)
+
+        if (refreshedAccessibility) {
             return
         }
 
@@ -129,11 +135,16 @@ class SettingsActivity : Activity() {
 
     private fun simpleListener(onChanged: () -> Unit): SeekBar.OnSeekBarChangeListener {
         return object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+            override fun onProgressChanged(
+                seekBar: SeekBar?,
+                progress: Int,
+                fromUser: Boolean
+            ) {
                 if (fromUser) onChanged()
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         }
     }
