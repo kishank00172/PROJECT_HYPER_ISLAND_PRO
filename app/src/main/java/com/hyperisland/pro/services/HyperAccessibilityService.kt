@@ -78,29 +78,21 @@ class HyperAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /*
-     * Center morph curve. The visual window is non-touchable.
-     * A separate exact-size transparent touch window receives taps only where the island exists.
+     * Center morph curve.
+     * Visual layer is non-touchable.
+     * Touch layer is exact-size and fully invisible.
      */
     private val morphInterpolator = PathInterpolator(0.20f, 0.0f, 0.0f, 1.0f)
 
     private var windowManager: WindowManager? = null
 
-    /*
-     * Visual overlay: stable max-size transparent container, NOT_TOUCHABLE.
-     */
     private var visualRoot: FrameLayout? = null
     private var visualWindowParams: WindowManager.LayoutParams? = null
 
-    /*
-     * Actual visible black island inside visualRoot.
-     */
     private var islandView: View? = null
     private var islandParams: FrameLayout.LayoutParams? = null
     private var islandBackground: GradientDrawable? = null
 
-    /*
-     * Touch overlay: transparent exact island-size window, touchable.
-     */
     private var touchView: FrameLayout? = null
     private var touchWindowParams: WindowManager.LayoutParams? = null
 
@@ -200,7 +192,10 @@ class HyperAccessibilityService : AccessibilityService() {
         )
 
         val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.TRANSPARENT)
+            background = null
+            foreground = null
+            alpha = 1f
+            setWillNotDraw(true)
             clipChildren = false
             clipToPadding = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -210,6 +205,8 @@ class HyperAccessibilityService : AccessibilityService() {
             background = islandBackground
             elevation = dp(30).toFloat()
             alpha = 1f
+            clipToOutline = true
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 
@@ -224,7 +221,14 @@ class HyperAccessibilityService : AccessibilityService() {
         root.addView(island, childParams)
 
         val touch = FrameLayout(this).apply {
-            setBackgroundColor(Color.TRANSPARENT)
+            /*
+             * Fully invisible touch layer.
+             * It remains clickable but visually transparent.
+             */
+            background = null
+            foreground = null
+            alpha = 0f
+            setWillNotDraw(true)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             isClickable = true
             setOnClickListener {
@@ -280,7 +284,7 @@ class HyperAccessibilityService : AccessibilityService() {
         try {
             windowManager?.updateViewLayout(root, visualParams)
             islandView?.layoutParams = child
-            updateTouchWindowToCurrent()
+            updateTouchWindowToSizePx(child.width, child.height)
         } catch (e: Exception) {
             if (immediate) {
                 Toast.makeText(
@@ -346,6 +350,12 @@ class HyperAccessibilityService : AccessibilityService() {
                 islandBackground?.cornerRadius = lerp(startRadius, targetRadius, t).toFloat()
 
                 islandView?.layoutParams = child
+
+                /*
+                 * Touch target follows the actual visible island size.
+                 * This prevents invisible expanded rectangles from blocking gestures.
+                 */
+                updateTouchWindowToSizePx(child.width, child.height)
             }
 
             addListener(object : android.animation.Animator.AnimatorListener {
@@ -371,13 +381,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     islandBackground?.cornerRadius = targetRadius
 
                     islandView?.layoutParams = child
-
-                    /*
-                     * Touch window is updated only after the morph finishes.
-                     * This prevents a large transparent touch area in compact mode
-                     * and keeps control center / notification shade gestures usable.
-                     */
-                    updateTouchWindowToCurrent()
+                    updateTouchWindowToSizePx(targetWidth, targetHeight)
                 }
             })
 
@@ -400,12 +404,12 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun updateTouchWindowToCurrent() {
+    private fun updateTouchWindowToSizePx(widthPx: Int, heightPx: Int) {
         val touch = touchView ?: return
         val params = touchWindowParams ?: return
 
-        params.width = dp(currentTargetWidthDp())
-        params.height = dp(currentTargetHeightDp())
+        params.width = widthPx
+        params.height = heightPx
         params.x = dp(AppSettings.getIslandXDp(this))
         params.y = dp(AppSettings.getIslandYDp(this))
 
@@ -465,12 +469,14 @@ class HyperAccessibilityService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService))
             y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService))
+            dimAmount = 0f
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
@@ -489,12 +495,14 @@ class HyperAccessibilityService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService))
             y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService))
+            dimAmount = 0f
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
@@ -534,7 +542,9 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun expandedCornerRadiusPx(): Int {
-        return dp(34)
+        val expandedHeight = AppSettings.getIslandExpandedHeightDp(this)
+        val radiusDp = (expandedHeight / 3).coerceIn(34, 46)
+        return dp(radiusDp)
     }
 
     private fun lerp(start: Int, end: Int, progress: Float): Int {
