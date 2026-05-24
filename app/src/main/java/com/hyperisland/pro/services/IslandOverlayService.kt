@@ -26,6 +26,15 @@ class IslandOverlayService : Service() {
         const val ACTION_HIDE = "com.hyperisland.pro.action.HIDE_ISLAND"
         const val ACTION_REFRESH = "com.hyperisland.pro.action.REFRESH_ISLAND"
 
+        /*
+         * Important:
+         * This action stops only the fallback application overlay service.
+         * It must NOT mark the whole island as OFF, because Accessibility Overlay
+         * may already be running as the primary engine.
+         */
+        const val ACTION_STOP_FALLBACK_ONLY =
+            "com.hyperisland.pro.action.STOP_FALLBACK_ONLY"
+
         private const val CHANNEL_ID = "hyper_island_overlay"
         private const val NOTIFICATION_ID = 1001
 
@@ -47,6 +56,14 @@ class IslandOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_STOP_FALLBACK_ONLY -> {
+                removeIsland()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                cancelForegroundNotification()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
             ACTION_HIDE -> {
                 AppSettings.setIslandEnabled(this, false)
                 AppSettings.setOverlayEngine(this, AppSettings.ENGINE_NONE)
@@ -104,19 +121,6 @@ class IslandOverlayService : Service() {
             alpha = 1f
 
             setOnClickListener {
-                it.animate()
-                    .scaleX(0.94f)
-                    .scaleY(0.94f)
-                    .setDuration(70)
-                    .withEndAction {
-                        it.animate()
-                            .scaleX(1f)
-                            .scaleY(1f)
-                            .setDuration(110)
-                            .start()
-                    }
-                    .start()
-
                 Toast.makeText(
                     this@IslandOverlayService,
                     "Application overlay pill tapped",
