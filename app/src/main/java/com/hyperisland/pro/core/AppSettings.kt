@@ -14,28 +14,45 @@ object AppSettings {
     private const val KEY_ISLAND_HEIGHT_DP = "island_height_dp"
     private const val KEY_ISLAND_Y_DP = "island_y_dp"
     private const val KEY_ISLAND_X_DP = "island_x_dp"
+    private const val KEY_ISLAND_EXPANDED_WIDTH_DP = "island_expanded_width_dp"
+    private const val KEY_ISLAND_EXPANDED_HEIGHT_DP = "island_expanded_height_dp"
 
     const val ENGINE_NONE = "none"
     const val ENGINE_ACCESSIBILITY = "accessibility"
     const val ENGINE_APPLICATION = "application"
 
-    private const val CURRENT_DEFAULTS_VERSION = 2
+    private const val CURRENT_DEFAULTS_VERSION = 3
 
     const val DEFAULT_ISLAND_WIDTH_DP = 134
     const val DEFAULT_ISLAND_HEIGHT_DP = 38
     const val DEFAULT_ISLAND_Y_DP = 1
     const val DEFAULT_ISLAND_X_DP = 0
 
+    const val DEFAULT_ISLAND_EXPANDED_WIDTH_DP = 330
+    const val DEFAULT_ISLAND_EXPANDED_HEIGHT_DP = 118
+
     fun ensurePhaseDefaults(context: Context) {
         val prefs = prefs(context)
         val version = prefs.getInt(KEY_DEFAULTS_VERSION, 0)
 
         if (version < CURRENT_DEFAULTS_VERSION) {
-            prefs.edit()
-                .putInt(KEY_ISLAND_WIDTH_DP, DEFAULT_ISLAND_WIDTH_DP)
-                .putInt(KEY_ISLAND_HEIGHT_DP, DEFAULT_ISLAND_HEIGHT_DP)
-                .putInt(KEY_ISLAND_Y_DP, DEFAULT_ISLAND_Y_DP)
-                .putInt(KEY_ISLAND_X_DP, DEFAULT_ISLAND_X_DP)
+            val editor = prefs.edit()
+
+            if (version < 2) {
+                editor
+                    .putInt(KEY_ISLAND_WIDTH_DP, DEFAULT_ISLAND_WIDTH_DP)
+                    .putInt(KEY_ISLAND_HEIGHT_DP, DEFAULT_ISLAND_HEIGHT_DP)
+                    .putInt(KEY_ISLAND_Y_DP, DEFAULT_ISLAND_Y_DP)
+                    .putInt(KEY_ISLAND_X_DP, DEFAULT_ISLAND_X_DP)
+            }
+
+            if (version < 3) {
+                editor
+                    .putInt(KEY_ISLAND_EXPANDED_WIDTH_DP, DEFAULT_ISLAND_EXPANDED_WIDTH_DP)
+                    .putInt(KEY_ISLAND_EXPANDED_HEIGHT_DP, DEFAULT_ISLAND_EXPANDED_HEIGHT_DP)
+            }
+
+            editor
                 .putInt(KEY_DEFAULTS_VERSION, CURRENT_DEFAULTS_VERSION)
                 .apply()
         }
@@ -111,12 +128,40 @@ object AppSettings {
             .apply()
     }
 
+    fun getIslandExpandedWidthDp(context: Context): Int {
+        return prefs(context).getInt(
+            KEY_ISLAND_EXPANDED_WIDTH_DP,
+            DEFAULT_ISLAND_EXPANDED_WIDTH_DP
+        )
+    }
+
+    fun setIslandExpandedWidthDp(context: Context, value: Int) {
+        prefs(context).edit()
+            .putInt(KEY_ISLAND_EXPANDED_WIDTH_DP, value.coerceIn(180, 420))
+            .apply()
+    }
+
+    fun getIslandExpandedHeightDp(context: Context): Int {
+        return prefs(context).getInt(
+            KEY_ISLAND_EXPANDED_HEIGHT_DP,
+            DEFAULT_ISLAND_EXPANDED_HEIGHT_DP
+        )
+    }
+
+    fun setIslandExpandedHeightDp(context: Context, value: Int) {
+        prefs(context).edit()
+            .putInt(KEY_ISLAND_EXPANDED_HEIGHT_DP, value.coerceIn(70, 220))
+            .apply()
+    }
+
     fun resetIslandDefaults(context: Context) {
         prefs(context).edit()
             .putInt(KEY_ISLAND_WIDTH_DP, DEFAULT_ISLAND_WIDTH_DP)
             .putInt(KEY_ISLAND_HEIGHT_DP, DEFAULT_ISLAND_HEIGHT_DP)
             .putInt(KEY_ISLAND_Y_DP, DEFAULT_ISLAND_Y_DP)
             .putInt(KEY_ISLAND_X_DP, DEFAULT_ISLAND_X_DP)
+            .putInt(KEY_ISLAND_EXPANDED_WIDTH_DP, DEFAULT_ISLAND_EXPANDED_WIDTH_DP)
+            .putInt(KEY_ISLAND_EXPANDED_HEIGHT_DP, DEFAULT_ISLAND_EXPANDED_HEIGHT_DP)
             .putInt(KEY_DEFAULTS_VERSION, CURRENT_DEFAULTS_VERSION)
             .apply()
     }
