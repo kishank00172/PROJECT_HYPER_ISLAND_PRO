@@ -78,23 +78,31 @@ class HyperAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /*
-     * Center morph curve.
-     * Visual layer is non-touchable.
-     * Touch layer is exact-size and fully invisible.
+     * Final Phase 2 architecture:
+     *
+     * 1. Visual window:
+     *    - exact island size
+     *    - black rounded background
+     *    - NOT_TOUCHABLE
+     *
+     * 2. Touch window:
+     *    - exact island size
+     *    - fully invisible
+     *    - touchable
+     *
+     * No large transparent max-size visual container.
+     * This removes the grey rectangle artifact.
      */
     private val morphInterpolator = PathInterpolator(0.20f, 0.0f, 0.0f, 1.0f)
 
     private var windowManager: WindowManager? = null
 
-    private var visualRoot: FrameLayout? = null
-    private var visualWindowParams: WindowManager.LayoutParams? = null
-
-    private var islandView: View? = null
-    private var islandParams: FrameLayout.LayoutParams? = null
-    private var islandBackground: GradientDrawable? = null
+    private var visualView: View? = null
+    private var visualParams: WindowManager.LayoutParams? = null
+    private var visualBackground: GradientDrawable? = null
 
     private var touchView: FrameLayout? = null
-    private var touchWindowParams: WindowManager.LayoutParams? = null
+    private var touchParams: WindowManager.LayoutParams? = null
 
     private var morphAnimator: ValueAnimator? = null
     private var isExpanded = false
@@ -114,7 +122,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Phase 2: stable center morph engine only.
+        // Phase 2: exact-size visual + exact-size touch island.
     }
 
     override fun onInterrupt() = Unit
@@ -139,10 +147,10 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
 
-            if (visualRoot == null || touchView == null) {
+            if (visualView == null || touchView == null) {
                 showIslandInternal()
             } else {
-                updateContainerAndIsland(immediate = true)
+                updateWindowsToCurrentSize()
             }
         }
     }
@@ -151,7 +159,7 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
 
-            if (visualRoot == null || touchView == null) {
+            if (visualView == null || touchView == null) {
                 showIslandInternal()
             }
 
@@ -170,7 +178,7 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
 
-            if (visualRoot == null || touchView == null) {
+            if (visualView == null || touchView == null) {
                 showIslandInternal()
             }
 
@@ -179,30 +187,22 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun showIslandInternal() {
-        if (visualRoot != null && touchView != null) {
-            updateContainerAndIsland(immediate = true)
+        if (visualView != null && touchView != null) {
+            updateWindowsToCurrentSize()
             return
         }
 
         hideIslandInternal()
         isExpanded = false
 
-        islandBackground = createIslandBackground(
-            cornerRadiusPx = compactCornerRadiusPx()
-        )
+        val widthPx = dp(AppSettings.getIslandWidthDp(this))
+        val heightPx = dp(AppSettings.getIslandHeightDp(this))
+        val radiusPx = compactCornerRadiusPx()
 
-        val root = FrameLayout(this).apply {
-            background = null
-            foreground = null
-            alpha = 1f
-            setWillNotDraw(true)
-            clipChildren = false
-            clipToPadding = false
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
+        visualBackground = createIslandBackground(radiusPx)
 
-        val island = View(this).apply {
-            background = islandBackground
+        val visual = View(this).apply {
+            background = visualBackground
             elevation = dp(30).toFloat()
             alpha = 1f
             clipToOutline = true
@@ -210,21 +210,7 @@ class HyperAccessibilityService : AccessibilityService() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 
-        val childParams = FrameLayout.LayoutParams(
-            dp(AppSettings.getIslandWidthDp(this)),
-            dp(AppSettings.getIslandHeightDp(this))
-        ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            topMargin = 0
-        }
-
-        root.addView(island, childParams)
-
         val touch = FrameLayout(this).apply {
-            /*
-             * Fully invisible touch layer.
-             * It remains clickable but visually transparent.
-             */
             background = null
             foreground = null
             alpha = 0f
@@ -236,19 +222,17 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }
 
-        visualRoot = root
-        islandView = island
-        islandParams = childParams
-        touchView = touch
+        val vParams = createVisualParams(widthPx, heightPx)
+        val tParams = createTouchParams(widthPx, heightPx)
 
-        val visualParams = createVisualWindowParams()
-        val touchParams = createTouchWindowParams()
-        visualWindowParams = visualParams
-        touchWindowParams = touchParams
+        visualView = visual
+        touchView = touch
+        visualParams = vParams
+        touchParams = tParams
 
         try {
-            windowManager?.addView(root, visualParams)
-            windowManager?.addView(touch, touchParams)
+            windowManager?.addView(visual, vParams)
+            windowManager?.addView(touch, tParams)
         } catch (e: Exception) {
             hideIslandInternal()
 
@@ -260,80 +244,46 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun updateContainerAndIsland(immediate: Boolean) {
-        val root = visualRoot ?: return
-        val visualParams = visualWindowParams ?: return
-        val child = islandParams ?: return
-
-        visualParams.width = dp(AppSettings.getIslandExpandedWidthDp(this))
-        visualParams.height = dp(AppSettings.getIslandExpandedHeightDp(this))
-        visualParams.x = dp(AppSettings.getIslandXDp(this))
-        visualParams.y = dp(AppSettings.getIslandYDp(this))
-
-        child.width = dp(currentTargetWidthDp())
-        child.height = dp(currentTargetHeightDp())
-        child.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        child.topMargin = 0
-
-        islandBackground?.cornerRadius = if (isExpanded) {
-            expandedCornerRadiusPx().toFloat()
+    private fun updateWindowsToCurrentSize() {
+        val widthPx = dp(currentTargetWidthDp())
+        val heightPx = dp(currentTargetHeightDp())
+        val radiusPx = if (isExpanded) {
+            expandedCornerRadiusPx()
         } else {
-            compactCornerRadiusPx().toFloat()
+            compactCornerRadiusPx()
         }
 
-        try {
-            windowManager?.updateViewLayout(root, visualParams)
-            islandView?.layoutParams = child
-            updateTouchWindowToSizePx(child.width, child.height)
-        } catch (e: Exception) {
-            if (immediate) {
-                Toast.makeText(
-                    this,
-                    "Island update failed: ${e.message}",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
+        updateWindowsToSize(widthPx, heightPx, radiusPx)
     }
 
     private fun setExpandedAnimated(expanded: Boolean) {
         if (isExpanded == expanded && morphAnimator?.isRunning != true) return
 
-        val root = visualRoot ?: return
-        val child = islandParams ?: return
+        val vParams = visualParams ?: return
+        val tParams = touchParams ?: return
+        val visual = visualView ?: return
+        val touch = touchView ?: return
 
         morphAnimator?.cancel()
 
-        val startExpanded = isExpanded
+        val wasExpanded = isExpanded
         isExpanded = expanded
 
-        val startWidth = child.width
-        val startHeight = child.height
-        val startRadius = islandBackground?.cornerRadius ?: if (startExpanded) {
+        val startWidth = vParams.width
+        val startHeight = vParams.height
+        val startRadius = visualBackground?.cornerRadius ?: if (wasExpanded) {
             expandedCornerRadiusPx().toFloat()
         } else {
             compactCornerRadiusPx().toFloat()
         }
 
-        val targetWidth = if (expanded) {
-            dp(AppSettings.getIslandExpandedWidthDp(this))
-        } else {
-            dp(AppSettings.getIslandWidthDp(this))
-        }
-
-        val targetHeight = if (expanded) {
-            dp(AppSettings.getIslandExpandedHeightDp(this))
-        } else {
-            dp(AppSettings.getIslandHeightDp(this))
-        }
-
+        val targetWidth = dp(currentTargetWidthDp())
+        val targetHeight = dp(currentTargetHeightDp())
         val targetRadius = if (expanded) {
             expandedCornerRadiusPx().toFloat()
         } else {
             compactCornerRadiusPx().toFloat()
         }
-
-        updateVisualContainerOnly(root)
 
         morphAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = if (expanded) 360L else 280L
@@ -342,20 +292,28 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
 
-                child.width = lerp(startWidth, targetWidth, t)
-                child.height = lerp(startHeight, targetHeight, t)
-                child.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                child.topMargin = 0
+                val w = lerp(startWidth, targetWidth, t)
+                val h = lerp(startHeight, targetHeight, t)
+                val r = lerp(startRadius, targetRadius, t).toFloat()
 
-                islandBackground?.cornerRadius = lerp(startRadius, targetRadius, t).toFloat()
+                vParams.width = w
+                vParams.height = h
+                vParams.x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService))
+                vParams.y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService))
 
-                islandView?.layoutParams = child
+                tParams.width = w
+                tParams.height = h
+                tParams.x = vParams.x
+                tParams.y = vParams.y
 
-                /*
-                 * Touch target follows the actual visible island size.
-                 * This prevents invisible expanded rectangles from blocking gestures.
-                 */
-                updateTouchWindowToSizePx(child.width, child.height)
+                visualBackground?.cornerRadius = r
+
+                try {
+                    windowManager?.updateViewLayout(visual, vParams)
+                    windowManager?.updateViewLayout(touch, tParams)
+                } catch (_: Exception) {
+                    cancel()
+                }
             }
 
             addListener(object : android.animation.Animator.AnimatorListener {
@@ -374,14 +332,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     if (cancelled) return
 
-                    child.width = targetWidth
-                    child.height = targetHeight
-                    child.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    child.topMargin = 0
-                    islandBackground?.cornerRadius = targetRadius
-
-                    islandView?.layoutParams = child
-                    updateTouchWindowToSizePx(targetWidth, targetHeight)
+                    updateWindowsToSize(
+                        widthPx = targetWidth,
+                        heightPx = targetHeight,
+                        cornerRadiusPx = targetRadius.roundToInt()
+                    )
                 }
             })
 
@@ -389,32 +344,31 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun updateVisualContainerOnly(root: FrameLayout) {
-        val params = visualWindowParams ?: return
-
-        params.width = dp(AppSettings.getIslandExpandedWidthDp(this))
-        params.height = dp(AppSettings.getIslandExpandedHeightDp(this))
-        params.x = dp(AppSettings.getIslandXDp(this))
-        params.y = dp(AppSettings.getIslandYDp(this))
-
-        try {
-            windowManager?.updateViewLayout(root, params)
-        } catch (_: Exception) {
-            // Ignore.
-        }
-    }
-
-    private fun updateTouchWindowToSizePx(widthPx: Int, heightPx: Int) {
+    private fun updateWindowsToSize(
+        widthPx: Int,
+        heightPx: Int,
+        cornerRadiusPx: Int
+    ) {
+        val visual = visualView ?: return
         val touch = touchView ?: return
-        val params = touchWindowParams ?: return
+        val vParams = visualParams ?: return
+        val tParams = touchParams ?: return
 
-        params.width = widthPx
-        params.height = heightPx
-        params.x = dp(AppSettings.getIslandXDp(this))
-        params.y = dp(AppSettings.getIslandYDp(this))
+        vParams.width = widthPx
+        vParams.height = heightPx
+        vParams.x = dp(AppSettings.getIslandXDp(this))
+        vParams.y = dp(AppSettings.getIslandYDp(this))
+
+        tParams.width = widthPx
+        tParams.height = heightPx
+        tParams.x = vParams.x
+        tParams.y = vParams.y
+
+        visualBackground?.cornerRadius = cornerRadiusPx.toFloat()
 
         try {
-            windowManager?.updateViewLayout(touch, params)
+            windowManager?.updateViewLayout(visual, vParams)
+            windowManager?.updateViewLayout(touch, tParams)
         } catch (_: Exception) {
             // Ignore.
         }
@@ -425,7 +379,7 @@ class HyperAccessibilityService : AccessibilityService() {
         morphAnimator = null
 
         val touch = touchView
-        val root = visualRoot
+        val visual = visualView
 
         if (touch != null) {
             try {
@@ -439,32 +393,30 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }
 
-        if (root != null) {
+        if (visual != null) {
             try {
-                windowManager?.removeViewImmediate(root)
+                windowManager?.removeViewImmediate(visual)
             } catch (_: Exception) {
                 try {
-                    windowManager?.removeView(root)
+                    windowManager?.removeView(visual)
                 } catch (_: Exception) {
                     // Already removed.
                 }
             }
         }
 
-        visualRoot = null
-        visualWindowParams = null
-        islandView = null
-        islandParams = null
-        islandBackground = null
+        visualView = null
+        visualParams = null
+        visualBackground = null
         touchView = null
-        touchWindowParams = null
+        touchParams = null
         isExpanded = false
     }
 
-    private fun createVisualWindowParams(): WindowManager.LayoutParams {
+    private fun createVisualParams(widthPx: Int, heightPx: Int): WindowManager.LayoutParams {
         return WindowManager.LayoutParams(
-            dp(AppSettings.getIslandExpandedWidthDp(this)),
-            dp(AppSettings.getIslandExpandedHeightDp(this)),
+            widthPx,
+            heightPx,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
@@ -483,14 +435,14 @@ class HyperAccessibilityService : AccessibilityService() {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
 
-            title = "Hyper Island Pro Visual Root"
+            title = "Hyper Island Pro Visual Island"
         }
     }
 
-    private fun createTouchWindowParams(): WindowManager.LayoutParams {
+    private fun createTouchParams(widthPx: Int, heightPx: Int): WindowManager.LayoutParams {
         return WindowManager.LayoutParams(
-            dp(currentTargetWidthDp()),
-            dp(currentTargetHeightDp()),
+            widthPx,
+            heightPx,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
