@@ -69,20 +69,14 @@ class HyperAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /*
-     * Phase 2.3 architecture:
+     * Phase 2.3 Gemini patch:
+     * Visual window = MATCH_PARENT transparent, NOT_TOUCHABLE.
+     * Touch window = exact-size transparent hitbox.
      *
-     * Window A: MATCH_PARENT width visual layer
-     * - static size
-     * - NOT_TOUCHABLE
-     * - transparent root
-     * - contains actual black island view
-     *
-     * Window B: exact-size invisible touch layer
-     * - compact size in compact state
-     * - expanded size in expanded state
-     * - snaps only on state changes, not every frame
-     *
-     * Animation happens only inside Window A on the black island view.
+     * Patch focus:
+     * - Touch window has explicit Color.TRANSPARENT background
+     * - Touch window alpha remains 1f
+     * - No hardware acceleration flag on touch window
      */
     private val morphInterpolator = PathInterpolator(0.20f, 0.0f, 0.0f, 1.0f)
 
@@ -193,7 +187,6 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            background = null
             foreground = null
             alpha = 1f
             setWillNotDraw(true)
@@ -225,10 +218,14 @@ class HyperAccessibilityService : AccessibilityService() {
         root.addView(island, childParams)
 
         val touch = FrameLayout(this).apply {
-            background = null
+            /*
+             * Gemini tint fix:
+             * Explicit transparent background, alpha 1f.
+             * Not background=null and not alpha=0f.
+             */
+            setBackgroundColor(Color.TRANSPARENT)
             foreground = null
-            alpha = 0f
-            setWillNotDraw(true)
+            alpha = 1f
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             isClickable = true
             setOnClickListener {
@@ -316,14 +313,7 @@ class HyperAccessibilityService : AccessibilityService() {
             compactCornerRadiusPx().toFloat()
         }
 
-        /*
-         * Touch hitbox snaps once at state transition, not every animation frame.
-         */
         updateTouchWindow(targetWidth, targetHeight)
-
-        /*
-         * Visual root stays static.
-         */
         updateVisualRootStatic(root)
 
         morphAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -480,8 +470,7 @@ class HyperAccessibilityService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
