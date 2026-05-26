@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
@@ -70,17 +71,6 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-
-    /*
-     * Phase 2.5:
-     * ViewOutlineProvider clipping experiment.
-     *
-     * Window A = static MATCH_PARENT visual window, NOT_TOUCHABLE.
-     * Window B = exact-size transparent touch hitbox.
-     *
-     * Root visual window is clipped to current island bounds using outlineProvider,
-     * so HyperOS should not render the large transparent rectangle.
-     */
     private val morphInterpolator = PathInterpolator(0.20f, 0.0f, 0.0f, 1.0f)
 
     private var windowManager: WindowManager? = null
@@ -94,6 +84,13 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private var touchView: FrameLayout? = null
     private var touchParams: WindowManager.LayoutParams? = null
+
+    /*
+     * Transparent outside-touch watcher.
+     * Used only while island is expanded.
+     */
+    private var outsideWatcherView: FrameLayout? = null
+    private var outsideWatcherParams: WindowManager.LayoutParams? = null
 
     private var morphAnimator: ValueAnimator? = null
     private var isExpanded = false
@@ -116,7 +113,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Phase 2.5: static visual window + outline clipping.
+        // Phase 2 finishing: outside-touch collapse watcher.
     }
 
     override fun onInterrupt() = Unit
@@ -202,11 +199,6 @@ class HyperAccessibilityService : AccessibilityService() {
             clipChildren = false
             clipToPadding = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-
-            /*
-             * Clip root drawing to island bounds.
-             * If HyperOS tint is caused by view content bounds, this should remove it.
-             */
             clipToOutline = true
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
@@ -245,21 +237,18 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }
 
-        val vParams = createVisualParams()
-        val tParams = createTouchParams(compactWidth, compactHeight)
-
         visualRoot = root
-        visualParams = vParams
+        visualParams = createVisualParams()
         islandView = island
         islandLayoutParams = childParams
         touchView = touch
-        touchParams = tParams
+        touchParams = createTouchParams(compactWidth, compactHeight)
 
         updateOutlineForIsland(compactWidth, compactHeight, compactRadius)
 
         try {
-            windowManager?.addView(root, vParams)
-            windowManager?.addView(touch, tParams)
+            windowManager?.addView(root, visualParams)
+            windowManager?.addView(touch, touchParams)
         } catch (e: Exception) {
             hideIslandInternal()
             Toast.makeText(
@@ -277,11 +266,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val targetWidth = dp(currentTargetWidthDp())
         val targetHeight = dp(currentTargetHeightDp())
-        val targetRadius = if (isExpanded) {
-            expandedCornerRadiusPx().toFloat()
-        } else {
-            compactCornerRadiusPx().toFloat()
-        }
+        val targetRadius = if (isExpanded) expandedCornerRadiusPx().toFloat() else compactCornerRadiusPx().toFloat()
 
         vParams.width = WindowManager.LayoutParams.MATCH_PARENT
         vParams.height = dp(AppSettings.getIslandExpandedHeightDp(this))
@@ -301,6 +286,7 @@ class HyperAccessibilityService : AccessibilityService() {
             islandView?.layoutParams = child
             visualRoot?.invalidateOutline()
             updateTouchWindow(targetWidth, targetHeight)
+            updateOutsideWatcherForState()
         } catch (_: Exception) {
             // Ignore.
         }
@@ -327,13 +313,17 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val targetWidth = dp(currentTargetWidthDp())
         val targetHeight = dp(currentTargetHeightDp())
-        val targetRadius = if (expanded) {
-            expandedCornerRadiusPx().toFloat()
-        } else {
-            compactCornerRadiusPx().toFloat()
-        }
+        val targetRadius = if (expanded) expandedCornerRadiusPx().toFloat() else compactCornerRadiusPx().toFloat()
 
         updateTouchWindow(targetWidth, targetHeight)
+
+        /*
+         * Outside watcher:
+         * - add immediately when expanded target starts
+         * - remove immediately when collapse starts
+         */
+        updateOutsideWatcherForState()
+
         updateVisualRootStatic(root)
 
         morphAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -353,7 +343,6 @@ class HyperAccessibilityService : AccessibilityService() {
                 child.topMargin = 0
 
                 islandBackground?.cornerRadius = radius
-
                 updateOutlineForIsland(width, height, radius)
 
                 islandView?.layoutParams = child
@@ -386,10 +375,68 @@ class HyperAccessibilityService : AccessibilityService() {
 
                     islandView?.layoutParams = child
                     visualRoot?.invalidateOutline()
+                    updateOutsideWatcherForState()
                 }
             })
 
             start()
+        }
+    }
+
+    private fun updateOutsideWatcherForState() {
+        if (isExpanded) {
+            ensureOutsideWatcher()
+        } else {
+            removeOutsideWatcher()
+        }
+    }
+
+    private fun ensureOutsideWatcher() {
+        if (outsideWatcherView != null) return
+
+        val watcher = FrameLayout(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            alpha = 1f
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) {
+                    postCollapseIsland()
+                }
+                false
+            }
+        }
+
+        val params = createOutsideWatcherParams()
+
+        outsideWatcherView = watcher
+        outsideWatcherParams = params
+
+        try {
+            /*
+             * Add watcher before touch window order issues are minimal because watcher is NOT_TOUCH_MODAL.
+             */
+            windowManager?.addView(watcher, params)
+        } catch (_: Exception) {
+            outsideWatcherView = null
+            outsideWatcherParams = null
+        }
+    }
+
+    private fun removeOutsideWatcher() {
+        val watcher = outsideWatcherView ?: return
+
+        try {
+            windowManager?.removeViewImmediate(watcher)
+        } catch (_: Exception) {
+            try {
+                windowManager?.removeView(watcher)
+            } catch (_: Exception) {
+                // Already removed.
+            }
+        } finally {
+            outsideWatcherView = null
+            outsideWatcherParams = null
         }
     }
 
@@ -439,6 +486,8 @@ class HyperAccessibilityService : AccessibilityService() {
         morphAnimator?.cancel()
         morphAnimator = null
 
+        removeOutsideWatcher()
+
         val touch = touchView
         val root = visualRoot
 
@@ -473,6 +522,8 @@ class HyperAccessibilityService : AccessibilityService() {
         islandBackground = null
         touchView = null
         touchParams = null
+        outsideWatcherView = null
+        outsideWatcherParams = null
         isExpanded = false
         outlineRect.setEmpty()
         outlineRadius = 0f
@@ -528,6 +579,27 @@ class HyperAccessibilityService : AccessibilityService() {
             }
 
             title = "Hyper Island Pro Touch Hitbox"
+        }
+    }
+
+    private fun createOutsideWatcherParams(): WindowManager.LayoutParams {
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+            alpha = 1f
+            dimAmount = 0f
+            title = "Hyper Island Pro Outside Watcher"
         }
     }
 
