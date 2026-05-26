@@ -21,7 +21,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Phase 2 tests use real Accessibility Overlay commands. No fake island state."
+            android:text="Phase 3 tests use real Accessibility Overlay and notification island commands."
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
 
@@ -61,6 +61,15 @@
             android:layout_marginTop="12dp"
             android:background="@drawable/bg_button_secondary"
             android:text="TOGGLE EXPAND / COLLAPSE"
+            android:textColor="@color/text_primary" />
+
+        <Button
+            android:id="@+id/btnTestNotification"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_button_secondary"
+            android:text="TEST NOTIFICATION ISLAND"
             android:textColor="@color/text_primary" />
 
         <Button
