@@ -17,11 +17,12 @@ class TestLabActivity : Activity() {
         findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
 
         findViewById<TextView>(R.id.txtTests).text = buildString {
-            append("Phase 2 active tests:\n")
+            append("Phase 3 active tests:\n")
             append("• Expand island\n")
             append("• Collapse island\n")
-            append("• Toggle expand/collapse\n\n")
-            append("These controls send real commands to the Accessibility Overlay engine. No fake UI state.")
+            append("• Toggle expand/collapse\n")
+            append("• Simulate notification island\n\n")
+            append("Real notifications will also trigger island if Notification Access is enabled.")
         }
 
         findViewById<Button>(R.id.btnExpandIsland).setOnClickListener {
@@ -40,6 +41,22 @@ class TestLabActivity : Activity() {
             if (!ensureIslandEnabled()) return@setOnClickListener
             val ok = HyperAccessibilityService.toggleExpandFromApp(this)
             showCommandResult(ok, "Toggle command sent")
+        }
+
+        findViewById<Button>(R.id.btnTestNotification).setOnClickListener {
+            if (!ensureIslandEnabled()) return@setOnClickListener
+
+            val ok = HyperAccessibilityService.showNotificationFromApp(
+                context = this,
+                packageName = packageName,
+                appName = "Test Notification",
+                title = "HYPER ISLAND PRO",
+                message = "This is a real Phase 3 island notification simulation.",
+                postTime = System.currentTimeMillis(),
+                contentIntent = null
+            )
+
+            showCommandResult(ok, "Test notification sent")
         }
     }
 
