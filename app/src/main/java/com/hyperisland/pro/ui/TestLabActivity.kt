@@ -8,22 +8,19 @@ import android.widget.Toast
 import com.hyperisland.pro.R
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.services.HyperAccessibilityService
+import com.hyperisland.pro.services.HyperNotificationListenerService
 
 class TestLabActivity : Activity() {
+
+    private lateinit var txtTests: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_test_lab)
 
-        findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
+        txtTests = findViewById(R.id.txtTests)
 
-        findViewById<TextView>(R.id.txtTests).text = buildString {
-            append("Phase 3 active tests:\n")
-            append("• Expand island\n")
-            append("• Collapse island\n")
-            append("• Toggle expand/collapse\n")
-            append("• Simulate notification island\n\n")
-            append("Real notifications will also trigger island if Notification Access is enabled.")
-        }
+        findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
 
         findViewById<Button>(R.id.btnExpandIsland).setOnClickListener {
             if (!ensureIslandEnabled()) return@setOnClickListener
@@ -57,6 +54,29 @@ class TestLabActivity : Activity() {
             )
 
             showCommandResult(ok, "Test notification sent")
+        }
+
+        refreshInfo()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshInfo()
+    }
+
+    private fun refreshInfo() {
+        txtTests.text = buildString {
+            append("Phase 3 active tests:\n")
+            append("• Expand island\n")
+            append("• Collapse island\n")
+            append("• Toggle expand/collapse\n")
+            append("• Simulate notification island\n\n")
+            append("Notification Listener:\n")
+            append(if (HyperNotificationListenerService.isConnected) "Connected" else "Not connected")
+            append("\n")
+            append(HyperNotificationListenerService.lastDebugMessage)
+            append("\n\n")
+            append("If real notifications do not trigger island, toggle Notification Access OFF/ON once.")
         }
     }
 
