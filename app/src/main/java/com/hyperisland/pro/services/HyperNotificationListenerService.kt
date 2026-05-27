@@ -18,8 +18,10 @@ class HyperNotificationListenerService : NotificationListenerService() {
             private set
     }
 
-    private var lastKey: String = ""
-    private var lastTime: Long = 0L
+    private val keyLastShownAt = HashMap<String, Long>()
+    private val packageLastShownAt = HashMap<String, Long>()
+    private val fingerprintLastShownAt = HashMap<String, Long>()
+    private val messageFingerprintCache = HashMap<String, String>()
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -27,7 +29,11 @@ class HyperNotificationListenerService : NotificationListenerService() {
         lastDebugMessage = "Notification listener connected"
 
         try {
-            Toast.makeText(this, "Hyper Island notification listener connected", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                "Hyper Island notification listener connected",
+                Toast.LENGTH_SHORT
+            ).show()
         } catch (_: Exception) {
         }
     }
@@ -55,7 +61,6 @@ class HyperNotificationListenerService : NotificationListenerService() {
 
         val notification = sbn.notification ?: return
 
-        // Ignore group summaries, but allow normal ongoing notifications for now.
         if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
             lastDebugMessage = "Ignored group summary from $pkg"
             return
@@ -70,20 +75,111 @@ class HyperNotificationListenerService : NotificationListenerService() {
         }
 
         val appName = getAppName(pkg)
-
-        val duplicateKey = "$pkg|$title|$message"
+        val fingerprint = "$pkg|$title|$message"
         val now = System.currentTimeMillis()
+        val isMessage = isMessageNotification(pkg, notification)
 
-        if (duplicateKey == lastKey && now - lastTime < 2500L) {
-            lastDebugMessage = "Ignored duplicate notification from $appName"
+        if (isMessage) {
+            handleMessageNotification(
+                sbn = sbn,
+                pkg = pkg,
+                appName = appName,
+                title = title,
+                message = message,
+                fingerprint = fingerprint,
+                now = now,
+                notification = notification
+            )
             return
         }
 
-        lastKey = duplicateKey
-        lastTime = now
+        if (isOngoingOrSticky(notification)) {
+            lastDebugMessage = "Ignored ongoing/sticky status notification from $appName"
+            return
+        }
+
+        if (isProgressNotification(notification)) {
+            lastDebugMessage = "Ignored progress/status notification from $appName"
+            return
+        }
+
+        val lastKeyShown = keyLastShownAt[sbn.key] ?: 0L
+        if (now - lastKeyShown < 60_000L) {
+            lastDebugMessage = "Suppressed same notification-key update from $appName"
+            return
+        }
+
+        val lastFingerprintShown = fingerprintLastShownAt[fingerprint] ?: 0L
+        if (now - lastFingerprintShown < 60_000L) {
+            lastDebugMessage = "Suppressed zombie/reposted notification from $appName"
+            return
+        }
+
+        val lastPackageShown = packageLastShownAt[pkg] ?: 0L
+        if (now - lastPackageShown < 8_000L) {
+            lastDebugMessage = "Suppressed package cooldown from $appName"
+            return
+        }
+
+        keyLastShownAt[sbn.key] = now
+        fingerprintLastShownAt[fingerprint] = now
+        packageLastShownAt[pkg] = now
 
         lastDebugMessage = "Received notification: $appName | $title | $message"
 
+        sendToIsland(
+            sbn = sbn,
+            pkg = pkg,
+            appName = appName,
+            title = title,
+            message = message,
+            notification = notification
+        )
+    }
+
+    private fun handleMessageNotification(
+        sbn: StatusBarNotification,
+        pkg: String,
+        appName: String,
+        title: String,
+        message: String,
+        fingerprint: String,
+        now: Long,
+        notification: Notification
+    ) {
+        val previousFingerprint = messageFingerprintCache[pkg]
+        val lastFingerprintShown = fingerprintLastShownAt[fingerprint] ?: 0L
+
+        if (previousFingerprint == fingerprint && now - lastFingerprintShown < 1_500L) {
+            lastDebugMessage = "Ignored immediate duplicate message from $appName"
+            return
+        }
+
+        messageFingerprintCache[pkg] = fingerprint
+        fingerprintLastShownAt[fingerprint] = now
+        keyLastShownAt[sbn.key] = now
+        packageLastShownAt[pkg] = now
+
+        lastDebugMessage = "Received message notification: $appName | $title | $message"
+
+        sendToIsland(
+            sbn = sbn,
+            pkg = pkg,
+            appName = appName,
+            title = title,
+            message = message,
+            notification = notification
+        )
+    }
+
+    private fun sendToIsland(
+        sbn: StatusBarNotification,
+        pkg: String,
+        appName: String,
+        title: String,
+        message: String,
+        notification: Notification
+    ) {
         HyperAccessibilityService.showNotificationFromApp(
             context = this,
             packageName = pkg,
@@ -95,6 +191,39 @@ class HyperNotificationListenerService : NotificationListenerService() {
         )
     }
 
+    private fun isMessageNotification(pkg: String, notification: Notification): Boolean {
+        if (notification.category == Notification.CATEGORY_MESSAGE) return true
+
+        val lower = pkg.lowercase()
+
+        return lower.contains("whatsapp") ||
+            lower.contains("telegram") ||
+            lower.contains("signal") ||
+            lower.contains("mms") ||
+            lower.contains("sms") ||
+            lower.contains("messaging") ||
+            lower.contains("messages")
+    }
+
+    private fun isOngoingOrSticky(notification: Notification): Boolean {
+        val flags = notification.flags
+
+        return (flags and Notification.FLAG_ONGOING_EVENT) != 0 ||
+            (flags and Notification.FLAG_FOREGROUND_SERVICE) != 0 ||
+            (flags and Notification.FLAG_NO_CLEAR) != 0
+    }
+
+    private fun isProgressNotification(notification: Notification): Boolean {
+        val extras = notification.extras ?: return false
+
+        val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+        val progress = extras.getInt(Notification.EXTRA_PROGRESS, 0)
+
+        return max > 0 ||
+            progress > 0 ||
+            extras.containsKey(Notification.EXTRA_PROGRESS_INDETERMINATE)
+    }
+
     private fun extractTitle(notification: Notification): String {
         val extras = notification.extras
 
@@ -104,6 +233,10 @@ class HyperNotificationListenerService : NotificationListenerService() {
         val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()?.trim()
         if (!titleBig.isNullOrBlank()) return titleBig
 
+        val conversationTitle =
+            extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim()
+        if (!conversationTitle.isNullOrBlank()) return conversationTitle
+
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim()
         if (!subText.isNullOrBlank()) return subText
 
@@ -112,6 +245,19 @@ class HyperNotificationListenerService : NotificationListenerService() {
 
     private fun extractMessage(notification: Notification): String {
         val extras = notification.extras
+
+        val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        if (!messages.isNullOrEmpty()) {
+            val last = messages.lastOrNull()
+            val text = try {
+                val bundle = last as? android.os.Bundle
+                bundle?.getCharSequence("text")?.toString()?.trim()
+            } catch (_: Exception) {
+                null
+            }
+
+            if (!text.isNullOrBlank()) return text
+        }
 
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
         if (!bigText.isNullOrBlank()) return bigText
