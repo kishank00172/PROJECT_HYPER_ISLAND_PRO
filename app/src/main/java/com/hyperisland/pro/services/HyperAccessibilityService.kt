@@ -29,6 +29,11 @@ import kotlin.math.roundToInt
 
 class HyperAccessibilityService : AccessibilityService() {
 
+    private enum class ExpandReason {
+        MANUAL_USER,
+        AUTO_NOTIFICATION
+    }
+
     companion object {
         @Volatile
         private var instance: HyperAccessibilityService? = null
@@ -85,11 +90,9 @@ class HyperAccessibilityService : AccessibilityService() {
             val service = instance ?: return false
 
             service.postNotificationEvent(
-                packageName = packageName,
                 appName = appName,
                 title = title,
                 message = message,
-                postTime = postTime,
                 contentIntent = contentIntent
             )
 
@@ -122,6 +125,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private var morphAnimator: ValueAnimator? = null
     private var isExpanded = false
+    private var expandReason = ExpandReason.MANUAL_USER
 
     private var notificationMode = false
     private var currentPendingIntent: PendingIntent? = null
@@ -145,7 +149,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Phase 3: notification island.
+        // Phase 3: notification island + manual/auto expand behavior.
     }
 
     override fun onInterrupt() = Unit
@@ -182,14 +186,14 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             if (visualRoot == null || touchView == null) showIslandInternal()
-            setExpandedAnimated(true)
+            setExpandedAnimated(true, ExpandReason.MANUAL_USER)
         }
     }
 
     private fun postCollapseIsland() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
-            setExpandedAnimated(false)
+            setExpandedAnimated(false, expandReason)
         }
     }
 
@@ -201,17 +205,15 @@ class HyperAccessibilityService : AccessibilityService() {
             if (notificationMode && isExpanded) {
                 openCurrentNotification()
             } else {
-                setExpandedAnimated(!isExpanded)
+                setExpandedAnimated(!isExpanded, ExpandReason.MANUAL_USER)
             }
         }
     }
 
     private fun postNotificationEvent(
-        packageName: String,
         appName: String,
         title: String,
         message: String,
-        postTime: Long,
         contentIntent: PendingIntent?
     ) {
         mainHandler.post {
@@ -231,7 +233,7 @@ class HyperAccessibilityService : AccessibilityService() {
             contentContainer?.visibility = View.VISIBLE
             contentContainer?.alpha = 0f
 
-            setExpandedAnimated(true)
+            setExpandedAnimated(true, ExpandReason.AUTO_NOTIFICATION)
             scheduleAutoCollapse()
         }
     }
@@ -243,7 +245,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (notificationMode) {
                 notificationMode = false
                 currentPendingIntent = null
-                setExpandedAnimated(false)
+                setExpandedAnimated(false, ExpandReason.AUTO_NOTIFICATION)
             }
         }
 
@@ -262,10 +264,10 @@ class HyperAccessibilityService : AccessibilityService() {
         try {
             pending?.send()
         } catch (_: Exception) {
-            // Ignore if pending intent is already invalid.
+            // Ignore if pending intent is invalid.
         }
 
-        setExpandedAnimated(false)
+        setExpandedAnimated(false, ExpandReason.AUTO_NOTIFICATION)
     }
 
     private fun showIslandInternal() {
@@ -278,6 +280,7 @@ class HyperAccessibilityService : AccessibilityService() {
         isExpanded = false
         notificationMode = false
         currentPendingIntent = null
+        expandReason = ExpandReason.MANUAL_USER
 
         val compactWidth = dp(AppSettings.getIslandWidthDp(this))
         val compactHeight = dp(AppSettings.getIslandHeightDp(this))
@@ -318,7 +321,6 @@ class HyperAccessibilityService : AccessibilityService() {
         }
 
         val app = TextView(this).apply {
-            text = ""
             setTextColor(Color.rgb(170, 170, 178))
             textSize = 12f
             includeFontPadding = false
@@ -326,7 +328,6 @@ class HyperAccessibilityService : AccessibilityService() {
         }
 
         val title = TextView(this).apply {
-            text = ""
             setTextColor(Color.WHITE)
             textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
@@ -335,7 +336,6 @@ class HyperAccessibilityService : AccessibilityService() {
         }
 
         val msg = TextView(this).apply {
-            text = ""
             setTextColor(Color.rgb(210, 210, 216))
             textSize = 13f
             includeFontPadding = false
@@ -379,7 +379,6 @@ class HyperAccessibilityService : AccessibilityService() {
         visualParams = createVisualParams()
         islandView = island
         islandLayoutParams = childParams
-        islandBackground = islandBackground
         contentContainer = content
         appNameText = app
         titleText = title
@@ -409,7 +408,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val targetWidth = dp(currentTargetWidthDp())
         val targetHeight = dp(currentTargetHeightDp())
-        val targetRadius = if (isExpanded) expandedCornerRadiusPx().toFloat() else compactCornerRadiusPx().toFloat()
+        val targetRadius =
+            if (isExpanded) expandedCornerRadiusPx().toFloat() else compactCornerRadiusPx().toFloat()
 
         vParams.width = WindowManager.LayoutParams.MATCH_PARENT
         vParams.height = dp(AppSettings.getIslandExpandedHeightDp(this))
@@ -431,11 +431,10 @@ class HyperAccessibilityService : AccessibilityService() {
             updateTouchWindow(targetWidth, targetHeight)
             updateOutsideWatcherForState()
         } catch (_: Exception) {
-            // Ignore.
         }
     }
 
-    private fun setExpandedAnimated(expanded: Boolean) {
+    private fun setExpandedAnimated(expanded: Boolean, reason: ExpandReason) {
         if (isExpanded == expanded && morphAnimator?.isRunning != true) return
 
         val root = visualRoot ?: return
@@ -445,6 +444,10 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val wasExpanded = isExpanded
         isExpanded = expanded
+
+        if (expanded) {
+            expandReason = reason
+        }
 
         val startWidth = child.width
         val startHeight = child.height
@@ -456,7 +459,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val targetWidth = dp(currentTargetWidthDp())
         val targetHeight = dp(currentTargetHeightDp())
-        val targetRadius = if (expanded) expandedCornerRadiusPx().toFloat() else compactCornerRadiusPx().toFloat()
+        val targetRadius =
+            if (expanded) expandedCornerRadiusPx().toFloat() else compactCornerRadiusPx().toFloat()
 
         updateTouchWindow(targetWidth, targetHeight)
         updateOutsideWatcherForState()
@@ -524,6 +528,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         contentContainer?.visibility = View.GONE
                         notificationMode = false
                         currentPendingIntent = null
+                        expandReason = ExpandReason.MANUAL_USER
                     } else if (notificationMode) {
                         contentContainer?.alpha = 1f
                         contentContainer?.visibility = View.VISIBLE
@@ -540,7 +545,11 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateOutsideWatcherForState() {
-        if (isExpanded) ensureOutsideWatcher() else removeOutsideWatcher()
+        if (isExpanded && expandReason == ExpandReason.MANUAL_USER) {
+            ensureOutsideWatcher()
+        } else {
+            removeOutsideWatcher()
+        }
     }
 
     private fun ensureOutsideWatcher() {
@@ -552,7 +561,9 @@ class HyperAccessibilityService : AccessibilityService() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
 
             setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) {
+                if (event.action == MotionEvent.ACTION_DOWN ||
+                    event.action == MotionEvent.ACTION_OUTSIDE
+                ) {
                     postCollapseIsland()
                 }
                 false
@@ -581,7 +592,6 @@ class HyperAccessibilityService : AccessibilityService() {
             try {
                 windowManager?.removeView(watcher)
             } catch (_: Exception) {
-                // Already removed.
             }
         } finally {
             outsideWatcherView = null
@@ -611,7 +621,6 @@ class HyperAccessibilityService : AccessibilityService() {
         try {
             windowManager?.updateViewLayout(root, params)
         } catch (_: Exception) {
-            // Ignore.
         }
     }
 
@@ -627,7 +636,6 @@ class HyperAccessibilityService : AccessibilityService() {
         try {
             windowManager?.updateViewLayout(touch, params)
         } catch (_: Exception) {
-            // Ignore.
         }
     }
 
@@ -649,7 +657,6 @@ class HyperAccessibilityService : AccessibilityService() {
                 try {
                     windowManager?.removeView(touch)
                 } catch (_: Exception) {
-                    // Already removed.
                 }
             }
         }
@@ -661,7 +668,6 @@ class HyperAccessibilityService : AccessibilityService() {
                 try {
                     windowManager?.removeView(root)
                 } catch (_: Exception) {
-                    // Already removed.
                 }
             }
         }
@@ -682,6 +688,7 @@ class HyperAccessibilityService : AccessibilityService() {
         isExpanded = false
         notificationMode = false
         currentPendingIntent = null
+        expandReason = ExpandReason.MANUAL_USER
         outlineRect.setEmpty()
         outlineRadius = 0f
     }
