@@ -48,6 +48,8 @@ class HyperNotificationListenerService : NotificationListenerService() {
         if (sbn == null) return
 
         val pkg = sbn.packageName ?: return
+        val notification = sbn.notification ?: return
+        val now = System.currentTimeMillis()
 
         if (pkg == packageName) {
             lastDebugMessage = "Ignored own app notification"
@@ -55,29 +57,30 @@ class HyperNotificationListenerService : NotificationListenerService() {
         }
 
         if (!AppSettings.isIslandEnabled(this)) {
-            lastDebugMessage = "Ignored notification because island is OFF"
-            return
-        }
-
-        val notification = sbn.notification ?: return
-
-        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
-            lastDebugMessage = "Ignored group summary from $pkg"
+            lastDebugMessage = "Ignored because island OFF: $pkg"
             return
         }
 
         val title = extractTitle(notification)
         val message = extractMessage(notification)
+        val appName = getAppName(pkg)
+        val category = notification.category ?: "null"
+        val flags = notification.flags
+        val isMessage = isMessageNotification(pkg, notification)
+        val fingerprint = "$pkg|$title|$message"
 
-        if (title.isBlank() && message.isBlank()) {
-            lastDebugMessage = "Ignored empty notification from $pkg"
+        lastDebugMessage =
+            "RAW: $appName\npkg=$pkg\ncat=$category flags=$flags\ntitle=$title\nmsg=$message"
+
+        if ((flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            lastDebugMessage = "Ignored group summary: $appName"
             return
         }
 
-        val appName = getAppName(pkg)
-        val fingerprint = "$pkg|$title|$message"
-        val now = System.currentTimeMillis()
-        val isMessage = isMessageNotification(pkg, notification)
+        if (title.isBlank() && message.isBlank()) {
+            lastDebugMessage = "Ignored empty notification: $appName pkg=$pkg cat=$category flags=$flags"
+            return
+        }
 
         if (isMessage) {
             handleMessageNotification(
@@ -93,31 +96,35 @@ class HyperNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        if (isOngoingOrSticky(notification)) {
-            lastDebugMessage = "Ignored ongoing/sticky status notification from $appName"
+        val noisyStatusApp = isKnownNoisyStatusApp(pkg, appName)
+
+        if (isProgressNotification(notification)) {
+            lastDebugMessage = "Ignored progress/status notification: $appName"
             return
         }
 
-        if (isProgressNotification(notification)) {
-            lastDebugMessage = "Ignored progress/status notification from $appName"
+        if (noisyStatusApp && isOngoingOrSticky(notification)) {
+            lastDebugMessage = "Ignored known noisy ongoing/sticky: $appName"
             return
         }
 
         val lastKeyShown = keyLastShownAt[sbn.key] ?: 0L
-        if (now - lastKeyShown < 60_000L) {
-            lastDebugMessage = "Suppressed same notification-key update from $appName"
+        val sameKeyRecentlyShown = now - lastKeyShown < 60_000L
+
+        if (sameKeyRecentlyShown && isOngoingOrSticky(notification)) {
+            lastDebugMessage = "Suppressed ongoing same-key update: $appName"
             return
         }
 
         val lastFingerprintShown = fingerprintLastShownAt[fingerprint] ?: 0L
-        if (now - lastFingerprintShown < 60_000L) {
-            lastDebugMessage = "Suppressed zombie/reposted notification from $appName"
+        if (now - lastFingerprintShown < 30_000L) {
+            lastDebugMessage = "Suppressed duplicate/zombie fingerprint: $appName"
             return
         }
 
         val lastPackageShown = packageLastShownAt[pkg] ?: 0L
-        if (now - lastPackageShown < 8_000L) {
-            lastDebugMessage = "Suppressed package cooldown from $appName"
+        if (now - lastPackageShown < 5_000L) {
+            lastDebugMessage = "Suppressed package cooldown: $appName"
             return
         }
 
@@ -125,7 +132,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         fingerprintLastShownAt[fingerprint] = now
         packageLastShownAt[pkg] = now
 
-        lastDebugMessage = "Received notification: $appName | $title | $message"
+        lastDebugMessage = "SHOWN: $appName | $title | $message"
 
         sendToIsland(
             sbn = sbn,
@@ -151,7 +158,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         val lastFingerprintShown = fingerprintLastShownAt[fingerprint] ?: 0L
 
         if (previousFingerprint == fingerprint && now - lastFingerprintShown < 1_500L) {
-            lastDebugMessage = "Ignored immediate duplicate message from $appName"
+            lastDebugMessage = "Ignored immediate duplicate message: $appName"
             return
         }
 
@@ -160,7 +167,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         keyLastShownAt[sbn.key] = now
         packageLastShownAt[pkg] = now
 
-        lastDebugMessage = "Received message notification: $appName | $title | $message"
+        lastDebugMessage = "SHOWN MESSAGE: $appName | $title | $message"
 
         sendToIsland(
             sbn = sbn,
@@ -203,6 +210,26 @@ class HyperNotificationListenerService : NotificationListenerService() {
             lower.contains("sms") ||
             lower.contains("messaging") ||
             lower.contains("messages")
+    }
+
+    private fun isKnownNoisyStatusApp(pkg: String, appName: String): Boolean {
+        val p = pkg.lowercase()
+        val n = appName.lowercase()
+
+        return p.contains("ampere") ||
+            n.contains("ampere") ||
+            p.contains("honeygain") ||
+            n.contains("honeygain") ||
+            p.contains("battery") ||
+            n.contains("battery") ||
+            p.contains("batterymeter") ||
+            n.contains("battery meter") ||
+            p.contains("accubattery") ||
+            n.contains("accubattery") ||
+            p.contains("vpn") ||
+            n.contains("vpn") ||
+            p.contains("netguard") ||
+            n.contains("netguard")
     }
 
     private fun isOngoingOrSticky(notification: Notification): Boolean {
