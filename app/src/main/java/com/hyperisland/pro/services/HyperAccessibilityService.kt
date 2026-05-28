@@ -13,6 +13,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -21,10 +22,15 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.hyperisland.pro.core.AppSettings
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class HyperAccessibilityService : AccessibilityService() {
@@ -99,6 +105,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 appName = appName,
                 title = title,
                 message = message,
+                postTime = postTime,
                 contentIntent = contentIntent
             )
 
@@ -119,7 +126,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private var islandBackground: GradientDrawable? = null
 
     private var contentContainer: LinearLayout? = null
-    private var appNameText: TextView? = null
+    private var appIconView: ImageView? = null
+    private var appNameTimeText: TextView? = null
     private var titleText: TextView? = null
     private var messageText: TextView? = null
 
@@ -140,6 +148,9 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
+
+    private var touchStartY = 0f
+    private var touchStartX = 0f
 
     private val outlineRect = Rect()
     private var outlineRadius = 0f
@@ -218,6 +229,7 @@ class HyperAccessibilityService : AccessibilityService() {
             appName = appName,
             title = title,
             message = message,
+            postTime = System.currentTimeMillis(),
             contentIntent = null
         )
     }
@@ -284,22 +296,25 @@ class HyperAccessibilityService : AccessibilityService() {
         appName: String,
         title: String,
         message: String,
+        postTime: Long,
         contentIntent: PendingIntent?
     ) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
 
-            val cleanTitle = title.trim()
-            val cleanMessage = message.trim()
+            val cleanTitleRaw = title.trim()
+            val cleanMessageRaw = message.trim()
 
-            if (cleanTitle.isBlank() && cleanMessage.isBlank()) {
+            if (cleanTitleRaw.isBlank() && cleanMessageRaw.isBlank()) {
                 if (source == "AccessibilityFallback") {
                     lastAccessibilityDebugMessage = "Fallback ignored blank content: $packageName"
                 }
                 return@post
             }
 
-            val fingerprint = "$packageName|$cleanTitle|$cleanMessage"
+            val display = buildDisplayText(appName, cleanTitleRaw, cleanMessageRaw)
+
+            val fingerprint = "$packageName|${display.title}|${display.message}"
             val now = System.currentTimeMillis()
 
             if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 2_000L) {
@@ -320,20 +335,53 @@ class HyperAccessibilityService : AccessibilityService() {
             currentPendingIntent = contentIntent
             currentPackageName = packageName
 
-            appNameText?.text = appName
-            titleText?.text = cleanTitle.ifEmpty { appName }
-            messageText?.text = cleanMessage.ifEmpty { "New notification" }
+            appIconView?.setImageDrawable(loadAppIcon(packageName))
+            appNameTimeText?.text = "${display.appName} • ${formatNotificationTime(postTime)}"
+            titleText?.text = display.title
+            messageText?.text = display.message
+
+            titleText?.visibility = if (display.title.isBlank()) View.GONE else View.VISIBLE
+            messageText?.visibility = if (display.message.isBlank()) View.GONE else View.VISIBLE
 
             contentContainer?.visibility = View.VISIBLE
             contentContainer?.alpha = 0f
 
             if (source == "AccessibilityFallback") {
-                lastAccessibilityDebugMessage = "Fallback shown: $appName | ${cleanTitle.ifEmpty { appName }} | $cleanMessage"
+                lastAccessibilityDebugMessage =
+                    "Fallback shown: ${display.appName} | ${display.title} | ${display.message}"
             }
 
             setExpandedAnimated(true, ExpandReason.AUTO_NOTIFICATION)
             scheduleAutoCollapse()
         }
+    }
+
+    private data class DisplayText(
+        val appName: String,
+        val title: String,
+        val message: String
+    )
+
+    private fun buildDisplayText(appName: String, rawTitle: String, rawMessage: String): DisplayText {
+        val cleanApp = appName.trim().ifBlank { "App" }
+        var title = rawTitle.trim()
+        var message = rawMessage.trim()
+
+        if (title.equals(cleanApp, ignoreCase = true)) {
+            title = message
+            message = ""
+        }
+
+        if (title.isBlank() && message.isNotBlank()) {
+            title = message
+            message = ""
+        }
+
+        return DisplayText(
+            appName = cleanApp,
+            title = title,
+            message = message
+        )
     }
 
     private fun scheduleAutoCollapse() {
@@ -422,19 +470,31 @@ class HyperAccessibilityService : AccessibilityService() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val horizontalContent = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             visibility = View.GONE
             alpha = 0f
-            setPadding(dp(22), dp(14), dp(22), dp(14))
+            setPadding(dp(18), dp(12), dp(18), dp(12))
         }
 
-        val app = TextView(this).apply {
-            setTextColor(Color.rgb(170, 170, 178))
+        val icon = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            alpha = 1f
+        }
+
+        val textColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+
+        val appLine = TextView(this).apply {
+            setTextColor(Color.rgb(0, 150, 255)) // #0096FF
             textSize = 12f
             includeFontPadding = false
             maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
         }
 
         val title = TextView(this).apply {
@@ -443,6 +503,7 @@ class HyperAccessibilityService : AccessibilityService() {
             typeface = Typeface.DEFAULT_BOLD
             includeFontPadding = false
             maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
         }
 
         val msg = TextView(this).apply {
@@ -450,14 +511,29 @@ class HyperAccessibilityService : AccessibilityService() {
             textSize = 13f
             includeFontPadding = false
             maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
         }
 
-        content.addView(app)
-        content.addView(title)
-        content.addView(msg)
+        textColumn.addView(appLine)
+        textColumn.addView(title)
+        textColumn.addView(msg)
+
+        horizontalContent.addView(
+            icon,
+            LinearLayout.LayoutParams(dp(38), dp(38))
+        )
+
+        horizontalContent.addView(
+            textColumn,
+            LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        )
 
         island.addView(
-            content,
+            horizontalContent,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -480,8 +556,35 @@ class HyperAccessibilityService : AccessibilityService() {
             alpha = 1f
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             isClickable = true
-            setOnClickListener {
-                postToggleExpanded()
+
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        touchStartY = event.rawY
+                        touchStartX = event.rawX
+                        true
+                    }
+
+                    MotionEvent.ACTION_UP -> {
+                        val dy = event.rawY - touchStartY
+                        val dx = event.rawX - touchStartX
+
+                        if (dy < -dp(24) && abs(dy) > abs(dx)) {
+                            // Swipe up = compact/collapse, especially useful for auto notifications.
+                            notificationMode = false
+                            currentPendingIntent = null
+                            currentPackageName = null
+                            autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
+                            autoCollapseRunnable = null
+                            postCollapseIsland()
+                        } else {
+                            postToggleExpanded()
+                        }
+                        true
+                    }
+
+                    else -> true
+                }
             }
         }
 
@@ -489,8 +592,9 @@ class HyperAccessibilityService : AccessibilityService() {
         visualParams = createVisualParams()
         islandView = island
         islandLayoutParams = childParams
-        contentContainer = content
-        appNameText = app
+        contentContainer = horizontalContent
+        appIconView = icon
+        appNameTimeText = appLine
         titleText = title
         messageText = msg
         touchView = touch
@@ -790,7 +894,8 @@ class HyperAccessibilityService : AccessibilityService() {
         islandLayoutParams = null
         islandBackground = null
         contentContainer = null
-        appNameText = null
+        appIconView = null
+        appNameTimeText = null
         titleText = null
         messageText = null
         touchView = null
@@ -888,6 +993,14 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun loadAppIcon(pkg: String): android.graphics.drawable.Drawable? {
+        return try {
+            packageManager.getApplicationIcon(pkg)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun getAppName(pkg: String): String {
         return try {
             val info = packageManager.getApplicationInfo(pkg, 0)
@@ -895,6 +1008,16 @@ class HyperAccessibilityService : AccessibilityService() {
         } catch (_: Exception) {
             pkg
         }
+    }
+
+    private fun formatNotificationTime(postTime: Long): String {
+        val now = System.currentTimeMillis()
+
+        if (postTime <= 0L || now - postTime < 60_000L) {
+            return "now"
+        }
+
+        return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(postTime))
     }
 
     private fun currentTargetWidthDp(): Int {
