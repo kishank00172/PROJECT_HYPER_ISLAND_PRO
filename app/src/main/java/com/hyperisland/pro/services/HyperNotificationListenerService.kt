@@ -18,10 +18,14 @@ class HyperNotificationListenerService : NotificationListenerService() {
             private set
     }
 
-    private val keyLastShownAt = HashMap<String, Long>()
-    private val packageLastShownAt = HashMap<String, Long>()
-    private val fingerprintLastShownAt = HashMap<String, Long>()
-    private val messageFingerprintCache = HashMap<String, String>()
+    private data class RepeatInfo(
+        var count: Int,
+        var firstSeenAt: Long,
+        var lastSeenAt: Long,
+        var blockedUntil: Long
+    )
+
+    private val repeatMap = HashMap<String, RepeatInfo>()
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -49,7 +53,6 @@ class HyperNotificationListenerService : NotificationListenerService() {
 
         val pkg = sbn.packageName ?: return
         val notification = sbn.notification ?: return
-        val now = System.currentTimeMillis()
 
         if (pkg == packageName) {
             lastDebugMessage = "Ignored own app notification"
@@ -61,132 +64,41 @@ class HyperNotificationListenerService : NotificationListenerService() {
             return
         }
 
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            lastDebugMessage = "Ignored group summary: $pkg"
+            return
+        }
+
+        val appName = getAppName(pkg)
         val title = extractTitle(notification)
         val message = extractMessage(notification)
-        val appName = getAppName(pkg)
-        val category = notification.category ?: "null"
-        val flags = notification.flags
-        val isMessage = isMessageNotification(pkg, notification)
-        val fingerprint = "$pkg|$title|$message"
-
-        lastDebugMessage =
-            "RAW: $appName\npkg=$pkg\ncat=$category flags=$flags\ntitle=$title\nmsg=$message"
-
-        if ((flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
-            lastDebugMessage = "Ignored group summary: $appName"
-            return
-        }
 
         if (title.isBlank() && message.isBlank()) {
-            lastDebugMessage = "Ignored empty notification: $appName pkg=$pkg cat=$category flags=$flags"
+            lastDebugMessage = "Ignored empty notification: $appName ($pkg)"
             return
         }
 
-        if (isMessage) {
-            handleMessageNotification(
-                sbn = sbn,
-                pkg = pkg,
-                appName = appName,
-                title = title,
-                message = message,
-                fingerprint = fingerprint,
-                now = now,
-                notification = notification
-            )
+        /*
+         * New rule:
+         * Show every normal clearable notification.
+         * Ignore only permanent/non-removable service/status notifications,
+         * and zombie notifications that rapidly recreate/update themselves.
+         */
+
+        if (isPermanentNonRemovable(notification)) {
+            lastDebugMessage = "Ignored permanent/non-removable notification: $appName"
             return
         }
 
-        val noisyStatusApp = isKnownNoisyStatusApp(pkg, appName)
+        val fingerprint = "$pkg|${sbn.id}|${sbn.tag ?: ""}|$title|$message"
+        val now = System.currentTimeMillis()
 
-        if (isProgressNotification(notification)) {
-            lastDebugMessage = "Ignored progress/status notification: $appName"
+        if (isZombieRepeat(fingerprint, now, appName)) {
             return
         }
-
-        if (noisyStatusApp && isOngoingOrSticky(notification)) {
-            lastDebugMessage = "Ignored known noisy ongoing/sticky: $appName"
-            return
-        }
-
-        val lastKeyShown = keyLastShownAt[sbn.key] ?: 0L
-        val sameKeyRecentlyShown = now - lastKeyShown < 60_000L
-
-        if (sameKeyRecentlyShown && isOngoingOrSticky(notification)) {
-            lastDebugMessage = "Suppressed ongoing same-key update: $appName"
-            return
-        }
-
-        val lastFingerprintShown = fingerprintLastShownAt[fingerprint] ?: 0L
-        if (now - lastFingerprintShown < 30_000L) {
-            lastDebugMessage = "Suppressed duplicate/zombie fingerprint: $appName"
-            return
-        }
-
-        val lastPackageShown = packageLastShownAt[pkg] ?: 0L
-        if (now - lastPackageShown < 5_000L) {
-            lastDebugMessage = "Suppressed package cooldown: $appName"
-            return
-        }
-
-        keyLastShownAt[sbn.key] = now
-        fingerprintLastShownAt[fingerprint] = now
-        packageLastShownAt[pkg] = now
 
         lastDebugMessage = "SHOWN: $appName | $title | $message"
 
-        sendToIsland(
-            sbn = sbn,
-            pkg = pkg,
-            appName = appName,
-            title = title,
-            message = message,
-            notification = notification
-        )
-    }
-
-    private fun handleMessageNotification(
-        sbn: StatusBarNotification,
-        pkg: String,
-        appName: String,
-        title: String,
-        message: String,
-        fingerprint: String,
-        now: Long,
-        notification: Notification
-    ) {
-        val previousFingerprint = messageFingerprintCache[pkg]
-        val lastFingerprintShown = fingerprintLastShownAt[fingerprint] ?: 0L
-
-        if (previousFingerprint == fingerprint && now - lastFingerprintShown < 1_500L) {
-            lastDebugMessage = "Ignored immediate duplicate message: $appName"
-            return
-        }
-
-        messageFingerprintCache[pkg] = fingerprint
-        fingerprintLastShownAt[fingerprint] = now
-        keyLastShownAt[sbn.key] = now
-        packageLastShownAt[pkg] = now
-
-        lastDebugMessage = "SHOWN MESSAGE: $appName | $title | $message"
-
-        sendToIsland(
-            sbn = sbn,
-            pkg = pkg,
-            appName = appName,
-            title = title,
-            message = message,
-            notification = notification
-        )
-    }
-
-    private fun sendToIsland(
-        sbn: StatusBarNotification,
-        pkg: String,
-        appName: String,
-        title: String,
-        message: String,
-        notification: Notification
-    ) {
         HyperAccessibilityService.showNotificationFromApp(
             context = this,
             packageName = pkg,
@@ -198,57 +110,68 @@ class HyperNotificationListenerService : NotificationListenerService() {
         )
     }
 
-    private fun isMessageNotification(pkg: String, notification: Notification): Boolean {
-        if (notification.category == Notification.CATEGORY_MESSAGE) return true
-
-        val lower = pkg.lowercase()
-
-        return lower.contains("whatsapp") ||
-            lower.contains("telegram") ||
-            lower.contains("signal") ||
-            lower.contains("mms") ||
-            lower.contains("sms") ||
-            lower.contains("messaging") ||
-            lower.contains("messages")
-    }
-
-    private fun isKnownNoisyStatusApp(pkg: String, appName: String): Boolean {
-        val p = pkg.lowercase()
-        val n = appName.lowercase()
-
-        return p.contains("ampere") ||
-            n.contains("ampere") ||
-            p.contains("honeygain") ||
-            n.contains("honeygain") ||
-            p.contains("battery") ||
-            n.contains("battery") ||
-            p.contains("batterymeter") ||
-            n.contains("battery meter") ||
-            p.contains("accubattery") ||
-            n.contains("accubattery") ||
-            p.contains("vpn") ||
-            n.contains("vpn") ||
-            p.contains("netguard") ||
-            n.contains("netguard")
-    }
-
-    private fun isOngoingOrSticky(notification: Notification): Boolean {
+    private fun isPermanentNonRemovable(notification: Notification): Boolean {
         val flags = notification.flags
 
+        /*
+         * These are normally persistent service/status notifications.
+         * They should not trigger the island as regular notifications.
+         */
         return (flags and Notification.FLAG_ONGOING_EVENT) != 0 ||
             (flags and Notification.FLAG_FOREGROUND_SERVICE) != 0 ||
             (flags and Notification.FLAG_NO_CLEAR) != 0
     }
 
-    private fun isProgressNotification(notification: Notification): Boolean {
-        val extras = notification.extras ?: return false
+    private fun isZombieRepeat(
+        fingerprint: String,
+        now: Long,
+        appName: String
+    ): Boolean {
+        val info = repeatMap[fingerprint]
 
-        val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
-        val progress = extras.getInt(Notification.EXTRA_PROGRESS, 0)
+        if (info == null) {
+            repeatMap[fingerprint] = RepeatInfo(
+                count = 1,
+                firstSeenAt = now,
+                lastSeenAt = now,
+                blockedUntil = 0L
+            )
+            return false
+        }
 
-        return max > 0 ||
-            progress > 0 ||
-            extras.containsKey(Notification.EXTRA_PROGRESS_INDETERMINATE)
+        if (now < info.blockedUntil) {
+            lastDebugMessage = "Ignored zombie/repeating notification: $appName"
+            return true
+        }
+
+        val timeSinceFirst = now - info.firstSeenAt
+        val timeSinceLast = now - info.lastSeenAt
+
+        if (timeSinceLast <= 10_000L) {
+            info.count += 1
+            info.lastSeenAt = now
+        } else {
+            info.count = 1
+            info.firstSeenAt = now
+            info.lastSeenAt = now
+            info.blockedUntil = 0L
+            return false
+        }
+
+        /*
+         * If the exact same notification appears/updates 3 times within 30 sec,
+         * treat it as zombie/status spam and silence it for 2 minutes.
+         *
+         * First and second occurrences still show.
+         * Third and later are suppressed.
+         */
+        if (info.count >= 3 && timeSinceFirst <= 30_000L) {
+            info.blockedUntil = now + 120_000L
+            lastDebugMessage = "Marked and ignored zombie notification: $appName"
+            return true
+        }
+
+        return false
     }
 
     private fun extractTitle(notification: Notification): String {
