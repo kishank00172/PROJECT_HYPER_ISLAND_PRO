@@ -71,12 +71,16 @@ class TestLabActivity : Activity() {
             append("• Collapse island\n")
             append("• Toggle expand/collapse\n")
             append("• Simulate notification island\n\n")
+
             append("Notification Listener:\n")
             append(if (HyperNotificationListenerService.isConnected) "Connected" else "Not connected")
             append("\n")
             append(HyperNotificationListenerService.lastDebugMessage)
-            append("\n\n")
-            append("If real notifications do not trigger island, toggle Notification Access OFF/ON once.")
+
+            append("\n\nAccessibility Fallback:\n")
+            append(HyperAccessibilityService.lastAccessibilityDebugMessage)
+
+            append("\n\nIf real notifications do not trigger island, toggle Notification Access OFF/ON once.")
         }
     }
 
