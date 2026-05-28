@@ -38,6 +38,10 @@ class HyperAccessibilityService : AccessibilityService() {
         @Volatile
         private var instance: HyperAccessibilityService? = null
 
+        @Volatile
+        var lastAccessibilityDebugMessage: String = "Accessibility fallback waiting"
+            private set
+
         fun isConnected(): Boolean = instance != null
 
         fun showIslandFromApp(context: Context): Boolean {
@@ -90,6 +94,8 @@ class HyperAccessibilityService : AccessibilityService() {
             val service = instance ?: return false
 
             service.postNotificationEvent(
+                source = "NotificationListener",
+                packageName = packageName,
                 appName = appName,
                 title = title,
                 message = message,
@@ -129,7 +135,11 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private var notificationMode = false
     private var currentPendingIntent: PendingIntent? = null
+    private var currentPackageName: String? = null
     private var autoCollapseRunnable: Runnable? = null
+
+    private var lastIslandFingerprint = ""
+    private var lastIslandFingerprintTime = 0L
 
     private val outlineRect = Rect()
     private var outlineRadius = 0f
@@ -139,6 +149,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
+        lastAccessibilityDebugMessage = "Accessibility service connected"
 
         if (
             AppSettings.isIslandEnabled(this) &&
@@ -149,10 +160,67 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Phase 3: notification island + manual/auto expand behavior.
+        if (event == null) return
+
+        if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+            handleAccessibilityNotificationEvent(event)
+        }
     }
 
     override fun onInterrupt() = Unit
+
+    private fun handleAccessibilityNotificationEvent(event: AccessibilityEvent) {
+        if (!AppSettings.isIslandEnabled(this)) {
+            lastAccessibilityDebugMessage = "Fallback ignored: island OFF"
+            return
+        }
+
+        val pkg = event.packageName?.toString()?.trim().orEmpty()
+
+        if (pkg.isBlank()) {
+            lastAccessibilityDebugMessage = "Fallback ignored: empty package"
+            return
+        }
+
+        if (pkg == packageName) {
+            lastAccessibilityDebugMessage = "Fallback ignored: own app"
+            return
+        }
+
+        val eventText = event.text
+            ?.mapNotNull { it?.toString()?.trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+
+        if (eventText.isEmpty()) {
+            lastAccessibilityDebugMessage = "Fallback ignored empty text: $pkg"
+            return
+        }
+
+        val appName = getAppName(pkg)
+
+        val title: String
+        val message: String
+
+        if (eventText.size >= 2) {
+            title = eventText.first()
+            message = eventText.drop(1).joinToString(" • ")
+        } else {
+            title = appName
+            message = eventText.first()
+        }
+
+        lastAccessibilityDebugMessage = "Fallback raw: $appName | $title | $message"
+
+        postNotificationEvent(
+            source = "AccessibilityFallback",
+            packageName = pkg,
+            appName = appName,
+            title = title,
+            message = message,
+            contentIntent = null
+        )
+    }
 
     private fun postShowIsland() {
         mainHandler.post {
@@ -211,6 +279,8 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun postNotificationEvent(
+        source: String,
+        packageName: String,
         appName: String,
         title: String,
         message: String,
@@ -219,19 +289,47 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
 
+            val cleanTitle = title.trim()
+            val cleanMessage = message.trim()
+
+            if (cleanTitle.isBlank() && cleanMessage.isBlank()) {
+                if (source == "AccessibilityFallback") {
+                    lastAccessibilityDebugMessage = "Fallback ignored blank content: $packageName"
+                }
+                return@post
+            }
+
+            val fingerprint = "$packageName|$cleanTitle|$cleanMessage"
+            val now = System.currentTimeMillis()
+
+            if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 2_000L) {
+                if (source == "AccessibilityFallback") {
+                    lastAccessibilityDebugMessage = "Fallback duplicate ignored: $appName"
+                }
+                return@post
+            }
+
+            lastIslandFingerprint = fingerprint
+            lastIslandFingerprintTime = now
+
             if (visualRoot == null || touchView == null) {
                 showIslandInternal()
             }
 
             notificationMode = true
             currentPendingIntent = contentIntent
+            currentPackageName = packageName
 
             appNameText?.text = appName
-            titleText?.text = title.ifEmpty { appName }
-            messageText?.text = message.ifEmpty { "New notification" }
+            titleText?.text = cleanTitle.ifEmpty { appName }
+            messageText?.text = cleanMessage.ifEmpty { "New notification" }
 
             contentContainer?.visibility = View.VISIBLE
             contentContainer?.alpha = 0f
+
+            if (source == "AccessibilityFallback") {
+                lastAccessibilityDebugMessage = "Fallback shown: $appName | ${cleanTitle.ifEmpty { appName }} | $cleanMessage"
+            }
 
             setExpandedAnimated(true, ExpandReason.AUTO_NOTIFICATION)
             scheduleAutoCollapse()
@@ -245,6 +343,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (notificationMode) {
                 notificationMode = false
                 currentPendingIntent = null
+                currentPackageName = null
                 setExpandedAnimated(false, ExpandReason.AUTO_NOTIFICATION)
             }
         }
@@ -255,16 +354,26 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun openCurrentNotification() {
         val pending = currentPendingIntent
+        val pkg = currentPackageName
 
         notificationMode = false
         currentPendingIntent = null
+        currentPackageName = null
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         autoCollapseRunnable = null
 
         try {
-            pending?.send()
+            if (pending != null) {
+                pending.send()
+            } else if (!pkg.isNullOrBlank()) {
+                val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
+                if (launchIntent != null) {
+                    launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(launchIntent)
+                }
+            }
         } catch (_: Exception) {
-            // Ignore if pending intent is invalid.
+            // Ignore if intent is invalid.
         }
 
         setExpandedAnimated(false, ExpandReason.AUTO_NOTIFICATION)
@@ -280,6 +389,7 @@ class HyperAccessibilityService : AccessibilityService() {
         isExpanded = false
         notificationMode = false
         currentPendingIntent = null
+        currentPackageName = null
         expandReason = ExpandReason.MANUAL_USER
 
         val compactWidth = dp(AppSettings.getIslandWidthDp(this))
@@ -528,6 +638,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         contentContainer?.visibility = View.GONE
                         notificationMode = false
                         currentPendingIntent = null
+                        currentPackageName = null
                         expandReason = ExpandReason.MANUAL_USER
                     } else if (notificationMode) {
                         contentContainer?.alpha = 1f
@@ -561,7 +672,8 @@ class HyperAccessibilityService : AccessibilityService() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
 
             setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_DOWN ||
+                if (
+                    event.action == MotionEvent.ACTION_DOWN ||
                     event.action == MotionEvent.ACTION_OUTSIDE
                 ) {
                     postCollapseIsland()
@@ -688,6 +800,7 @@ class HyperAccessibilityService : AccessibilityService() {
         isExpanded = false
         notificationMode = false
         currentPendingIntent = null
+        currentPackageName = null
         expandReason = ExpandReason.MANUAL_USER
         outlineRect.setEmpty()
         outlineRadius = 0f
@@ -772,6 +885,15 @@ class HyperAccessibilityService : AccessibilityService() {
             shape = GradientDrawable.RECTANGLE
             setColor(Color.BLACK)
             cornerRadius = cornerRadiusPx
+        }
+    }
+
+    private fun getAppName(pkg: String): String {
+        return try {
+            val info = packageManager.getApplicationInfo(pkg, 0)
+            packageManager.getApplicationLabel(info).toString()
+        } catch (_: Exception) {
+            pkg
         }
     }
 
