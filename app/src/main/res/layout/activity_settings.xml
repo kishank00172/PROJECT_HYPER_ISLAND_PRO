@@ -76,155 +76,67 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="16dp"
-                    android:text="Island Dimensions"
+                    android:text="Basic Dimensions"
                     android:textColor="@color/primary_accent"
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <!-- WIDTH (STAGE 1) -->
-                <RelativeLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Normal Width"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/txtWidthValue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_alignParentEnd="true"
-                        android:text="134 dp"
-                        android:textColor="@color/white"
-                        android:textSize="13sp" />
+                <!-- NORMAL WIDTH -->
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Normal Width" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                    <TextView android:id="@+id/txtWidthValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="134 dp" android:textColor="@color/white" android:textSize="13sp" />
                 </RelativeLayout>
-                <SeekBar
-                    android:id="@+id/seekWidth"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="20dp" />
+                <SeekBar android:id="@+id/seekWidth" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="20dp" />
 
-                <!-- WIDTH (STAGE 2 - PING) -->
-                <RelativeLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Ping Expansion Width"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/txtStage2WidthValue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_alignParentEnd="true"
-                        android:text="180 dp"
-                        android:textColor="@color/white"
-                        android:textSize="13sp" />
+                <!-- PING WIDTH -->
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ping Width (Stage 2)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                    <TextView android:id="@+id/txtStage2WidthValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="180 dp" android:textColor="@color/white" android:textSize="13sp" />
                 </RelativeLayout>
-                <SeekBar
-                    android:id="@+id/seekStage2Width"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="20dp" />
+                <SeekBar android:id="@+id/seekStage2Width" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="20dp" />
 
                 <!-- HEIGHT -->
-                <RelativeLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Island Height"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/txtHeightValue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_alignParentEnd="true"
-                        android:text="38 dp"
-                        android:textColor="@color/white"
-                        android:textSize="13sp" />
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Island Height" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                    <TextView android:id="@+id/txtHeightValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="38 dp" android:textColor="@color/white" android:textSize="13sp" />
                 </RelativeLayout>
-                <SeekBar
-                    android:id="@+id/seekHeight"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="20dp" />
+                <SeekBar android:id="@+id/seekHeight" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="20dp" />
 
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginBottom="20dp"
-                    android:background="#1AFFFFFF" />
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginBottom="20dp" android:background="#1AFFFFFF" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="16dp"
-                    android:text="Island Position"
-                    android:textColor="@color/primary_accent"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:text="Notification Expansion (Stage 3)" android:textColor="@color/primary_accent" android:textSize="14sp" android:textStyle="bold" />
+
+                <!-- EXPANDED WIDTH -->
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Full Width" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                    <TextView android:id="@+id/txtExpandedWidthValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="330 dp" android:textColor="@color/white" android:textSize="13sp" />
+                </RelativeLayout>
+                <SeekBar android:id="@+id/seekExpandedWidth" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="20dp" />
+
+                <!-- EXPANDED HEIGHT -->
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Full Height" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                    <TextView android:id="@+id/txtExpandedHeightValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="118 dp" android:textColor="@color/white" android:textSize="13sp" />
+                </RelativeLayout>
+                <SeekBar android:id="@+id/seekExpandedHeight" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="20dp" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginBottom="20dp" android:background="#1AFFFFFF" />
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:text="Position" android:textColor="@color/primary_accent" android:textSize="14sp" android:textStyle="bold" />
 
                 <!-- Y POSITION -->
-                <RelativeLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Vertical Offset (Y)"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/txtYValue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_alignParentEnd="true"
-                        android:text="1 dp"
-                        android:textColor="@color/white"
-                        android:textSize="13sp" />
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Vertical (Y)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                    <TextView android:id="@+id/txtYValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="1 dp" android:textColor="@color/white" android:textSize="13sp" />
                 </RelativeLayout>
-                <SeekBar
-                    android:id="@+id/seekY"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="20dp" />
+                <SeekBar android:id="@+id/seekY" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="20dp" />
 
                 <!-- X POSITION -->
-                <RelativeLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Horizontal Center Offset (X)"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/txtXValue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_alignParentEnd="true"
-                        android:text="0 dp"
-                        android:textColor="@color/white"
-                        android:textSize="13sp" />
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Horizontal (X)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                    <TextView android:id="@+id/txtXValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="0 dp" android:textColor="@color/white" android:textSize="13sp" />
                 </RelativeLayout>
-                <SeekBar
-                    android:id="@+id/seekX"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="20dp" />
+                <SeekBar android:id="@+id/seekX" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="20dp" />
 
                 <Button
                     android:id="@+id/btnResetOverlay"
@@ -244,7 +156,7 @@
                 android:layout_marginTop="20dp"
                 android:layout_marginBottom="40dp"
                 android:gravity="center"
-                android:text="More customization options coming in later phases."
+                android:text="Design by Kishan • Phase 3 Logic"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
