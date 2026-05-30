@@ -16,38 +16,36 @@ import com.hyperisland.pro.services.IslandOverlayService
 class SettingsActivity : Activity() {
 
     private lateinit var txtWidth: TextView
+    private lateinit var txtStage2Width: TextView
     private lateinit var txtHeight: TextView
     private lateinit var txtY: TextView
     private lateinit var txtX: TextView
 
     private lateinit var seekWidth: SeekBar
+    private lateinit var seekStage2Width: SeekBar
     private lateinit var seekHeight: SeekBar
     private lateinit var seekY: SeekBar
     private lateinit var seekX: SeekBar
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         AppSettings.ensurePhaseDefaults(this)
-
         setContentView(R.layout.activity_settings)
 
-        findViewById<Button>(R.id.btnBack).setOnClickListener {
-            finish()
-        }
+        findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
 
         val developer = findViewById<Switch>(R.id.switchDeveloper)
         developer.isChecked = AppSettings.isDeveloperMode(this)
-        developer.setOnCheckedChangeListener { _, isChecked ->
-            AppSettings.setDeveloperMode(this, isChecked)
-        }
+        developer.setOnCheckedChangeListener { _, isChecked -> AppSettings.setDeveloperMode(this, isChecked) }
 
         txtWidth = findViewById(R.id.txtWidthValue)
+        txtStage2Width = findViewById(R.id.txtStage2WidthValue) // Naya ID (Layout mein add karna hoga)
         txtHeight = findViewById(R.id.txtHeightValue)
         txtY = findViewById(R.id.txtYValue)
         txtX = findViewById(R.id.txtXValue)
 
         seekWidth = findViewById(R.id.seekWidth)
+        seekStage2Width = findViewById(R.id.seekStage2Width) // Naya ID
         seekHeight = findViewById(R.id.seekHeight)
         seekY = findViewById(R.id.seekY)
         seekX = findViewById(R.id.seekX)
@@ -63,6 +61,7 @@ class SettingsActivity : Activity() {
 
     private fun setupSeekBars() {
         seekWidth.max = 190      // 70..260
+        seekStage2Width.max = 200 // 100..300
         seekHeight.max = 36      // 24..60
         seekY.max = 120          // 0..120
         seekX.max = 360          // -180..180
@@ -70,36 +69,34 @@ class SettingsActivity : Activity() {
         loadSeekValues()
 
         seekWidth.setOnSeekBarChangeListener(simpleListener {
-            val value = 70 + seekWidth.progress
-            AppSettings.setIslandWidthDp(this, value)
-            updateLabels()
-            refreshOverlayIfRunning()
+            AppSettings.setIslandWidthDp(this, 70 + seekWidth.progress)
+            updateLabels(); refreshOverlayIfRunning()
+        })
+
+        seekStage2Width.setOnSeekBarChangeListener(simpleListener {
+            AppSettings.setIslandStage2WidthDp(this, 100 + seekStage2Width.progress)
+            updateLabels(); refreshOverlayIfRunning()
         })
 
         seekHeight.setOnSeekBarChangeListener(simpleListener {
-            val value = 24 + seekHeight.progress
-            AppSettings.setIslandHeightDp(this, value)
-            updateLabels()
-            refreshOverlayIfRunning()
+            AppSettings.setIslandHeightDp(this, 24 + seekHeight.progress)
+            updateLabels(); refreshOverlayIfRunning()
         })
 
         seekY.setOnSeekBarChangeListener(simpleListener {
-            val value = seekY.progress
-            AppSettings.setIslandYDp(this, value)
-            updateLabels()
-            refreshOverlayIfRunning()
+            AppSettings.setIslandYDp(this, seekY.progress)
+            updateLabels(); refreshOverlayIfRunning()
         })
 
         seekX.setOnSeekBarChangeListener(simpleListener {
-            val value = seekX.progress - 180
-            AppSettings.setIslandXDp(this, value)
-            updateLabels()
-            refreshOverlayIfRunning()
+            AppSettings.setIslandXDp(this, seekX.progress - 180)
+            updateLabels(); refreshOverlayIfRunning()
         })
     }
 
     private fun loadSeekValues() {
         seekWidth.progress = AppSettings.getIslandWidthDp(this) - 70
+        seekStage2Width.progress = AppSettings.getIslandStage2WidthDp(this) - 100
         seekHeight.progress = AppSettings.getIslandHeightDp(this) - 24
         seekY.progress = AppSettings.getIslandYDp(this)
         seekX.progress = AppSettings.getIslandXDp(this) + 180
@@ -108,6 +105,7 @@ class SettingsActivity : Activity() {
 
     private fun updateLabels() {
         txtWidth.text = "${AppSettings.getIslandWidthDp(this)} dp"
+        txtStage2Width.text = "${AppSettings.getIslandStage2WidthDp(this)} dp"
         txtHeight.text = "${AppSettings.getIslandHeightDp(this)} dp"
         txtY.text = "${AppSettings.getIslandYDp(this)} dp"
         txtX.text = "${AppSettings.getIslandXDp(this)} dp"
@@ -115,37 +113,15 @@ class SettingsActivity : Activity() {
 
     private fun refreshOverlayIfRunning() {
         if (!AppSettings.isIslandEnabled(this)) return
-
-        val refreshedAccessibility = HyperAccessibilityService.refreshIslandFromApp(this)
-
-        if (refreshedAccessibility) {
-            return
-        }
-
-        val intent = Intent(this, IslandOverlayService::class.java).apply {
-            action = IslandOverlayService.ACTION_REFRESH
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        if (!HyperAccessibilityService.refreshIslandFromApp(this)) {
+            val intent = Intent(this, IslandOverlayService::class.java).apply { action = IslandOverlayService.ACTION_REFRESH }
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
         }
     }
 
-    private fun simpleListener(onChanged: () -> Unit): SeekBar.OnSeekBarChangeListener {
-        return object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(
-                seekBar: SeekBar?,
-                progress: Int,
-                fromUser: Boolean
-            ) {
-                if (fromUser) onChanged()
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-        }
+    private fun simpleListener(onChanged: () -> Unit) = object : SeekBar.OnSeekBarChangeListener {
+        override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { if (f) onChanged() }
+        override fun onStartTrackingTouch(s: SeekBar?) {}
+        override fun onStopTrackingTouch(s: SeekBar?) {}
     }
 }
