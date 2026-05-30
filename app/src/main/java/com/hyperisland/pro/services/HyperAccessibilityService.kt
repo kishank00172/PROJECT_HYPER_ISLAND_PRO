@@ -40,6 +40,12 @@ class HyperAccessibilityService : AccessibilityService() {
         AUTO_NOTIFICATION
     }
 
+    private data class DisplayText(
+        val appName: String,
+        val title: String,
+        val message: String
+    )
+
     companion object {
         @Volatile
         private var instance: HyperAccessibilityService? = null
@@ -284,19 +290,16 @@ class HyperAccessibilityService : AccessibilityService() {
             val cleanMessageRaw = message.trim()
             val now = System.currentTimeMillis()
 
-            // 1. PRIMARY LOCK: Prevent Accessibility fallback from overwriting fresh Listener data
             if (source == "AccessibilityFallback" && now - lastPrimaryEventTime < 1500L) {
                 return@post
             } else if (source == "NotificationListener") {
                 lastPrimaryEventTime = now
             }
 
-            // 2. BLANK OVERWRITE GUARD: Don't let empty events clear visible text
             if (isExpanded && notificationMode && cleanTitleRaw.isBlank() && cleanMessageRaw.isBlank()) {
                 return@post
             }
 
-            // 3. AUTO-COLLAPSE RESET: Keep island open as long as notifications arrive
             autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
 
             if (cleanTitleRaw.isBlank() && cleanMessageRaw.isBlank()) return@post
@@ -304,9 +307,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val display = buildDisplayText(appName, cleanTitleRaw, cleanMessageRaw)
             val fingerprint = "$packageName|${display.title}|${display.message}"
 
-            // 4. DUPLICATE SPAM PROTECTION
             if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) {
-                // Still reset timer even if duplicate to keep it open
                 scheduleAutoCollapse() 
                 return@post
             }
@@ -316,7 +317,6 @@ class HyperAccessibilityService : AccessibilityService() {
 
             if (visualRoot == null || touchView == null) showIslandInternal()
 
-            // 5. VIEW REFRESH GUARD: Force UI thread to redraw
             titleText?.clearAnimation()
             messageText?.clearAnimation()
             
@@ -340,12 +340,33 @@ class HyperAccessibilityService : AccessibilityService() {
                 contentContainer?.alpha = 0f
                 setExpandedAnimated(true, ExpandReason.AUTO_NOTIFICATION)
             } else {
-                // If already expanded, just refresh the content view smoothly
                 contentContainer?.animate()?.alpha(1f)?.setDuration(200)?.start()
             }
 
             scheduleAutoCollapse()
         }
+    }
+
+    private fun buildDisplayText(appName: String, rawTitle: String, rawMessage: String): DisplayText {
+        val cleanApp = appName.trim().ifBlank { "App" }
+        var title = rawTitle.trim()
+        var message = rawMessage.trim()
+
+        if (title.equals(cleanApp, ignoreCase = true)) {
+            title = message
+            message = ""
+        }
+
+        if (title.isBlank() && message.isNotBlank()) {
+            title = message
+            message = ""
+        }
+
+        return DisplayText(
+            appName = cleanApp,
+            title = title,
+            message = message
+        )
     }
 
     private fun scheduleAutoCollapse() {
@@ -415,7 +436,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val island = FrameLayout(this).apply {
             background = islandBackground
-            elevation = 0f // Pure AMOLED black
+            elevation = 0f 
             alpha = 1f
             clipToOutline = true
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
