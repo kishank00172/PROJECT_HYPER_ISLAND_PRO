@@ -33,15 +33,20 @@
 
         <activity
             android:name=".ui.SettingsActivity"
+            android:excludeFromRecents="true"
             android:exported="false" />
         <activity
             android:name=".ui.TestLabActivity"
+            android:excludeFromRecents="true"
             android:exported="false" />
         <activity
             android:name=".ui.PermissionDoctorActivity"
+            android:excludeFromRecents="true"
             android:exported="false" />
+        
         <activity
             android:name=".MainActivity"
+            android:excludeFromRecents="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -49,11 +54,13 @@
             </intent-filter>
         </activity>
 
-        <!-- Phase 1 service placeholder: declared but not started from Phase 0 UI. -->
+        <!-- Services running in a separate VIP process -->
         <service
             android:name=".services.IslandOverlayService"
             android:enabled="true"
             android:exported="false"
+            android:stopWithTask="false"
+            android:process=":island_core"
             android:foregroundServiceType="specialUse"
             tools:targetApi="34">
             <property
@@ -61,10 +68,10 @@
                 android:value="floating_dynamic_island_overlay" />
         </service>
 
-        <!-- Phase 3 placeholder: can be enabled by user, but no notification UI logic yet. -->
         <service
             android:name=".services.HyperNotificationListenerService"
             android:exported="true"
+            android:process=":island_core"
             android:label="@string/notification_listener_label"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
@@ -72,10 +79,10 @@
             </intent-filter>
         </service>
 
-        <!-- Phase 4+ placeholder for panel awareness/gestures; no fake behavior in Phase 0. -->
         <service
             android:name=".services.HyperAccessibilityService"
             android:exported="true"
+            android:process=":island_core"
             android:label="@string/accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
@@ -88,7 +95,7 @@
 
         <receiver
             android:name=".receivers.BootReceiver"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
