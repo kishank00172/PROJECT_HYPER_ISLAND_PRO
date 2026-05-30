@@ -12,4 +12,22 @@
     <color name="status_green">#388E3C</color>
     <color name="status_red">#D32F2F</color>
     <color name="status_orange">#F57C00</color>
+
+
+
+    
+    <color name="amoled_black">#000000</color>
+    <color name="surface_dark">#101014</color>
+    <color name="surface_card">#17171D</color>
+    <color name="surface_card_2">#20202A</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B7B7C2</color>
+    <color name="text_muted">#777783</color>
+    <color name="accent_cyan">#00E5FF</color>
+    <color name="accent_blue">#2979FF</color>
+    <color name="success_green">#30D158</color>
+    <color name="warning_orange">#FF9F0A</color>
+    <color name="error_red">#FF3B30</color>
+    <color name="divider_dark">#2A2A33</color>
+    <color name="icon_background">#000000</color>
 </resources>
