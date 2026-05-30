@@ -148,6 +148,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
+    private var lastPrimaryEventTime = 0L // Gemini Fix: Primary lock timestamp
 
     private var touchStartY = 0f
     private var touchStartX = 0f
@@ -304,18 +305,33 @@ class HyperAccessibilityService : AccessibilityService() {
 
             val cleanTitleRaw = title.trim()
             val cleanMessageRaw = message.trim()
+            val now = System.currentTimeMillis()
 
-            if (cleanTitleRaw.isBlank() && cleanMessageRaw.isBlank()) {
+            // Gemini Step 1: Debounce Fallback to prevent overwriting Primary Listener
+            if (source == "AccessibilityFallback") {
+                if (now - lastPrimaryEventTime < 1500L) {
+                    lastAccessibilityDebugMessage = "Fallback bypassed: primary lock active"
+                    return@post
+                }
+            } else if (source == "NotificationListener") {
+                lastPrimaryEventTime = now // Lock timestamp for primary
+            }
+
+            // Gemini Step 2: UI Guard-rail (No Blank Overwrites on active Island)
+            if (isExpanded && notificationMode && cleanTitleRaw.isBlank() && cleanMessageRaw.isBlank()) {
                 if (source == "AccessibilityFallback") {
-                    lastAccessibilityDebugMessage = "Fallback ignored blank content: $packageName"
+                    lastAccessibilityDebugMessage = "Fallback ignored: would overwrite valid content"
                 }
                 return@post
             }
 
-            val display = buildDisplayText(appName, cleanTitleRaw, cleanMessageRaw)
+            // Standard check: if both title/message are blank for a NEW event, skip.
+            if (cleanTitleRaw.isBlank() && cleanMessageRaw.isBlank()) {
+                return@post
+            }
 
+            val display = buildDisplayText(appName, cleanTitleRaw, cleanMessageRaw)
             val fingerprint = "$packageName|${display.title}|${display.message}"
-            val now = System.currentTimeMillis()
 
             if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 2_000L) {
                 if (source == "AccessibilityFallback") {
