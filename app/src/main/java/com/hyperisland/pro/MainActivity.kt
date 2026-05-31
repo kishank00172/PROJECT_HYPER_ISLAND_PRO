@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
+import android.widget.Button
 import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.services.HyperAccessibilityService
@@ -26,38 +27,47 @@ class MainActivity : Activity() {
         updateStatus()
         startKeepAliveService()
 
-        findViewById<View>(R.id.cardToggle).setOnClickListener {
+        // ID Fix: Using btnIslandToggle as per your activity_main.xml
+        findViewById<Button>(R.id.btnIslandToggle).setOnClickListener {
             val isServiceOn = isAccessibilityServiceEnabled(this)
             if (isServiceOn) {
-                // If already on, we just toggle the app's internal logic
                 val currentEnabled = AppSettings.isIslandEnabled(this)
                 AppSettings.setIslandEnabled(this, !currentEnabled)
                 HyperAccessibilityService.refreshIslandFromApp(this)
             } else {
-                // Open Permission Doctor if service is off
                 startActivity(Intent(this, PermissionDoctorActivity::class.java))
             }
             updateStatus()
         }
 
-        findViewById<View>(R.id.cardDoctor).setOnClickListener {
+        // ID Fix: btnPermissionDoctor
+        findViewById<Button>(R.id.btnPermissionDoctor).setOnClickListener {
             startActivity(Intent(this, PermissionDoctorActivity::class.java))
         }
-        findViewById<View>(R.id.cardLab).setOnClickListener {
+
+        // ID Fix: btnTestLab
+        findViewById<Button>(R.id.btnTestLab).setOnClickListener {
             startActivity(Intent(this, TestLabActivity::class.java))
         }
-        findViewById<View>(R.id.cardSettings).setOnClickListener {
+
+        // ID Fix: btnSettings
+        findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        
+        // Update build info if view exists
+        findViewById<TextView>(R.id.txtBuildInfo)?.text = "Build: Phase 3.1 - Bulletproof Logic"
     }
 
     private fun startKeepAliveService() {
         val intent = Intent(this, IslandOverlayService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (_: Exception) {}
     }
 
     private fun isAccessibilityServiceEnabled(context: Context): Boolean {
@@ -72,16 +82,26 @@ class MainActivity : Activity() {
     }
 
     private fun updateStatus() {
-        val txtStatus = findViewById<TextView>(R.id.txtServiceStatus)
+        val txtStatus = findViewById<TextView>(R.id.txtIslandStatus)
+        val btnToggle = findViewById<Button>(R.id.btnIslandToggle)
+        
         val isServiceOn = isAccessibilityServiceEnabled(this)
         val isAppLogicEnabled = AppSettings.isIslandEnabled(this)
 
         if (!isServiceOn) {
-            txtStatus.text = "Accessibility: OFF"
-            txtStatus.setTextColor(0xFFFF3B30.toInt())
+            txtStatus?.text = "Phase 3 status: SERVICE OFF"
+            txtStatus?.setTextColor(0xFFFF3B30.toInt()) // Red
+            btnToggle?.text = "TURN ISLAND ON"
         } else {
-            txtStatus.text = if (isAppLogicEnabled) "Island: ON" else "Island: standby"
-            txtStatus.setTextColor(if (isAppLogicEnabled) 0xFF30D158.toInt() else 0xFFFFA726.toInt())
+            if (isAppLogicEnabled) {
+                txtStatus?.text = "Phase 3 status: RUNNING"
+                txtStatus?.setTextColor(0xFF30D158.toInt()) // Green
+                btnToggle?.text = "TURN ISLAND OFF"
+            } else {
+                txtStatus?.text = "Phase 3 status: STANDBY"
+                txtStatus?.setTextColor(0xFFFFA726.toInt()) // Orange
+                btnToggle?.text = "TURN ISLAND ON"
+            }
         }
     }
 }
