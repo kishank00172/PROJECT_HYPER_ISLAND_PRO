@@ -1,15 +1,14 @@
 package com.hyperisland.pro
 
-import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.Button
+import android.view.View
 import android.widget.TextView
-import android.widget.Toast
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.services.HyperAccessibilityService
 import com.hyperisland.pro.services.IslandOverlayService
@@ -19,124 +18,41 @@ import com.hyperisland.pro.ui.TestLabActivity
 
 class MainActivity : Activity() {
 
-    private lateinit var txtIslandStatus: TextView
-    private lateinit var btnIslandToggle: Button
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         AppSettings.ensurePhaseDefaults(this)
-
         setContentView(R.layout.activity_main)
 
-        txtIslandStatus = findViewById(R.id.txtIslandStatus)
-        btnIslandToggle = findViewById(R.id.btnIslandToggle)
+        updateStatus()
+        startKeepAliveService()
 
-        findViewById<TextView>(R.id.txtBuildInfo).text = buildString {
-            append("Version: ${BuildConfig.VERSION_NAME}\n")
-            append("Package: ${BuildConfig.APPLICATION_ID}\n")
-            append("Min SDK: 33 | Kotlin + XML | No fake cutout")
-        }
-
-        btnIslandToggle.setOnClickListener {
-            if (AppSettings.isIslandEnabled(this)) {
-                stopIsland()
+        findViewById<View>(R.id.cardToggle).setOnClickListener {
+            val isServiceOn = isAccessibilityServiceEnabled(this)
+            if (isServiceOn) {
+                // If already on, we just toggle the app's internal logic
+                val currentEnabled = AppSettings.isIslandEnabled(this)
+                AppSettings.setIslandEnabled(this, !currentEnabled)
+                HyperAccessibilityService.refreshIslandFromApp(this)
             } else {
-                startIsland()
+                // Open Permission Doctor if service is off
+                startActivity(Intent(this, PermissionDoctorActivity::class.java))
             }
+            updateStatus()
         }
 
-        findViewById<Button>(R.id.btnPermissionDoctor).setOnClickListener {
+        findViewById<View>(R.id.cardDoctor).setOnClickListener {
             startActivity(Intent(this, PermissionDoctorActivity::class.java))
         }
-
-        findViewById<Button>(R.id.btnTestLab).setOnClickListener {
+        findViewById<View>(R.id.cardLab).setOnClickListener {
             startActivity(Intent(this, TestLabActivity::class.java))
         }
-
-        findViewById<Button>(R.id.btnSettings).setOnClickListener {
+        findViewById<View>(R.id.cardSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        refreshIslandUi()
-    }
-
-    private fun startIsland() {
-        if (isAccessibilityServiceEnabled()) {
-            val started = HyperAccessibilityService.showIslandFromApp(this)
-
-            if (started) {
-                /*
-                 * Critical fix:
-                 * Do NOT call ACTION_HIDE here.
-                 * ACTION_HIDE marks AppSettings island_enabled=false.
-                 * We only stop fallback service without changing global island state.
-                 */
-                stopFallbackOnly()
-
-                AppSettings.setIslandEnabled(this, true)
-                AppSettings.setOverlayEngine(this, AppSettings.ENGINE_ACCESSIBILITY)
-
-                refreshIslandUi()
-                Toast.makeText(this, "Accessibility overlay started", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            Toast.makeText(
-                this,
-                "Accessibility service enabled but not connected yet. Toggle Accessibility OFF/ON once.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
-        requestPostNotificationIfNeeded()
-
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Grant overlay permission first", Toast.LENGTH_SHORT).show()
-            startActivity(Intent(this, PermissionDoctorActivity::class.java))
-            return
-        }
-
-        AppSettings.setIslandEnabled(this, true)
-        AppSettings.setOverlayEngine(this, AppSettings.ENGINE_APPLICATION)
-        startFallbackService(IslandOverlayService.ACTION_SHOW)
-        refreshIslandUi()
-        Toast.makeText(this, "Fallback application overlay started", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun stopIsland() {
-        HyperAccessibilityService.hideIslandFromApp(this)
-        startFallbackService(IslandOverlayService.ACTION_HIDE)
-
-        AppSettings.setIslandEnabled(this, false)
-        AppSettings.setOverlayEngine(this, AppSettings.ENGINE_NONE)
-
-        refreshIslandUi()
-
-        Toast.makeText(this, "Island stop command sent", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun stopFallbackOnly() {
-        startFallbackService(IslandOverlayService.ACTION_STOP_FALLBACK_ONLY)
-    }
-
-    private fun startFallbackService(action: String) {
-        val intent = Intent(this, IslandOverlayService::class.java).apply {
-            this.action = action
-        }
-
-        if (
-            action == IslandOverlayService.ACTION_HIDE ||
-            action == IslandOverlayService.ACTION_STOP_FALLBACK_ONLY
-        ) {
-            startService(intent)
-            return
-        }
-
+    private fun startKeepAliveService() {
+        val intent = Intent(this, IslandOverlayService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -144,52 +60,28 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun requestPostNotificationIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2001)
-            }
-        }
-    }
-
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        val expected = ComponentName(this, HyperAccessibilityService::class.java).flattenToString()
-        val enabled = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-
+    private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        val expected = ComponentName(context, HyperAccessibilityService::class.java).flattenToString()
+        val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
         return enabled.split(":").any { it.equals(expected, ignoreCase = true) }
     }
 
-    private fun refreshIslandUi() {
-        val enabled = AppSettings.isIslandEnabled(this)
-        val engine = AppSettings.getOverlayEngine(this)
+    override fun onResume() {
+        super.onResume()
+        updateStatus()
+    }
 
-        txtIslandStatus.text = if (enabled) {
-            when (engine) {
-                AppSettings.ENGINE_ACCESSIBILITY -> {
-                    "Phase 2 status: ENABLED\nEngine: Accessibility Overlay\nTap the pill to expand/collapse."
-                }
+    private fun updateStatus() {
+        val txtStatus = findViewById<TextView>(R.id.txtServiceStatus)
+        val isServiceOn = isAccessibilityServiceEnabled(this)
+        val isAppLogicEnabled = AppSettings.isIslandEnabled(this)
 
-                AppSettings.ENGINE_APPLICATION -> {
-                    "Phase 2 status: ENABLED\nEngine: Application Overlay fallback."
-                }
-
-                else -> {
-                    "Phase 2 status: ENABLED\nEngine: Unknown"
-                }
-            }
+        if (!isServiceOn) {
+            txtStatus.text = "Accessibility: OFF"
+            txtStatus.setTextColor(0xFFFF3B30.toInt())
         } else {
-            "Phase 2 status: OFF\nEnable to show the real AMOLED black pill."
-        }
-
-        btnIslandToggle.text = if (enabled) {
-            "TURN ISLAND OFF"
-        } else {
-            "TURN ISLAND ON"
+            txtStatus.text = if (isAppLogicEnabled) "Island: ON" else "Island: standby"
+            txtStatus.setTextColor(if (isAppLogicEnabled) 0xFF30D158.toInt() else 0xFFFFA726.toInt())
         }
     }
 }
