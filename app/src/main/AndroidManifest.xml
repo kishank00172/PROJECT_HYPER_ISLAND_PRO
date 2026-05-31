@@ -54,13 +54,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Services running in a separate VIP process -->
         <service
             android:name=".services.IslandOverlayService"
             android:enabled="true"
             android:exported="false"
             android:stopWithTask="false"
-            android:process=":island_core"
             android:foregroundServiceType="specialUse"
             tools:targetApi="34">
             <property
@@ -71,7 +69,6 @@
         <service
             android:name=".services.HyperNotificationListenerService"
             android:exported="true"
-            android:process=":island_core"
             android:label="@string/notification_listener_label"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
@@ -82,7 +79,6 @@
         <service
             android:name=".services.HyperAccessibilityService"
             android:exported="true"
-            android:process=":island_core"
             android:label="@string/accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
