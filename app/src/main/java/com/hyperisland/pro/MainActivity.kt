@@ -27,36 +27,38 @@ class MainActivity : Activity() {
         updateStatus()
         startKeepAliveService()
 
-        // ID Fix: Using btnIslandToggle as per your activity_main.xml
         findViewById<Button>(R.id.btnIslandToggle).setOnClickListener {
             val isServiceOn = isAccessibilityServiceEnabled(this)
             if (isServiceOn) {
-                val currentEnabled = AppSettings.isIslandEnabled(this)
-                AppSettings.setIslandEnabled(this, !currentEnabled)
-                HyperAccessibilityService.refreshIslandFromApp(this)
+                val isAppLogicEnabled = AppSettings.isIslandEnabled(this)
+                if (isAppLogicEnabled) {
+                    // Turn OFF
+                    AppSettings.setIslandEnabled(this, false)
+                    HyperAccessibilityService.hideIslandFromApp(this)
+                } else {
+                    // Turn ON
+                    AppSettings.setIslandEnabled(this, true)
+                    HyperAccessibilityService.showIslandFromApp(this)
+                }
             } else {
                 startActivity(Intent(this, PermissionDoctorActivity::class.java))
             }
             updateStatus()
         }
 
-        // ID Fix: btnPermissionDoctor
         findViewById<Button>(R.id.btnPermissionDoctor).setOnClickListener {
             startActivity(Intent(this, PermissionDoctorActivity::class.java))
         }
 
-        // ID Fix: btnTestLab
         findViewById<Button>(R.id.btnTestLab).setOnClickListener {
             startActivity(Intent(this, TestLabActivity::class.java))
         }
 
-        // ID Fix: btnSettings
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         
-        // Update build info if view exists
-        findViewById<TextView>(R.id.txtBuildInfo)?.text = "Build: Phase 3.1 - Bulletproof Logic"
+        findViewById<TextView>(R.id.txtBuildInfo)?.text = "Build: Phase 3.2 - Touch & Toggle Fix"
     }
 
     private fun startKeepAliveService() {
@@ -90,16 +92,16 @@ class MainActivity : Activity() {
 
         if (!isServiceOn) {
             txtStatus?.text = "Phase 3 status: SERVICE OFF"
-            txtStatus?.setTextColor(0xFFFF3B30.toInt()) // Red
+            txtStatus?.setTextColor(0xFFFF3B30.toInt())
             btnToggle?.text = "TURN ISLAND ON"
         } else {
             if (isAppLogicEnabled) {
                 txtStatus?.text = "Phase 3 status: RUNNING"
-                txtStatus?.setTextColor(0xFF30D158.toInt()) // Green
+                txtStatus?.setTextColor(0xFF30D158.toInt())
                 btnToggle?.text = "TURN ISLAND OFF"
             } else {
                 txtStatus?.text = "Phase 3 status: STANDBY"
-                txtStatus?.setTextColor(0xFFFFA726.toInt()) // Orange
+                txtStatus?.setTextColor(0xFFFFA726.toInt())
                 btnToggle?.text = "TURN ISLAND ON"
             }
         }
