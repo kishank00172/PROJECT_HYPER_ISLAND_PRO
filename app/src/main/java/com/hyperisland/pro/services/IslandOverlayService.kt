@@ -26,15 +26,17 @@ class IslandOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // GHOST FIX: If Accessibility Service is already running, this fallback service is NOT needed.
+        // MANDATORY: Create channel and start foreground IMMEDIATELY
+        // This prevents the ForegroundServiceDidNotStartInTimeException crash
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification())
+
+        // GHOST FIX: If Accessibility Service is already running, we don't need this overlay.
         if (isAccessibilityServiceEnabled(this)) {
             stopForeground(true)
             stopSelf()
             return START_NOT_STICKY
         }
-
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
 
         when (intent?.action) {
             ACTION_HIDE -> {
@@ -63,7 +65,7 @@ class IslandOverlayService : Service() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Hyper Island Service", NotificationManager.IMPORTANCE_LOW))
+            manager?.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Hyper Island Service", NotificationManager.IMPORTANCE_LOW))
         }
     }
 
