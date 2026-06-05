@@ -1,6 +1,7 @@
 package com.hyperisland.pro
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -21,6 +22,25 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // --- CRASH CATCHER ---
+        val prefs = getSharedPreferences("crash_logs", MODE_PRIVATE)
+        val lastCrash = prefs.getString("last_error", null)
+        if (lastCrash != null) {
+            AlertDialog.Builder(this)
+                .setTitle("Last Launch Crashed")
+                .setMessage("Bhai ye error aaya tha:\n\n${lastCrash.take(500)}...")
+                .setPositiveButton("OK", null).show()
+            prefs.edit().remove("last_error").apply()
+        }
+
+        Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
+            val errorMsg = throwable.stackTraceToString()
+            getSharedPreferences("crash_logs", MODE_PRIVATE).edit().putString("last_error", errorMsg).commit()
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+        // ---------------------
+
         AppSettings.ensurePhaseDefaults(this)
         setContentView(R.layout.activity_main)
 
@@ -32,11 +52,9 @@ class MainActivity : Activity() {
             if (isServiceOn) {
                 val isAppLogicEnabled = AppSettings.isIslandEnabled(this)
                 if (isAppLogicEnabled) {
-                    // Turn OFF
                     AppSettings.setIslandEnabled(this, false)
                     HyperAccessibilityService.hideIslandFromApp(this)
                 } else {
-                    // Turn ON
                     AppSettings.setIslandEnabled(this, true)
                     HyperAccessibilityService.showIslandFromApp(this)
                 }
@@ -49,16 +67,12 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.btnPermissionDoctor).setOnClickListener {
             startActivity(Intent(this, PermissionDoctorActivity::class.java))
         }
-
         findViewById<Button>(R.id.btnTestLab).setOnClickListener {
             startActivity(Intent(this, TestLabActivity::class.java))
         }
-
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
-        
-        findViewById<TextView>(R.id.txtBuildInfo)?.text = "Build: Phase 3.2 - Touch & Toggle Fix"
     }
 
     private fun startKeepAliveService() {
@@ -86,7 +100,6 @@ class MainActivity : Activity() {
     private fun updateStatus() {
         val txtStatus = findViewById<TextView>(R.id.txtIslandStatus)
         val btnToggle = findViewById<Button>(R.id.btnIslandToggle)
-        
         val isServiceOn = isAccessibilityServiceEnabled(this)
         val isAppLogicEnabled = AppSettings.isIslandEnabled(this)
 
