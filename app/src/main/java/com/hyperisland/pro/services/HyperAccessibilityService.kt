@@ -171,12 +171,15 @@ class HyperAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
+        lastAccessibilityDebugMessage = "Accessibility service connected"
+
         if (AppSettings.isIslandEnabled(this)) {
             postShowIsland()
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent) {
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
             handleAccessibilityNotificationEvent(event)
         }
@@ -194,7 +197,9 @@ class HyperAccessibilityService : AccessibilityService() {
         if (rawText != null) {
             for (t in rawText) {
                 val s = t?.toString()?.trim()
-                if (!s.isNullOrBlank()) textItems.add(s)
+                if (!s.isNullOrBlank()) {
+                    textItems.add(s)
+                }
             }
         }
         
@@ -212,6 +217,8 @@ class HyperAccessibilityService : AccessibilityService() {
             finalTitle = appName
             finalMessage = textItems[0]
         }
+
+        lastAccessibilityDebugMessage = "Fallback captured: $appName"
 
         postNotificationEvent(
             source = "AccessibilityFallback",
@@ -315,6 +322,8 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
                 contentContainer?.translationY = t * 80f
+                val scale = 1f - (t * 0.15f)
+                contentContainer?.scaleX = scale; contentContainer?.scaleY = scale
                 contentContainer?.alpha = 1f - t
             }
         }
@@ -325,6 +334,8 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
                 contentContainer?.translationY = -80f * (1f - t)
+                val scale = 0.85f + (t * 0.15f)
+                contentContainer?.scaleX = scale; contentContainer?.scaleY = scale
                 contentContainer?.alpha = t
             }
         }
@@ -386,7 +397,7 @@ class HyperAccessibilityService : AccessibilityService() {
         expandReason = ExpandReason.AUTO_NOTIFICATION
         updateOutsideWatcherForState()
         
-        // VISIBILITY FIX: Always keep width MATCH_PARENT for Visual Window
+        // VISIBILITY FIX: Always keep width MATCH_PARENT for Render Window
         updateVisualRootStatic(visualRoot!!)
         updateTouchWindow(targetWidthValue, targetHeightValue)
 
@@ -477,6 +488,8 @@ class HyperAccessibilityService : AccessibilityService() {
                         contentContainer?.alpha = 0f
                         contentContainer?.visibility = View.GONE
                         notificationMode = false
+                        // TOUCH FIX: Shrink windows ONLY after collapse finishes
+                        updateVisualRootStatic(visualRoot!!)
                         updateTouchWindow(targetWidthValue, targetHeightValue)
                     }
                     visualRoot?.invalidateOutline()
@@ -558,11 +571,11 @@ class HyperAccessibilityService : AccessibilityService() {
         contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; alpha = 0f; setPadding(dp(18), dp(12), dp(18), dp(12))
             appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-            val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+            val textColumn = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
             appNameTimeText = TextView(context).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 12f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
             titleText = TextView(context).apply { setTextColor(Color.WHITE); textSize = 16f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
             messageText = TextView(context).apply { setTextColor(Color.rgb(210, 210, 216)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-            col.addView(appNameTimeText); col.addView(titleText); col.addView(messageText)
+            textColumn.addView(appNameTimeText); textColumn.addView(titleText); textColumn.addView(messageText)
             addView(appIconView, LinearLayout.LayoutParams(dp(38), dp(38)))
             addView(textColumn, LinearLayout.LayoutParams(0, -2, 1f))
         }
@@ -589,7 +602,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateAllToCurrentState() {
         val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = getTargetRadius(currentStage).toFloat()
-        updateIslandInternalView(w, h, r); updateVisualRootStatic(visualRoot!!); updateTouchWindow(w, h)
+        updateIslandInternalView(w, h, r); visualRoot?.let { updateVisualRootStatic(it) }; updateTouchWindow(w, h)
     }
 
     private fun updateOutsideWatcherForState() { if (currentStage == IslandStage.STAGE3_FULL && expandReason == ExpandReason.MANUAL_USER) ensureOutsideWatcher() else removeOutsideWatcher() }
@@ -598,7 +611,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun updateOutlineForIsland(widthPx: Int, heightPx: Int, radiusPx: Float) { val rootW = resources.displayMetrics.widthPixels; val left = ((rootW - widthPx) / 2) + dp(AppSettings.getIslandXDp(this)); outlineRect.set(left, 0, left + widthPx, heightPx); outlineRadius = radiusPx }
     
     private fun updateVisualRootStatic(root: FrameLayout) { 
-        // Always keep width as MATCH_PARENT for Visual Window to avoid clipping math errors
+        // VISIBILITY FIX: Always keep width MATCH_PARENT for Visual Render Window
         visualParams?.apply { 
             width = WindowManager.LayoutParams.MATCH_PARENT
             height = dp(AppSettings.getIslandExpandedHeightDp(this@HyperAccessibilityService) + 40)
@@ -608,7 +621,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
     
     private fun updateTouchWindow(widthPx: Int, heightPx: Int) { 
-        // Resize actual touch hitbox
+        // TOUCH FIX: Resize only actual touch hitbox
         val touchH = if (currentStage == IslandStage.STAGE1_IDLE) dp(25) else heightPx
         try { windowManager?.updateViewLayout(touchView!!, touchParams!!.apply { width = widthPx; height = touchH; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)); y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) }) } catch (_: Exception) {} 
     }
