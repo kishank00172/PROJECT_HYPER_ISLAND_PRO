@@ -171,6 +171,8 @@ class HyperAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
+        lastAccessibilityDebugMessage = "Accessibility service connected"
+
         if (AppSettings.isIslandEnabled(this)) {
             postShowIsland()
         }
@@ -212,6 +214,8 @@ class HyperAccessibilityService : AccessibilityService() {
             finalTitle = appName
             finalMessage = textItems[0]
         }
+
+        lastAccessibilityDebugMessage = "Fallback captured: $appName"
 
         postNotificationEvent(
             source = "AccessibilityFallback",
@@ -309,31 +313,27 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun playFluidTransitionAnimation(next: NotificationModel) {
         if (morphAnimator?.isRunning == true) morphAnimator?.cancel()
 
-        // Flash Mode Adjustment: Speed up animations if queue is massive (35+)
+        // Flash Mode: High speed for 35+ backlog
         val isFlashMode = notificationQueue.size >= 35
-        val exitDuration = if (isFlashMode) 100L else 200L
-        val entryDuration = if (isFlashMode) 150L else 300L
+        val exitDur = if (isFlashMode) 120L else 200L
+        val entryDur = if (isFlashMode) 150L else 300L
 
         val exitAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = exitDuration
+            duration = exitDur
             interpolator = AccelerateInterpolator()
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
                 contentContainer?.translationY = t * 80f
-                val scale = 1f - (t * 0.15f)
-                contentContainer?.scaleX = scale; contentContainer?.scaleY = scale
                 contentContainer?.alpha = 1f - t
             }
         }
 
         val entryAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = entryDuration
+            duration = entryDur
             interpolator = DecelerateInterpolator()
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
                 contentContainer?.translationY = -80f * (1f - t)
-                val scale = 0.85f + (t * 0.15f)
-                contentContainer?.scaleX = scale; contentContainer?.scaleY = scale
                 contentContainer?.alpha = t
             }
         }
@@ -395,6 +395,7 @@ class HyperAccessibilityService : AccessibilityService() {
         expandReason = ExpandReason.AUTO_NOTIFICATION
         updateOutsideWatcherForState()
         
+        // FIX: Visual Window MUST BE MATCH_PARENT for clipping
         updateVisualRootStatic(visualRoot!!)
         updateTouchWindow(targetWidthValue, targetHeightValue)
 
@@ -485,7 +486,6 @@ class HyperAccessibilityService : AccessibilityService() {
                         contentContainer?.alpha = 0f
                         contentContainer?.visibility = View.GONE
                         notificationMode = false
-                        updateVisualRootStatic(visualRoot!!)
                         updateTouchWindow(targetWidthValue, targetHeightValue)
                     }
                     visualRoot?.invalidateOutline()
@@ -527,9 +527,8 @@ class HyperAccessibilityService : AccessibilityService() {
         val queueSize = notificationQueue.size
         
         if (queueSize > 0) {
-            // FLASH MODE THRESHOLD (Option C)
             val burstDelay = when {
-                queueSize >= 35 -> 250L // Flash mode!
+                queueSize >= 35 -> 250L
                 queueSize in 20..34 -> 800L
                 queueSize in 6..19 -> 1200L
                 else -> 1800L
@@ -600,7 +599,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateAllToCurrentState() {
         val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = getTargetRadius(currentStage).toFloat()
-        updateIslandInternalView(w, h, r); visualRoot?.let { updateVisualRootStatic(it) }; updateTouchWindow(w, h)
+        updateIslandInternalView(w, h, r); updateVisualRootStatic(visualRoot!!); updateTouchWindow(w, h)
     }
 
     private fun updateOutsideWatcherForState() { if (currentStage == IslandStage.STAGE3_FULL && expandReason == ExpandReason.MANUAL_USER) ensureOutsideWatcher() else removeOutsideWatcher() }
@@ -609,9 +608,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun updateOutlineForIsland(widthPx: Int, heightPx: Int, radiusPx: Float) { val rootW = resources.displayMetrics.widthPixels; val left = ((rootW - widthPx) / 2) + dp(AppSettings.getIslandXDp(this)); outlineRect.set(left, 0, left + widthPx, heightPx); outlineRadius = radiusPx }
     
     private fun updateVisualRootStatic(root: FrameLayout) { 
-        val winW = if (currentStage == IslandStage.STAGE1_IDLE) dp(getTargetWidth(currentStage)) else -1
-        val winH = dp(getTargetHeight(currentStage) + 40)
-        visualParams?.apply { width = winW; height = winH; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) }
+        // ALWAYS MATCH_PARENT WIDTH
+        visualParams?.apply { 
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = dp(AppSettings.getIslandExpandedHeightDp(this@HyperAccessibilityService) + 40)
+            y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) 
+        }
         try { windowManager?.updateViewLayout(root, visualParams) } catch (_: Exception) {} 
     }
     
@@ -628,8 +630,8 @@ class HyperAccessibilityService : AccessibilityService() {
         visualRoot = null; touchView = null; currentStage = IslandStage.STAGE1_IDLE 
     }
     
-    private fun createVisualParams() = WindowManager.LayoutParams(dp(AppSettings.getIslandWidthDp(this)), dp(AppSettings.getIslandHeightDp(this) + 40), WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 512 or 256 or 65536 or 131072, -3).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProVisual" }
-    private fun createTouchParams(w: Int, h: Int) = WindowManager.LayoutParams(w, dp(25), WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 512 or 256 or 65536 or 131072, -3).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)) ; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProTouch" }
+    private fun createVisualParams() = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, dp(AppSettings.getIslandExpandedHeightDp(this) + 40), WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProVisual" }
+    private fun createTouchParams(w: Int, h: Int) = WindowManager.LayoutParams(w, dp(25), WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)) ; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProTouch" }
     private fun createIslandBackground(r: Float) = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
