@@ -20,6 +20,8 @@ class SettingsActivity : Activity() {
     private lateinit var txtExpandedWidth: TextView
     private lateinit var txtExpandedHeight: TextView
     private lateinit var txtHeight: TextView
+    private lateinit var txtCornerRadius: TextView
+    private lateinit var txtExpandedCornerRadius: TextView
     private lateinit var txtY: TextView
     private lateinit var txtX: TextView
 
@@ -28,6 +30,8 @@ class SettingsActivity : Activity() {
     private lateinit var seekExpandedWidth: SeekBar
     private lateinit var seekExpandedHeight: SeekBar
     private lateinit var seekHeight: SeekBar
+    private lateinit var seekCornerRadius: SeekBar
+    private lateinit var seekExpandedCornerRadius: SeekBar
     private lateinit var seekY: SeekBar
     private lateinit var seekX: SeekBar
 
@@ -47,6 +51,8 @@ class SettingsActivity : Activity() {
         txtExpandedWidth = findViewById(R.id.txtExpandedWidthValue)
         txtExpandedHeight = findViewById(R.id.txtExpandedHeightValue)
         txtHeight = findViewById(R.id.txtHeightValue)
+        txtCornerRadius = findViewById(R.id.txtCornerRadiusValue)
+        txtExpandedCornerRadius = findViewById(R.id.txtExpandedCornerRadiusValue)
         txtY = findViewById(R.id.txtYValue)
         txtX = findViewById(R.id.txtXValue)
 
@@ -55,6 +61,8 @@ class SettingsActivity : Activity() {
         seekExpandedWidth = findViewById(R.id.seekExpandedWidth)
         seekExpandedHeight = findViewById(R.id.seekExpandedHeight)
         seekHeight = findViewById(R.id.seekHeight)
+        seekCornerRadius = findViewById(R.id.seekCornerRadius)
+        seekExpandedCornerRadius = findViewById(R.id.seekExpandedCornerRadius)
         seekY = findViewById(R.id.seekY)
         seekX = findViewById(R.id.seekX)
 
@@ -68,50 +76,27 @@ class SettingsActivity : Activity() {
     }
 
     private fun setupSeekBars() {
-        seekWidth.max = 190      // 70..260
-        seekStage2Width.max = 200 // 100..300
-        seekExpandedWidth.max = 240 // 180..420
-        seekExpandedHeight.max = 150 // 70..220
-        seekHeight.max = 36      // 24..60
-        seekY.max = 120          // 0..120
-        seekX.max = 360          // -180..180
+        seekWidth.max = 190             // 70..260
+        seekStage2Width.max = 200        // 100..300
+        seekExpandedWidth.max = 240      // 180..420
+        seekExpandedHeight.max = 150     // 70..220
+        seekHeight.max = 36             // 24..60
+        seekCornerRadius.max = 30       // 0..30
+        seekExpandedCornerRadius.max = 60 // 0..60
+        seekY.max = 120                 // 0..120
+        seekX.max = 360                 // -180..180
 
         loadSeekValues()
 
-        seekWidth.setOnSeekBarChangeListener(simpleListener {
-            AppSettings.setIslandWidthDp(this, 70 + seekWidth.progress)
-            updateLabels(); refreshOverlayIfRunning()
-        })
-
-        seekStage2Width.setOnSeekBarChangeListener(simpleListener {
-            AppSettings.setIslandStage2WidthDp(this, 100 + seekStage2Width.progress)
-            updateLabels(); refreshOverlayIfRunning()
-        })
-
-        seekExpandedWidth.setOnSeekBarChangeListener(simpleListener {
-            AppSettings.setIslandExpandedWidthDp(this, 180 + seekExpandedWidth.progress)
-            updateLabels(); refreshOverlayIfRunning()
-        })
-
-        seekExpandedHeight.setOnSeekBarChangeListener(simpleListener {
-            AppSettings.setIslandExpandedHeightDp(this, 70 + seekExpandedHeight.progress)
-            updateLabels(); refreshOverlayIfRunning()
-        })
-
-        seekHeight.setOnSeekBarChangeListener(simpleListener {
-            AppSettings.setIslandHeightDp(this, 24 + seekHeight.progress)
-            updateLabels(); refreshOverlayIfRunning()
-        })
-
-        seekY.setOnSeekBarChangeListener(simpleListener {
-            AppSettings.setIslandYDp(this, seekY.progress)
-            updateLabels(); refreshOverlayIfRunning()
-        })
-
-        seekX.setOnSeekBarChangeListener(simpleListener {
-            AppSettings.setIslandXDp(this, seekX.progress - 180)
-            updateLabels(); refreshOverlayIfRunning()
-        })
+        seekWidth.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandWidthDp(this, 70 + seekWidth.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekStage2Width.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandStage2WidthDp(this, 100 + seekStage2Width.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekExpandedWidth.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandExpandedWidthDp(this, 180 + seekExpandedWidth.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekExpandedHeight.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandExpandedHeightDp(this, 70 + seekExpandedHeight.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekHeight.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandHeightDp(this, 24 + seekHeight.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekCornerRadius.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandCornerRadiusDp(this, seekCornerRadius.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekExpandedCornerRadius.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandExpandedCornerRadiusDp(this, seekExpandedCornerRadius.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekY.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandYDp(this, seekY.progress); updateLabels(); refreshOverlayIfRunning() })
+        seekX.setOnSeekBarChangeListener(simpleListener { AppSettings.setIslandXDp(this, seekX.progress - 180); updateLabels(); refreshOverlayIfRunning() })
     }
 
     private fun loadSeekValues() {
@@ -120,6 +105,8 @@ class SettingsActivity : Activity() {
         seekExpandedWidth.progress = AppSettings.getIslandExpandedWidthDp(this) - 180
         seekExpandedHeight.progress = AppSettings.getIslandExpandedHeightDp(this) - 70
         seekHeight.progress = AppSettings.getIslandHeightDp(this) - 24
+        seekCornerRadius.progress = AppSettings.getIslandCornerRadiusDp(this)
+        seekExpandedCornerRadius.progress = AppSettings.getIslandExpandedCornerRadiusDp(this)
         seekY.progress = AppSettings.getIslandYDp(this)
         seekX.progress = AppSettings.getIslandXDp(this) + 180
         updateLabels()
@@ -131,6 +118,8 @@ class SettingsActivity : Activity() {
         txtExpandedWidth.text = "${AppSettings.getIslandExpandedWidthDp(this)} dp"
         txtExpandedHeight.text = "${AppSettings.getIslandExpandedHeightDp(this)} dp"
         txtHeight.text = "${AppSettings.getIslandHeightDp(this)} dp"
+        txtCornerRadius.text = "${AppSettings.getIslandCornerRadiusDp(this)} dp"
+        txtExpandedCornerRadius.text = "${AppSettings.getIslandExpandedCornerRadiusDp(this)} dp"
         txtY.text = "${AppSettings.getIslandYDp(this)} dp"
         txtX.text = "${AppSettings.getIslandXDp(this)} dp"
     }
