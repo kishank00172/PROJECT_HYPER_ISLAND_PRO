@@ -137,7 +137,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var islandLayoutParams: FrameLayout.LayoutParams? = null
     private var islandBackground: GradientDrawable? = null
 
-    // Modular views based on your Sketch
+    // Modular views based on Sketch
     private var contentContainer: LinearLayout? = null
     private var appIconView: ImageView? = null
     private var appNameText: TextView? = null
@@ -413,12 +413,7 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = fluidInterpolator
             addUpdateListener { anim ->
                 val t = anim.animatedValue as Float
-                val w = lerp(pingW, targetWidthValue, t)
-                val h = lerp(initialHeightValue, targetHeightValue, t)
-                val r = lerp(startR, targetR, t)
-                
-                updateIslandInternalView(w, h, r)
-                
+                updateIslandInternalView(lerp(pingW, targetWidthValue, t), lerp(initialHeightValue, targetHeightValue, t), lerp(startR, targetR, t))
                 contentContainer?.visibility = View.VISIBLE
                 contentContainer?.alpha = t
             }
@@ -527,20 +522,6 @@ class HyperAccessibilityService : AccessibilityService() {
         animator.start()
     }
 
-    private fun updateAllToCurrentState() {
-        val root = visualRoot ?: return
-        val w = dp(getTargetWidth(currentStage))
-        val h = dp(getTargetHeight(currentStage))
-        val r = getTargetRadius(currentStage).toFloat()
-        islandLayoutParams?.apply { width = w; height = h }
-        islandBackground?.cornerRadius = r
-        updateOutlineForIsland(w, h, r)
-        updateVisualRootStatic(root)
-        updateTouchWindow(w, h)
-        islandView?.layoutParams = islandLayoutParams
-        root.invalidateOutline()
-    }
-
     private fun getTargetWidth(stage: IslandStage) = when(stage) {
         IslandStage.STAGE1_IDLE -> AppSettings.getIslandWidthDp(this)
         IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this)
@@ -632,24 +613,86 @@ class HyperAccessibilityService : AccessibilityService() {
         islandView?.addView(contentContainer, FrameLayout.LayoutParams(-1, -1))
         islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
         visualRoot?.addView(islandView, islandLayoutParams)
+        
         touchView = FrameLayout(this).apply { isClickable = true
             setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) { touchStartY = e.rawY; touchStartX = e.rawX } else if (e.action == MotionEvent.ACTION_UP) { if (e.rawY - touchStartY < -dp(24)) postCollapseIsland() else postToggleExpanded() }; true }
         }
-        visualParams = createVisualParams(); touchParams = createTouchParams(w, h)
+        
+        visualParams = createVisualParams()
+        touchParams = createTouchParams(w, h)
         updateOutlineForIsland(w, h, r)
-        try { windowManager?.addView(visualRoot, visualParams); windowManager?.addView(touchView, touchParams) } catch (e: Exception) { hideIslandInternal() }
+        
+        try {
+            windowManager?.addView(visualRoot, visualParams)
+            windowManager?.addView(touchView, touchParams)
+        } catch (e: Exception) {
+            hideIslandInternal()
+        }
     }
 
     private fun createOvalPlaceholder() = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.DKGRAY); cornerRadius = dp(12).toFloat() }
     private fun updateOutsideWatcherForState() { if (currentStage == IslandStage.STAGE3_FULL && expandReason == ExpandReason.MANUAL_USER) ensureOutsideWatcher() else removeOutsideWatcher() }
-    private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) postCollapseIsland() ; false } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 4096 or 512 or 256, -3).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
+    private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) postCollapseIsland() ; false } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
     private fun removeOutsideWatcher() { try { windowManager?.removeViewImmediate(outsideWatcherView!!) } catch (_: Exception) {}; outsideWatcherView = null }
     private fun updateOutlineForIsland(widthPx: Int, heightPx: Int, radiusPx: Float) { val rootW = resources.displayMetrics.widthPixels; val left = ((rootW - widthPx) / 2) + dp(AppSettings.getIslandXDp(this)); outlineRect.set(left, 0, left + widthPx, heightPx); outlineRadius = radiusPx }
-    private fun updateVisualRootStatic(root: FrameLayout) { visualParams?.apply { width = WindowManager.LayoutParams.MATCH_PARENT; height = dp(AppSettings.getIslandExpandedHeightDp(this@HyperAccessibilityService) + 40); y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) }; try { windowManager?.updateViewLayout(root, visualParams) } catch (_: Exception) {} }
-    private fun updateTouchWindow(widthPx: Int, heightPx: Int) { val touchH = if (currentStage == IslandStage.STAGE1_IDLE) dp(25) else heightPx; try { windowManager?.updateViewLayout(touchView!!, touchParams!!.apply { width = widthPx; height = touchH; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)); y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) }) } catch (_: Exception) {} }
-    private fun hideIslandInternal() { morphAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); notificationQueue.clear(); isProcessingQueue = false; try { windowManager?.removeViewImmediate(touchView!!); windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; touchView = null; currentStage = IslandStage.STAGE1_IDLE }
-    private fun createVisualParams() = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, dp(AppSettings.getIslandExpandedHeightDp(this) + 40), WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 512 or 256 or 65536 or 131072, -3).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProVisual" }
-    private fun createTouchParams(w: Int, h: Int) = WindowManager.LayoutParams(w, dp(25), WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 512 or 256 or 65536 or 131072, -3).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)) ; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProTouch" }
+    
+    private fun updateVisualRootStatic(root: FrameLayout) { 
+        // VISUAL FIX: ALWAYS KEEP MATCH_PARENT WIDTH + ADD FLAG_NOT_TOUCHABLE
+        visualParams?.apply { 
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = dp(AppSettings.getIslandExpandedHeightDp(this@HyperAccessibilityService) + 40)
+            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or 
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or // THIS IS THE KEY FIX
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or 
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or 
+                    WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or 
+                    WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
+            y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) 
+        }
+        try { windowManager?.updateViewLayout(root, visualParams) } catch (_: Exception) {} 
+    }
+    
+    private fun updateTouchWindow(widthPx: Int, heightPx: Int) { 
+        val touchH = if (currentStage == IslandStage.STAGE1_IDLE) dp(25) else heightPx
+        try { windowManager?.updateViewLayout(touchView!!, touchParams!!.apply { width = widthPx; height = touchH; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)); y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) }) } catch (_: Exception) {} 
+    }
+    
+    private fun hideIslandInternal() { 
+        morphAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher()
+        notificationQueue.clear()
+        isProcessingQueue = false
+        try { windowManager?.removeViewImmediate(touchView!!); windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}
+        visualRoot = null; touchView = null; currentStage = IslandStage.STAGE1_IDLE 
+    }
+    
+    private fun createVisualParams() = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.MATCH_PARENT, 
+        dp(AppSettings.getIslandExpandedHeightDp(this) + 40), 
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or 
+        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or // PREVENT TOUCH BLOCKING
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
+        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or 
+        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or 
+        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or 
+        WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, 
+        PixelFormat.TRANSLUCENT
+    ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES; title = "HyperIslandProVisual" }
+    
+    private fun createTouchParams(w: Int, h: Int) = WindowManager.LayoutParams(
+        w, 
+        dp(25), 
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or 
+        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or // ALLOW PASS-THROUGH OUTSIDE HITBOX
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
+        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or 
+        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or 
+        WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, 
+        PixelFormat.TRANSLUCENT
+    ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)) ; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES; title = "HyperIslandProTouch" }
+    
     private fun createIslandBackground(r: Float) = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
