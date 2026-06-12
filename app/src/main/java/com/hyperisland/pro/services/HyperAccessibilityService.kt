@@ -174,6 +174,8 @@ class HyperAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
+        lastAccessibilityDebugMessage = "Accessibility service connected"
+
         if (AppSettings.isIslandEnabled(this)) {
             postShowIsland()
         }
@@ -216,6 +218,8 @@ class HyperAccessibilityService : AccessibilityService() {
             finalTitle = appName
             finalMessage = textItems[0]
         }
+
+        lastAccessibilityDebugMessage = "Fallback captured: $appName"
 
         postNotificationEvent(
             source = "AccessibilityFallback",
@@ -413,7 +417,12 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = fluidInterpolator
             addUpdateListener { anim ->
                 val t = anim.animatedValue as Float
-                updateIslandInternalView(lerp(pingW, targetWidthValue, t), lerp(initialHeightValue, targetHeightValue, t), lerp(startR, targetR, t))
+                val w = lerp(pingW, targetWidthValue, t)
+                val h = lerp(initialHeightValue, targetHeightValue, t)
+                val r = lerp(startR, targetR, t)
+                
+                updateIslandInternalView(w, h, r)
+                
                 contentContainer?.visibility = View.VISIBLE
                 contentContainer?.alpha = t
             }
@@ -520,6 +529,20 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         morphAnimator = animator
         animator.start()
+    }
+
+    private fun updateAllToCurrentState() {
+        val root = visualRoot ?: return
+        val w = dp(getTargetWidth(currentStage))
+        val h = dp(getTargetHeight(currentStage))
+        val r = getTargetRadius(currentStage).toFloat()
+        islandLayoutParams?.apply { width = w; height = h }
+        islandBackground?.cornerRadius = r
+        updateOutlineForIsland(w, h, r)
+        updateVisualRootStatic(root)
+        updateTouchWindow(w, h)
+        islandView?.layoutParams = islandLayoutParams
+        root.invalidateOutline()
     }
 
     private fun getTargetWidth(stage: IslandStage) = when(stage) {
@@ -637,17 +660,9 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun updateOutlineForIsland(widthPx: Int, heightPx: Int, radiusPx: Float) { val rootW = resources.displayMetrics.widthPixels; val left = ((rootW - widthPx) / 2) + dp(AppSettings.getIslandXDp(this)); outlineRect.set(left, 0, left + widthPx, heightPx); outlineRadius = radiusPx }
     
     private fun updateVisualRootStatic(root: FrameLayout) { 
-        // VISUAL FIX: ALWAYS KEEP MATCH_PARENT WIDTH + ADD FLAG_NOT_TOUCHABLE
         visualParams?.apply { 
             width = WindowManager.LayoutParams.MATCH_PARENT
             height = dp(AppSettings.getIslandExpandedHeightDp(this@HyperAccessibilityService) + 40)
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or 
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or // THIS IS THE KEY FIX
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or 
-                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or 
-                    WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or 
-                    WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
             y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) 
         }
         try { windowManager?.updateViewLayout(root, visualParams) } catch (_: Exception) {} 
@@ -670,13 +685,7 @@ class HyperAccessibilityService : AccessibilityService() {
         WindowManager.LayoutParams.MATCH_PARENT, 
         dp(AppSettings.getIslandExpandedHeightDp(this) + 40), 
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or 
-        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or // PREVENT TOUCH BLOCKING
-        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
-        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or 
-        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or 
-        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or 
-        WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, 
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, 
         PixelFormat.TRANSLUCENT
     ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES; title = "HyperIslandProVisual" }
     
@@ -684,12 +693,7 @@ class HyperAccessibilityService : AccessibilityService() {
         w, 
         dp(25), 
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or 
-        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or // ALLOW PASS-THROUGH OUTSIDE HITBOX
-        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
-        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or 
-        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or 
-        WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, 
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS, 
         PixelFormat.TRANSLUCENT
     ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; x = dp(AppSettings.getIslandXDp(this@HyperAccessibilityService)) ; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES; title = "HyperIslandProTouch" }
     
