@@ -17,23 +17,23 @@ class TestLabActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_test_lab)
 
+        // Using exact IDs from activity_test_lab.xml
         findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
-        txtStatus = findViewById(R.id.txtLabStatus)
+        txtStatus = findViewById(R.id.txtTests) // ID was txtTests, not txtLabStatus
 
-        findViewById<Button>(R.id.btnExpand).setOnClickListener {
+        findViewById<Button>(R.id.btnExpandIsland).setOnClickListener {
             HyperAccessibilityService.expandIslandFromApp(this)
         }
 
-        findViewById<Button>(R.id.btnCollapse).setOnClickListener {
+        findViewById<Button>(R.id.btnCollapseIsland).setOnClickListener {
             HyperAccessibilityService.collapseIslandFromApp(this)
         }
 
-        findViewById<Button>(R.id.btnToggle).setOnClickListener {
+        findViewById<Button>(R.id.btnToggleIsland).setOnClickListener {
             HyperAccessibilityService.toggleExpandFromApp(this)
         }
 
         findViewById<Button>(R.id.btnTestNotification).setOnClickListener {
-            // Updated to pass empty actions for simulation
             HyperAccessibilityService.showNotificationFromApp(
                 context = this,
                 packageName = packageName,
@@ -42,7 +42,7 @@ class TestLabActivity : Activity() {
                 message = "This is a real Phase 3 island notification simulation.",
                 postTime = System.currentTimeMillis(),
                 contentIntent = null,
-                actions = emptyList() // Added missing parameter
+                actions = emptyList() 
             )
         }
     }
