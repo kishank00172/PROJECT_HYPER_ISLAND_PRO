@@ -1,4 +1,4 @@
-name: Android Debug APK
+Name: Android Debug APK
 
 on:
   push:
@@ -21,9 +21,30 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      # --- NAYA STEP 1: Android SDK Caching (Bar-bar download se bachne ke liye) ---
+      - name: Cache Android SDK Components
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/platforms/android-35
+            /usr/local/lib/android/sdk/build-tools/35.0.0
+            /usr/local/lib/android/sdk/platform-tools
+          key: ${{ runner.os }}-android-sdk-35
+
       - name: Install Android platform
         run: |
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      # --- NAYA STEP 2: Gradle & Dependencies Caching ---
+      - name: Cache Gradle Packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
