@@ -1,3 +1,4 @@
+
 package com.hyperisland.pro.services
 
 import android.accessibilityservice.AccessibilityService
@@ -59,10 +60,11 @@ class HyperAccessibilityService : AccessibilityService() {
     )
 
     companion object {
+        // STABLE ARCHITECTURE FLAGS: Allow touch pass-through and keep layout stable
         private const val WINDOW_FLAGS_BASE =
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or // KEY: Allow background touches
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
@@ -71,7 +73,7 @@ class HyperAccessibilityService : AccessibilityService() {
         private const val WINDOW_FLAGS_OUTSIDE_WATCHER =
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                WindowManager.LayoutParams.WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
@@ -130,7 +132,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
     private var lastPrimaryEventTime = 0L
-
     private var touchStartY = 0f
     private val outlineRect = Rect()
     private var outlineRadius = 0f
@@ -160,34 +161,12 @@ class HyperAccessibilityService : AccessibilityService() {
         postNotificationEvent("AccessibilityFallback", pkg, appName, t, m, System.currentTimeMillis(), null, emptyList())
     }
 
-    private fun postShowIsland() = mainHandler.post { 
-        if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() 
-    }
-
-    private fun postHideIsland() = mainHandler.post { 
-        hideIslandInternal() 
-    }
-
-    private fun postUpdateIsland() = mainHandler.post { 
-        if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() 
-    }
-
-    private fun postExpandIsland() = mainHandler.post { 
-        setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) 
-    }
-
-    private fun postCollapseIsland() = mainHandler.post { 
-        setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) 
-    }
-
-    private fun postToggleExpanded() = mainHandler.post { 
-        if (notificationMode && currentStage == IslandStage.STAGE3_FULL) {
-            openCurrentNotification()
-        } else {
-            val target = if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL
-            setStageAnimated(target, ExpandReason.MANUAL_USER)
-        }
-    }
+    private fun postShowIsland() = mainHandler.post { if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
+    private fun postHideIsland() = mainHandler.post { hideIslandInternal() }
+    private fun postUpdateIsland() = mainHandler.post { if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
+    private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
+    private fun postCollapseIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) }
+    private fun postToggleExpanded() = mainHandler.post { if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else setStageAnimated(if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
 
     private fun postNotificationEvent(source: String, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) {
         mainHandler.post {
@@ -220,11 +199,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val entryDur = if (isFlash) 150L else 300L
         val exitAnimator = ValueAnimator.ofFloat(0f, 1f).apply { duration = exitDur; interpolator = AccelerateInterpolator(); addUpdateListener { contentContainer?.translationY = it.animatedValue as Float * 80f; contentContainer?.alpha = 1f - it.animatedValue as Float } }
         val entryAnimator = ValueAnimator.ofFloat(0f, 1f).apply { duration = entryDur; interpolator = DecelerateInterpolator(); addUpdateListener { contentContainer?.translationY = -80f * (1f - it.animatedValue as Float); contentContainer?.alpha = it.animatedValue as Float } }
-        exitAnimator.addListener(onEnd = {
-            updateNotificationContent(next)
-            contentContainer?.translationY = -80f; contentContainer?.alpha = 0f
-            entryAnimator.start()
-        })
+        exitAnimator.addListener(onEnd = { updateNotificationContent(next); contentContainer?.translationY = -80f; contentContainer?.alpha = 0f; entryAnimator.start() })
         entryAnimator.addListener(onEnd = { scheduleAutoCollapse() })
         morphAnimator = exitAnimator; exitAnimator.start()
     }
@@ -263,8 +238,13 @@ class HyperAccessibilityService : AccessibilityService() {
         val startW = dp(AppSettings.getIslandWidthDp(this)); val pingW = dp(AppSettings.getIslandStage2WidthDp(this))
         val targetW = dp(AppSettings.getIslandExpandedWidthDp(this)); val initialH = dp(AppSettings.getIslandHeightDp(this)); val targetH = dp(AppSettings.getIslandExpandedHeightDp(this))
         val startR = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat(); val targetR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
+        
         currentStage = IslandStage.STAGE3_FULL; expandReason = ExpandReason.AUTO_NOTIFICATION
+        updateOutsideWatcherForState()
+        
+        // GEMINI 3.1 PRO FIX: Keep window width fixed at maximum to stop jitter
         updateVisualRootStatic(visualRoot!!, targetW, targetH)
+
         val pingAnimator = ValueAnimator.ofFloat(0f, 1f).apply { duration = 120L; addUpdateListener { updateIslandInternalView(lerpEven(startW, pingW, it.animatedValue as Float), initialH, startR) } }
         val expandAnimator = ValueAnimator.ofFloat(0f, 1f).apply { duration = 360L; interpolator = fluidInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandInternalView(lerpEven(pingW, targetW, t), lerpEven(initialH, targetH, t), lerp(startR, targetR, t)); contentContainer?.visibility = View.VISIBLE; contentContainer?.alpha = t } }
         morphAnimator = AnimatorSet().apply { playSequentially(pingAnimator, expandAnimator); addListener(onEnd = { scheduleAutoCollapse() }); start() }
@@ -272,11 +252,14 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateIslandInternalView(w: Int, h: Int, r: Float) {
         val child = islandLayoutParams ?: return
+        // Force Even width for rounding stability
         val smoothW = if (w % 2 != 0) w + 1 else w
         child.width = smoothW; child.height = h; islandBackground?.cornerRadius = r
         outlineRadius = r
-        updateOutlineForIsland(smoothW, h, r); islandView?.layoutParams = child
-        applyDynamicScaling(h); islandView?.invalidateOutline(); visualRoot?.invalidateOutline()
+        islandView?.layoutParams = child
+        applyDynamicScaling(h)
+        islandView?.invalidateOutline() // Ensure ViewOutlineProvider refreshes
+        visualRoot?.invalidateOutline()
     }
 
     private fun applyDynamicScaling(heightPx: Int) {
@@ -298,7 +281,10 @@ class HyperAccessibilityService : AccessibilityService() {
         val curR = islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
         currentStage = targetStage; expandReason = reason
         val targetW = dp(getTargetWidth(targetStage)); val targetH = dp(getTargetHeight(targetStage)); val targetR = getTargetRadius(targetStage).toFloat()
+        
+        // Sync window stability
         updateVisualRootStatic(visualRoot!!, targetW, targetH)
+
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = if (targetStage == IslandStage.STAGE1_IDLE) 280L else 360L; interpolator = fluidInterpolator
             addUpdateListener { val t = it.animatedValue as Float; val w = lerpEven(curW, targetW, t); val h = lerpEven(curH, targetH, t); val r = lerp(curR, targetR, t); updateIslandInternalView(w, h, r); if (notificationMode && targetStage == IslandStage.STAGE1_IDLE) contentContainer?.alpha = (1f - (t / 0.3f)).coerceIn(0f, 1f) }
@@ -331,11 +317,18 @@ class HyperAccessibilityService : AccessibilityService() {
         val h = dp(AppSettings.getIslandHeightDp(this)); val w = dp(AppSettings.getIslandWidthDp(this)); val r = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
         islandBackground = createIslandBackground(r)
         visualRoot = FrameLayout(this).apply { setBackgroundColor(0) }
+        
+        // ViewOutlineProvider for hardware clipping fix
         islandView = FrameLayout(this).apply { 
             background = islandBackground; elevation = 0f; clipToOutline = true; setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            outlineProvider = object : ViewOutlineProvider() { override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, outlineRadius) } }
-            setOnClickListener { if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else toggleExpandFromApp(context) }
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, outlineRadius)
+                }
+            }
+            setOnClickListener { if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else postToggleExpanded() }
         }
+        
         contentContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP; visibility = View.GONE; alpha = 0f; setPadding(dp(14), dp(14), dp(14), dp(14))
             appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
@@ -360,10 +353,11 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateOutlineForIsland(w: Int, h: Int, r: Float) { outlineRect.set(0, 0, w, h); outlineRadius = r }
+    
     private fun updateVisualRootStatic(root: FrameLayout, w: Int, h: Int) { 
         visualParams?.apply { 
-            val targetRawW = if (currentStage == IslandStage.STAGE1_IDLE) w else dp(AppSettings.getIslandExpandedWidthDp(this@HyperAccessibilityService))
-            width = if (targetRawW % 2 != 0) targetRawW + 1 else targetRawW
+            // LOCK WIDTH TO MAX EXPANDED TO PREVENT JITTER
+            width = dp(AppSettings.getIslandExpandedWidthDp(this@HyperAccessibilityService))
             height = h + dp(40); y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)) 
         }
         try { windowManager?.updateViewLayout(root, visualParams) } catch (_: Exception) {} 
@@ -373,14 +367,17 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun createVisualParams() = WindowManager.LayoutParams(dp(AppSettings.getIslandWidthDp(this)), dp(AppSettings.getIslandHeightDp(this) + 40), WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_BASE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(AppSettings.getIslandYDp(this@HyperAccessibilityService)); if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProVisual" }
 
     private fun updateOutsideWatcherForState() { if (currentStage == IslandStage.STAGE3_FULL && expandReason == ExpandReason.MANUAL_USER) ensureOutsideWatcher() else removeOutsideWatcher() }
-    private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) postCollapseIsland() ; false } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_OUTSIDE_WATCHER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
+    private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) postCollapseIsland() ; false } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 4096 or 512 or 256, -3).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
     private fun removeOutsideWatcher() { try { windowManager?.removeViewImmediate(outsideWatcherView!!) } catch (_: Exception) {}; outsideWatcherView = null }
     private fun createIslandBackground(r: Float) = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
     private fun formatNotificationTime(t: Long) = if (t <= 0L || System.currentTimeMillis() - t < 60000L) " • now" else " • " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(t))
     
-    private fun lerpEven(s: Int, e: Int, p: Float): Int { val outVal = (s + ((e - s) * p)).roundToInt(); return if (outVal % 2 != 0) outVal + 1 else outVal }
+    private fun lerpEven(s: Int, e: Int, p: Float): Int {
+        val outVal = (s + ((e - s) * p)).roundToInt()
+        return if (outVal % 2 != 0) outVal + 1 else outVal
+    }
     private fun lerp(s: Int, e: Int, p: Float) = (s + ((e - s) * p)).roundToInt()
     private fun lerp(s: Float, e: Float, p: Float) = s + ((e - s) * p)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
