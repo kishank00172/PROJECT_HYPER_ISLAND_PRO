@@ -1,5 +1,5 @@
 package com.hyperisland.pro.services
-p
+
 import android.accessibilityservice.AccessibilityService
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
