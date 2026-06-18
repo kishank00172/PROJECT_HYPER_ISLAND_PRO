@@ -21,15 +21,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # cache-disabled: true se saara faltu time bach jayega
+      # Smart Gradle cache ko wapas zinda kar rahe hain
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
-          cache-disabled: true
 
+      # Parallel aur build-cache flags se compilation fast hoga
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace --parallel
+        run: gradle :app:assembleDebug --stacktrace --parallel --build-cache
         
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
