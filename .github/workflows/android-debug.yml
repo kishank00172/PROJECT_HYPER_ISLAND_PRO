@@ -9,8 +9,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Tweak 1: Sirf latest code download karega
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -21,15 +24,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # Smart Gradle cache ko wapas zinda kar rahe hain
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
 
-      # Parallel aur build-cache flags se compilation fast hoga
+      # Tweak 2 & 3: Configuration cache aur No-daemon ka combo
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace --parallel --build-cache
+        run: gradle :app:assembleDebug --stacktrace --parallel --build-cache --configuration-cache --no-daemon
         
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
