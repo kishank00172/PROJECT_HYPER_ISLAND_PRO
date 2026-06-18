@@ -21,18 +21,16 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android platform
-        run: |
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      # NOTE: Sdkmanager wala step hata diya hai kyunki Android 35 pre-installed aata hai.
 
-      # Sirf setup-gradle ka smart cache use karenge (Double caching hata di)
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
 
+      # Parallel aur build-cache flags ke sath fast compilation
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:assembleDebug --stacktrace --parallel --build-cache
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
