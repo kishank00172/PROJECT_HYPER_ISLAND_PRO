@@ -9,7 +9,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # Tweak 1: Sirf latest code download karega
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -21,17 +20,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # Setup-android action ko uda diya. Sirf ek chhota sa sanity check.
+      - name: Check Android SDK
+        run: echo "Android Home is running from $ANDROID_HOME"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
 
-      # Tweak 2 & 3: Configuration cache aur No-daemon ka combo
+      # --no-watch-fs add kar diya
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace --parallel --build-cache --configuration-cache --no-daemon
+        run: gradle :app:assembleDebug --stacktrace --parallel --build-cache --configuration-cache --no-daemon --no-watch-fs
         
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
