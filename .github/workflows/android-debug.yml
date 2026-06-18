@@ -20,19 +20,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Setup-android action ko uda diya. Sirf ek chhota sa sanity check.
       - name: Check Android SDK
         run: echo "Android Home is running from $ANDROID_HOME"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.10.2
+          cache-cleanup: on-success
 
-      # --no-watch-fs add kar diya
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace --parallel --build-cache --configuration-cache --no-daemon --no-watch-fs
-        
+        run: ./gradlew :app:assembleDebug --parallel --build-cache --configuration-cache --no-daemon --no-watch-fs --offline
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
