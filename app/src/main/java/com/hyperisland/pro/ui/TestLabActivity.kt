@@ -16,11 +16,11 @@ class TestLabActivity : Activity() {
                 context = this,
                 packageName = packageName,
                 appName = "Test Lab",
-                title = "Phase 3 Check",
-                message = "Fluid Expansion & FIFO Queue Test",
+                title = "Phase 3 Test",
+                message = "Testing real Grid Layout & FIFO Queue",
                 postTime = System.currentTimeMillis(),
                 contentIntent = null,
-                actions = listOf("Reply", "Dismiss")
+                actions = emptyList() // Fixed parameter mismatch
             )
         }
     }
