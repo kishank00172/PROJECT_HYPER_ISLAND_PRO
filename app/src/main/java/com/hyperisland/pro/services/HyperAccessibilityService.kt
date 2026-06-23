@@ -188,8 +188,13 @@ class HyperAccessibilityService : AccessibilityService() {
         footerActions?.removeAllViews()
         if (actions.isEmpty()) { actionScroll?.visibility = View.GONE; return }
         actionScroll?.visibility = View.VISIBLE
-        val availableWidthDp = ((AppSettings.getIslandExpandedWidthDp(this) - 36) * 0.8).toInt()
-        val btnWidth = when (actions.size) { 1 -> (availableWidthDp * 0.7).toInt(); 2 -> (availableWidthDp * 0.46).toInt(); 3 -> (availableWidthDp * 0.31).toInt(); else -> 90 }
+        val totalWidthDp = AppSettings.getIslandExpandedWidthDp(this) - 36
+        val availableWidthDp = (totalWidthDp * 0.8).toInt()
+        val btnWidth = when (actions.size) { 
+            1 -> (availableWidthDp * 0.7).toInt()
+            2 -> (availableWidthDp * 0.46).toInt()
+            else -> (availableWidthDp * 0.31).toInt() 
+        }
         actions.forEach { action ->
             val btn = TextView(this).apply {
                 text = action.title; setTextColor(Color.WHITE); textSize = 11f; gravity = Gravity.CENTER; setPadding(dp(10), 0, dp(10), 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
@@ -280,15 +285,14 @@ class HyperAccessibilityService : AccessibilityService() {
         islandView = FrameLayout(this).apply {
             background = islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, outlineRadius) } }
             gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
-                val ctx = this@HyperAccessibilityService
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); visibility = View.GONE; alpha = 0f
-                val iconSec = FrameLayout(ctx).apply { appIconView = ImageView(ctx).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(appIconView, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER)) }
-                val contentSec = LinearLayout(ctx).apply {
+                val iconSec = FrameLayout(this@HyperAccessibilityService).apply { appIconView = ImageView(this@HyperAccessibilityService).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(appIconView, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER)) }
+                val contentSec = LinearLayout(this@HyperAccessibilityService).apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0)
-                    headerLine = TextView(ctx).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-                    titleText = TextView(ctx).apply { setTextColor(Color.WHITE); textSize = 15f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-                    messageText = TextView(ctx).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-                    actionScroll = HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false; footerActions = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
+                    headerLine = TextView(this@HyperAccessibilityService).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+                    titleText = TextView(this@HyperAccessibilityService).apply { setTextColor(Color.WHITE); textSize = 15f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+                    messageText = TextView(this@HyperAccessibilityService).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+                    actionScroll = HorizontalScrollView(this@HyperAccessibilityService).apply { isHorizontalScrollBarEnabled = false; footerActions = LinearLayout(this@HyperAccessibilityService).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
                     addView(headerLine); addView(titleText); addView(messageText); addView(actionScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
                 }
                 addView(iconSec, LinearLayout.LayoutParams(0, -2, 0.2f)); addView(contentSec, LinearLayout.LayoutParams(0, -2, 0.8f))
@@ -311,5 +315,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun lerpEven(s: Int, e: Int, p: Float): Int { val v = (s + ((e - s) * p)).roundToInt(); return if (v % 2 != 0) v + 1 else v }
     private fun lerp(s: Float, e: Float, p: Float) = s + ((e - s) * p)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
     override fun onDestroy() { hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }
