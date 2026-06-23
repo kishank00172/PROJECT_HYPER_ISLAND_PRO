@@ -6,6 +6,7 @@ import android.animation.AnimatorSet
 import android.animation.ValueAnimator
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.PixelFormat
@@ -37,6 +38,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import java.lang.reflect.Method
 
 class HyperAccessibilityService : AccessibilityService() {
 
@@ -44,10 +46,21 @@ class HyperAccessibilityService : AccessibilityService() {
     private enum class ExpandReason { MANUAL_USER, AUTO_NOTIFICATION }
     
     private data class DisplayText(val appName: String, val title: String, val message: String)
-    private data class NotificationModel(val packageName: String, val appName: String, val title: String, val message: String, val postTime: Long, val contentIntent: PendingIntent?)
+    private data class NotificationModel(
+        val packageName: String, 
+        val appName: String, 
+        val title: String, 
+        val message: String, 
+        val postTime: Long, 
+        val contentIntent: PendingIntent?,
+        val actions: List<String>? = null
+    )
 
     companion object {
         @Volatile private var instance: HyperAccessibilityService? = null
+        @Volatile var lastAccessibilityDebugMessage: String = "Accessibility active"
+            private set
+
         fun isConnected(): Boolean = instance != null
         fun showIslandFromApp(context: Context) = instance?.run { postShowIsland(); true } ?: false
         fun hideIslandFromApp(context: Context? = null) = instance?.run { postHideIsland(); true } ?: false
@@ -55,8 +68,20 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?) =
-            instance?.run { postNotificationEvent("NotificationListener", packageName, appName, title, message, postTime, contentIntent); true } ?: false
+        
+        fun showNotificationFromApp(
+            context: Context, 
+            packageName: String, 
+            appName: String, 
+            title: String, 
+            message: String, 
+            postTime: Long, 
+            contentIntent: PendingIntent?,
+            actions: List<String>? = null
+        ) = instance?.run { 
+            postNotificationEvent("NotificationListener", packageName, appName, title, message, postTime, contentIntent, actions)
+            true 
+        } ?: false
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -105,7 +130,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (textItems.isEmpty()) return
             val appName = getAppName(pkg)
             val (title, message) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
-            postNotificationEvent("AccessibilityFallback", pkg, appName, title, message, System.currentTimeMillis(), null)
+            postNotificationEvent("AccessibilityFallback", pkg, appName, title, message, System.currentTimeMillis(), null, null)
         }
     }
 
@@ -121,7 +146,7 @@ class HyperAccessibilityService : AccessibilityService() {
         else setStageAnimated(if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER)
     }
 
-    private fun postNotificationEvent(source: String, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?) {
+    private fun postNotificationEvent(source: String, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<String>?) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             val now = System.currentTimeMillis()
@@ -132,7 +157,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) { scheduleAutoCollapse(); return@post }
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
             if (visualRoot == null) showIslandInternal()
-            notificationQueue.add(NotificationModel(packageName, appName, title, message, postTime, contentIntent))
+            notificationQueue.add(NotificationModel(packageName, appName, title, message, postTime, contentIntent, actions))
             if (!isProcessingQueue) processNextInQueue() else scheduleAutoCollapse()
         }
     }
@@ -163,19 +188,20 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateNotificationContent(model: NotificationModel) {
-        currentPendingIntent = model.contentIntent; currentPackageName = model.packageName
+        currentPendingIntent = model.contentIntent
+        currentPackageName = model.packageName
         val display = buildDisplayText(model.appName, model.title, model.message)
         appIconView?.setImageDrawable(loadAppIcon(model.packageName))
         headerLine?.text = "${display.appName} • ${formatNotificationTime(model.postTime)}"
         titleText?.text = display.title; messageText?.text = display.message
         titleText?.visibility = if (display.title.isBlank()) View.GONE else View.VISIBLE
         messageText?.visibility = if (display.message.isBlank()) View.GONE else View.VISIBLE
-        setupActionTiles(model.packageName); forceRegionUpdate()
+        setupActionTiles(model.packageName, model.actions); forceRegionUpdate()
     }
 
-    private fun setupActionTiles(pkg: String) {
+    private fun setupActionTiles(pkg: String, customActions: List<String>?) {
         footerActions?.removeAllViews()
-        val actions = if (pkg.contains("whatsapp") || pkg.contains("messaging")) listOf("Reply", "Mark as Read") else if (pkg.contains("music") || pkg.contains("spotify")) listOf("Previous", "Pause", "Next") else listOf("Dismiss")
+        val actions = customActions ?: if (pkg.contains("whatsapp") || pkg.contains("messaging")) listOf("Reply", "Mark as Read") else if (pkg.contains("music") || pkg.contains("spotify")) listOf("Previous", "Pause", "Next") else listOf("Dismiss")
         val availableWidthDp = ((AppSettings.getIslandExpandedWidthDp(this) - 36) * 0.8).toInt()
         val btnWidth = when (actions.size) { 1 -> (availableWidthDp * 0.7).toInt(); 2 -> (availableWidthDp * 0.46).toInt(); 3 -> (availableWidthDp * 0.31).toInt(); else -> 90 }
         actions.forEach { action ->
@@ -251,7 +277,25 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun showIslandInternal() {
         hideIslandInternal()
         visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096, -3).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProVisual" }
-        visualRoot = FrameLayout(this).apply { setBackgroundColor(0); viewTreeObserver.addOnComputeInternalInsetsListener { insets -> insets.contentInsets.setEmpty(); insets.visibleInsets.setEmpty(); insets.touchableRegion.setEmpty(); try { insets.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType).invoke(insets, 3) } catch (_: Exception) {}; val rect = Rect(); islandView?.getGlobalVisibleRect(rect); if (!rect.isEmpty) insets.touchableRegion.set(rect) } }
+        visualRoot = FrameLayout(this).apply { 
+            setBackgroundColor(0)
+            try {
+                val observer = viewTreeObserver
+                val onComputeInternalInsetsListenerClass = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
+                val addListenerMethod = observer.javaClass.getMethod("addOnComputeInternalInsetsListener", onComputeInternalInsetsListenerClass)
+                val proxy = java.lang.reflect.Proxy.newProxyInstance(onComputeInternalInsetsListenerClass.classLoader, arrayOf(onComputeInternalInsetsListenerClass)) { _, method, args ->
+                    if (method.name == "onComputeInternalInsets") {
+                        val info = args[0]
+                        info.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType).invoke(info, 3)
+                        val region = info.javaClass.getField("touchableRegion").get(info) as android.graphics.Region
+                        val rect = Rect(); islandView?.getGlobalVisibleRect(rect)
+                        if (!rect.isEmpty) region.set(rect)
+                    }
+                    null
+                }
+                addListenerMethod.invoke(observer, proxy)
+            } catch (_: Exception) {}
+        }
         islandBackground = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat() }
         islandView = FrameLayout(this).apply {
             background = islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(outlineRect, outlineRadius) } }
