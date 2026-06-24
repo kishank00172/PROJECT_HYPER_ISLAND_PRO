@@ -89,7 +89,8 @@ class HyperAccessibilityService : AccessibilityService() {
     
     private var gridRoot: LinearLayout? = null
     private var appIconView: ImageView? = null
-    private var headerLine: TextView? = null
+    private var appNameText: TextView? = null
+    private var timeStampText: TextView? = null
     private var titleText: TextView? = null
     private var messageText: TextView? = null
     private var footerActions: LinearLayout? = null
@@ -178,7 +179,7 @@ class HyperAccessibilityService : AccessibilityService() {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName
         val display = buildDisplayText(model.appName, model.title, model.message)
         appIconView?.setImageDrawable(loadAppIcon(model.packageName))
-        headerLine?.text = "${display.appName} • ${formatNotificationTime(model.postTime)}"
+        appNameText?.text = display.appName; timeStampText?.text = formatNotificationTime(model.postTime)
         titleText?.text = display.title; messageText?.text = display.message
         titleText?.visibility = if (display.title.isBlank()) View.GONE else View.VISIBLE
         messageText?.visibility = if (display.message.isBlank()) View.GONE else View.VISIBLE
@@ -196,7 +197,8 @@ class HyperAccessibilityService : AccessibilityService() {
         val btnWidth = when (actions.size) { 
             1 -> (availableWidthDp * 0.70).toInt()
             2 -> (availableWidthDp * 0.46).toInt()
-            else -> (availableWidthDp * 0.31).toInt() 
+            3 -> (availableWidthDp * 0.31).toInt()
+            else -> 90 
         }
 
         actions.forEach { action ->
