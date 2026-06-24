@@ -132,7 +132,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() = Unit
 
-    private fun postShowIsland() = mainHandler.post { showIslandInternal() }
+    private fun postShowIsland() = mainHandler.post { if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
     private fun postHideIsland() = mainHandler.post { hideIslandInternal() }
     private fun postUpdateIsland() = mainHandler.post { if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
@@ -188,13 +188,8 @@ class HyperAccessibilityService : AccessibilityService() {
         footerActions?.removeAllViews()
         if (actions.isEmpty()) { actionScroll?.visibility = View.GONE; return }
         actionScroll?.visibility = View.VISIBLE
-        val totalWidthDp = AppSettings.getIslandExpandedWidthDp(this) - 36
-        val availableWidthDp = (totalWidthDp * 0.8).toInt()
-        val btnWidth = when (actions.size) { 
-            1 -> (availableWidthDp * 0.7).toInt()
-            2 -> (availableWidthDp * 0.46).toInt()
-            else -> (availableWidthDp * 0.31).toInt() 
-        }
+        val availableWidthDp = ((AppSettings.getIslandExpandedWidthDp(this) - 36) * 0.8).toInt()
+        val btnWidth = when (actions.size) { 1 -> (availableWidthDp * 0.7).toInt(); 2 -> (availableWidthDp * 0.46).toInt(); else -> (availableWidthDp * 0.31).toInt() }
         actions.forEach { action ->
             val btn = TextView(this).apply {
                 text = action.title; setTextColor(Color.WHITE); textSize = 11f; gravity = Gravity.CENTER; setPadding(dp(10), 0, dp(10), 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
@@ -238,11 +233,11 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
         islandLayoutParams?.width = w; islandLayoutParams?.height = h; islandBackground?.cornerRadius = r
-        outlineRadius = r; islandView?.layoutParams = islandLayoutParams; visualRoot?.invalidateOutline(); forceRegionUpdate()
+        updateOutlineForIsland(w, h, r); islandView?.layoutParams = islandLayoutParams; visualRoot?.invalidateOutline(); forceRegionUpdate()
     }
 
     private fun getTargetWidth(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandWidthDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this); IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedWidthDp(this) }
-    private fun getTargetHeight(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandHeightDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandHeightDp(this) + 4; IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedHeightDp(this) }
+    private fun getTargetHeight(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandHeightDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this) + 4; IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedHeightDp(this) }
     private fun getTargetRadius(s: IslandStage) = if (s == IslandStage.STAGE3_FULL) AppSettings.getIslandExpandedCornerRadiusDp(this) else AppSettings.getIslandCornerRadiusDp(this)
 
     private fun scheduleAutoCollapse() {
@@ -256,18 +251,13 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun showIslandInternal() {
         hideIslandInternal()
-        val h = dp(AppSettings.getIslandHeightDp(this))
-        val w = dp(AppSettings.getIslandWidthDp(this))
-        val r = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
-        
+        val h = dp(AppSettings.getIslandHeightDp(this)); val w = dp(AppSettings.getIslandWidthDp(this)); val r = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
         visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; title = "HyperIslandProVisual" }
-        
         visualRoot = FrameLayout(this).apply { setBackgroundColor(0)
             try {
                 val observer = viewTreeObserver
-                val onComputeInternalInsetsListenerClass = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
-                val addListenerMethod = observer.javaClass.getMethod("addOnComputeInternalInsetsListener", onComputeInternalInsetsListenerClass)
-                val proxy = Proxy.newProxyInstance(onComputeInternalInsetsListenerClass.classLoader, arrayOf(onComputeInternalInsetsListenerClass)) { _, method, args ->
+                val listenerClass = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
+                val proxy = Proxy.newProxyInstance(listenerClass.classLoader, arrayOf(listenerClass)) { _, method, args ->
                     if (method.name == "onComputeInternalInsets") {
                         val info = args[0]
                         info.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType).invoke(info, 3)
@@ -277,22 +267,21 @@ class HyperAccessibilityService : AccessibilityService() {
                     }
                     null
                 }
-                addListenerMethod.invoke(observer, proxy)
+                observer.javaClass.getMethod("addOnComputeInternalInsetsListener", listenerClass).invoke(observer, proxy)
             } catch (_: Exception) {}
         }
-        
         islandBackground = createIslandBackground(r)
         islandView = FrameLayout(this).apply {
             background = islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, outlineRadius) } }
             gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); visibility = View.GONE; alpha = 0f
-                val iconSec = FrameLayout(this@HyperAccessibilityService).apply { appIconView = ImageView(this@HyperAccessibilityService).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(appIconView, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER)) }
-                val contentSec = LinearLayout(this@HyperAccessibilityService).apply {
+                val iconSec = FrameLayout(context).apply { appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(appIconView, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER)) }
+                val contentSec = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0)
-                    headerLine = TextView(this@HyperAccessibilityService).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-                    titleText = TextView(this@HyperAccessibilityService).apply { setTextColor(Color.WHITE); textSize = 15f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-                    messageText = TextView(this@HyperAccessibilityService).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-                    actionScroll = HorizontalScrollView(this@HyperAccessibilityService).apply { isHorizontalScrollBarEnabled = false; footerActions = LinearLayout(this@HyperAccessibilityService).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
+                    headerLine = TextView(context).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+                    titleText = TextView(context).apply { setTextColor(Color.WHITE); textSize = 15f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+                    messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+                    actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
                     addView(headerLine); addView(titleText); addView(messageText); addView(actionScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
                 }
                 addView(iconSec, LinearLayout.LayoutParams(0, -2, 0.2f)); addView(contentSec, LinearLayout.LayoutParams(0, -2, 0.8f))
@@ -301,7 +290,7 @@ class HyperAccessibilityService : AccessibilityService() {
             setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_UP) { if (e.rawY - touchStartY < -dp(24)) postCollapseIsland() else postToggleExpanded() } else if (e.action == MotionEvent.ACTION_DOWN) { touchStartY = e.rawY }; true }
         }
         islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
-        visualRoot?.addView(islandView, islandLayoutParams)
+        visualRoot?.addView(islandView, islandLayoutParams); updateOutlineForIsland(w, h, r)
         try { windowManager?.addView(visualRoot, visualParams) } catch (_: Exception) { hideIslandInternal() }
     }
 
@@ -312,9 +301,14 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
     private fun formatNotificationTime(t: Long) = if (t <= 0L || System.currentTimeMillis() - t < 60000L) "now" else SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(t))
     private fun buildDisplayText(appName: String, t: String, m: String): DisplayText { val a = appName.trim().ifBlank { "App" }; var ti = t.trim(); var me = m.trim(); if (ti.equals(a, true)) { ti = me; me = "" }; if (ti.isBlank() && me.isNotBlank()) { ti = me; me = "" }; return DisplayText(a, ti, me) }
+    private fun updateOutlineForIsland(w: Int, h: Int, r: Float) {
+        val left = ((resources.displayMetrics.widthPixels - w) / 2) + dp(AppSettings.getIslandXDp(this))
+        val top = dp(AppSettings.getIslandYDp(this))
+        outlineRect.set(left, top, left + w, top + h); outlineRadius = r; islandLayoutParams?.topMargin = top
+    }
+    private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
     private fun lerpEven(s: Int, e: Int, p: Float): Int { val v = (s + ((e - s) * p)).roundToInt(); return if (v % 2 != 0) v + 1 else v }
     private fun lerp(s: Float, e: Float, p: Float) = s + ((e - s) * p)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
     override fun onDestroy() { hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }
