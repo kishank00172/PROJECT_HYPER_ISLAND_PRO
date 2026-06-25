@@ -134,7 +134,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() = Unit
 
-    private fun postShowIsland() = mainHandler.post { if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
+    private fun postShowIsland() = mainHandler.post { showIslandInternal() }
     private fun postHideIsland() = mainHandler.post { hideIslandInternal() }
     private fun postUpdateIsland() = mainHandler.post { if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
@@ -179,7 +179,7 @@ class HyperAccessibilityService : AccessibilityService() {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName
         val display = buildDisplayText(model.appName, model.title, model.message)
         appIconView?.setImageDrawable(loadAppIcon(model.packageName))
-        appNameText?.text = display.appName; timeStampText?.text = formatNotificationTime(model.postTime)
+        headerLine?.text = "${display.appName} • ${formatNotificationTime(model.postTime)}"
         titleText?.text = display.title; messageText?.text = display.message
         titleText?.visibility = if (display.title.isBlank()) View.GONE else View.VISIBLE
         messageText?.visibility = if (display.message.isBlank()) View.GONE else View.VISIBLE
@@ -190,9 +190,17 @@ class HyperAccessibilityService : AccessibilityService() {
         footerActions?.removeAllViews()
         if (actions.isEmpty()) { actionScroll?.visibility = View.GONE; return }
         actionScroll?.visibility = View.VISIBLE
-        val totalWidthDp = AppSettings.getIslandExpandedWidthDp(this) - 32
+        
+        // SYMMETRICAL WIDTH CALCULATION (20 padding L + 20 padding R + 16 gap = 56 total)
+        val totalWidthDp = AppSettings.getIslandExpandedWidthDp(this) - 56
         val availableWidthDp = (totalWidthDp * 0.8).toInt()
-        val btnWidth = when (actions.size) { 1 -> (availableWidthDp * 0.70).toInt(); 2 -> (availableWidthDp * 0.46).toInt(); 3 -> (availableWidthDp * 0.31).toInt(); else -> 90 }
+        
+        val btnWidth = when (actions.size) { 
+            1 -> (availableWidthDp * 0.70).toInt()
+            2 -> (availableWidthDp * 0.46).toInt()
+            else -> (availableWidthDp * 0.31).toInt() 
+        }
+
         actions.forEach { action ->
             val btn = TextView(this).apply {
                 text = action.title; setTextColor(Color.WHITE); textSize = 11f; gravity = Gravity.CENTER; setPadding(dp(12), 0, dp(12), 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
@@ -280,14 +288,17 @@ class HyperAccessibilityService : AccessibilityService() {
         islandView = FrameLayout(this).apply {
             background = islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, outlineRadius) } }
             gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10)); visibility = View.GONE; alpha = 0f; weightSum = 1f
+                // PERFECT SYMMETRY: 20dp Padding on all sides
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)); visibility = View.GONE; alpha = 0f; weightSum = 1f
                 val iconSec = FrameLayout(context).apply { appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
                 val contentSec = LinearLayout(context).apply {
-                    orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
+                    // GAP: 16dp between Icon and Text
+                    orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0)
                     val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
                     appNameText = TextView(context).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; typeface = Typeface.DEFAULT_BOLD }
                     timeStampText = TextView(context).apply { setTextColor(Color.GRAY); textSize = 10f; setPadding(dp(6), 0, 0, 0) }
                     header.addView(appNameText); header.addView(timeStampText)
+                    headerLine = appNameText // Synchronize for notification update
                     titleText = TextView(context).apply { setTextColor(Color.WHITE); textSize = 15.5f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
                     messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
                     actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
