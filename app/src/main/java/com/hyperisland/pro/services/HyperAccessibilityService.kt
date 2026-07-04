@@ -232,14 +232,20 @@ class HyperAccessibilityService : AccessibilityService() {
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         
-        val p = visualParams ?: return
-        p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-        
+        // 1. Fade out buttons
+        actionScroll?.animate()?.alpha(0f)?.setDuration(200)?.setListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) { actionScroll?.visibility = View.GONE }
+        })?.start()
+
+        // 2. Prepare & Morph Reply Bar
         replyBar?.visibility = View.VISIBLE
         replyBar?.alpha = 0f
-        replyBar?.animate()?.alpha(1f)?.setDuration(200)?.start()
+        replyBar?.translationY = dp(10).toFloat()
+        replyBar?.animate()?.alpha(1f)?.translationY(0f)?.setDuration(300)?.setStartDelay(100)?.start()
         
-        // Anti-Flicker Delay (50ms as per Claude/Opus)
+        // 3. Focus & Keyboard (50ms delay per Claude/Opus)
+        val p = visualParams ?: return
+        p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         visualRoot?.postDelayed({
             windowManager?.updateViewLayout(visualRoot, p)
             replyEditText?.requestFocus()
@@ -253,14 +259,20 @@ class HyperAccessibilityService : AccessibilityService() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(replyEditText?.windowToken, 0)
         
-        replyBar?.visibility = View.GONE
+        replyBar?.animate()?.alpha(0f)?.setDuration(200)?.setListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) { 
+                replyBar?.visibility = View.GONE
+                actionScroll?.visibility = View.VISIBLE
+                actionScroll?.animate()?.alpha(1f)?.setDuration(200)?.start()
+            }
+        })?.start()
+
         val p = visualParams ?: return
         p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        
         visualRoot?.postDelayed({
             windowManager?.updateViewLayout(visualRoot, p)
             postCollapseIsland()
-        }, 100)
+        }, 150)
     }
 
     private fun triggerFluidExpansion() {
@@ -348,14 +360,19 @@ class HyperAccessibilityService : AccessibilityService() {
                     messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
                     actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
                     
-                    // Reply Bar UI
+                    // Premium Reply Bar UI
                     replyBar = LinearLayout(context).apply { 
                         orientation = LinearLayout.HORIZONTAL; visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0)
+                        val inputBg = GradientDrawable().apply { 
+                            shape = GradientDrawable.RECTANGLE; setColor(Color.parseColor("#1A1A1A")); cornerRadius = dp(12).toFloat()
+                            setStroke(dp(1), Color.parseColor("#333333"))
+                        }
                         replyEditText = EditText(context).apply { 
-                            hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = null; setPadding(dp(8), dp(4), dp(8), dp(4)); layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                            hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = inputBg
+                            setPadding(dp(12), dp(8), dp(12), dp(8)); layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
                         }
                         sendButton = TextView(context).apply { 
-                            text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(8), 0, 0, 0); setOnClickListener { exitReplyMode() }
+                            text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(12), 0, 0, 0); setOnClickListener { exitReplyMode() }
                         }
                         addView(replyEditText); addView(sendButton)
                     }
