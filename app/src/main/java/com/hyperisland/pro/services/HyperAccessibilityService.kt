@@ -30,6 +30,8 @@ import android.view.accessibility.AccessibilityWindowInfo
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.PathInterpolator
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -42,6 +44,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import java.lang.reflect.Proxy
 
 class HyperAccessibilityService : AccessibilityService() {
@@ -55,15 +58,13 @@ class HyperAccessibilityService : AccessibilityService() {
         val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>
     )
 
-    // LIQUID INTERPOLATORS (As suggested by Claude/Opus)
-    private val expandInterpolator = PathInterpolator(0.34f, 1.56f, 0.64f, 1.0f) // Overshoot bounce
-    private val morphInterpolator = PathInterpolator(0.25f, 0.46f, 0.45f, 0.94f)  // Smooth settle
-    private val collapseInterpolator = PathInterpolator(0.55f, 0.0f, 0.1f, 1.0f) // Organic shrink
+    private val expandInterpolator = PathInterpolator(0.34f, 1.56f, 0.64f, 1.0f) 
+    private val morphInterpolator = PathInterpolator(0.25f, 0.46f, 0.45f, 0.94f) 
+    private val collapseInterpolator = PathInterpolator(0.55f, 0.0f, 0.1f, 1.0f)
 
     companion object {
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
         @Volatile private var instance: HyperAccessibilityService? = null
-        
         fun isConnected(): Boolean = instance != null
         fun showIslandFromApp(context: Context) = instance?.run { postShowIsland(); true } ?: false
         fun hideIslandFromApp(context: Context? = null) = instance?.run { postHideIsland(); true } ?: false
@@ -71,20 +72,15 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        
-        fun showNotificationFromApp(
-            context: Context, packageName: String, appName: String, title: String, 
-            message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>
-        ) = instance?.run { 
-            postNotificationEvent("NotificationListener", packageName, appName, title, message, postTime, contentIntent, actions)
-            true 
-        } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) =
+            instance?.run { postNotificationEvent("NotificationListener", packageName, appName, title, message, postTime, contentIntent, actions); true } ?: false
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val notificationQueue = ArrayDeque<NotificationModel>()
     private var isProcessingQueue = false
     private var isShadeOpen = false
+    private var isReplyMode = false
     
     private var windowManager: WindowManager? = null
     private var visualRoot: FrameLayout? = null
@@ -103,6 +99,11 @@ class HyperAccessibilityService : AccessibilityService() {
     private var footerActions: LinearLayout? = null
     private var actionScroll: HorizontalScrollView? = null
 
+    // Reply UI
+    private var replyBar: LinearLayout? = null
+    private var replyEditText: EditText? = null
+    private var sendButton: TextView? = null
+
     private var outsideWatcherView: FrameLayout? = null
     private var morphAnimator: Animator? = null
     private var currentStage = IslandStage.STAGE1_IDLE
@@ -111,7 +112,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private var currentPendingIntent: PendingIntent? = null
     private var currentPackageName: String? = null
     private var autoCollapseRunnable: Runnable? = null
-    
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
     private var lastPrimaryEventTime = 0L
@@ -128,22 +128,13 @@ class HyperAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        
-        // COMBINED SHADE DETECTION (Claude Tier 1 + 2)
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
-            event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             val shadeOpen = checkNotificationShadeState()
             if (shadeOpen != isShadeOpen) {
                 isShadeOpen = shadeOpen
-                if (isShadeOpen) {
-                    visualRoot?.animate()?.alpha(0f)?.setDuration(120)?.start()
-                } else {
-                    visualRoot?.animate()?.alpha(1f)?.setDuration(200)?.start()
-                }
+                visualRoot?.animate()?.alpha(if (isShadeOpen) 0f else 1f)?.setDuration(if (isShadeOpen) 120 else 200)?.start()
             }
         }
-
         if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
             val pkg = event.packageName?.toString().orEmpty()
             if (pkg.isBlank() || pkg == packageName || !AppSettings.isIslandEnabled(this)) return
@@ -159,17 +150,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun checkNotificationShadeState(): Boolean {
         val windowList = windows ?: return false
         val screenHeight = resources.displayMetrics.heightPixels
-        
-        return windowList.any { window ->
-            // Check for System windows that take up significant height (Notification Panel)
-            val isSystem = window.type == AccessibilityWindowInfo.TYPE_SYSTEM
-            val rect = Rect()
-            window.getBoundsInScreen(rect)
-            val isExpandedShade = rect.height() > screenHeight * 0.35f
-            val isShadePackage = window.root?.packageName == "com.android.systemui"
-            
-            isSystem && isExpandedShade && isShadePackage
-        }
+        return windowList.any { it.type == AccessibilityWindowInfo.TYPE_SYSTEM && it.getBoundsInScreen(outlineRect).let { rect -> outlineRect.height() > screenHeight * 0.35f } && it.root?.packageName == "com.android.systemui" }
     }
 
     override fun onInterrupt() = Unit
@@ -178,11 +159,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postHideIsland() = mainHandler.post { hideIslandInternal() }
     private fun postUpdateIsland() = mainHandler.post { if (visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
-    private fun postCollapseIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) }
-    private fun postToggleExpanded() = mainHandler.post { 
-        if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification()
-        else setStageAnimated(if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER)
-    }
+    private fun postCollapseIsland() = mainHandler.post { if (isReplyMode) exitReplyMode() else setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) }
+    private fun postToggleExpanded() = mainHandler.post { if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else setStageAnimated(if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
 
     private fun postNotificationEvent(source: String, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) {
         mainHandler.post {
@@ -217,13 +195,11 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateNotificationContent(model: NotificationModel) {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName
-        val display = buildDisplayText(model.appName, model.title, model.message)
         appIconView?.setImageDrawable(loadAppIcon(model.packageName))
-        appNameText?.text = display.appName
-        timeStampText?.text = formatNotificationTime(model.postTime)
-        titleText?.text = display.title; messageText?.text = display.message
-        titleText?.visibility = if (display.title.isBlank()) View.GONE else View.VISIBLE
-        messageText?.visibility = if (display.message.isBlank()) View.GONE else View.VISIBLE
+        appNameText?.text = model.appName; timeStampText?.text = formatNotificationTime(model.postTime)
+        titleText?.text = model.title; messageText?.text = model.message
+        titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
+        messageText?.visibility = if (model.message.isBlank()) View.GONE else View.VISIBLE
         setupActionTiles(model.actions); forceRegionUpdate()
     }
 
@@ -240,12 +216,51 @@ class HyperAccessibilityService : AccessibilityService() {
                 background = createIslandBackground(dp(16).toFloat()).apply { setColor(Color.parseColor("#222222")); setStroke(dp(1), Color.parseColor("#444444")) }
                 isClickable = true
                 setOnClickListener { 
-                    val oldText = text; text = "✓ $oldText"; setTextColor(Color.GREEN)
-                    postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldText; setTextColor(Color.WHITE) } }, 500)
+                    if (action.title.toString().contains("Reply", true)) enterReplyMode()
+                    else {
+                        val oldT = text; text = "✓ $oldT"; setTextColor(Color.GREEN)
+                        postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldT; setTextColor(Color.WHITE) } }, 500)
+                    }
                 }
             }
             footerActions?.addView(btn, LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) })
         }
+    }
+
+    private fun enterReplyMode() {
+        if (isReplyMode) return
+        isReplyMode = true
+        autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
+        
+        val p = visualParams ?: return
+        p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        
+        replyBar?.visibility = View.VISIBLE
+        replyBar?.alpha = 0f
+        replyBar?.animate()?.alpha(1f)?.setDuration(200)?.start()
+        
+        // Anti-Flicker Delay (50ms as per Claude/Opus)
+        visualRoot?.postDelayed({
+            windowManager?.updateViewLayout(visualRoot, p)
+            replyEditText?.requestFocus()
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(replyEditText, InputMethodManager.SHOW_IMPLICIT)
+        }, 50)
+    }
+
+    private fun exitReplyMode() {
+        isReplyMode = false
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(replyEditText?.windowToken, 0)
+        
+        replyBar?.visibility = View.GONE
+        val p = visualParams ?: return
+        p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        
+        visualRoot?.postDelayed({
+            windowManager?.updateViewLayout(visualRoot, p)
+            postCollapseIsland()
+        }, 100)
     }
 
     private fun triggerFluidExpansion() {
@@ -255,7 +270,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val startR = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat(); val targetR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
         currentStage = IslandStage.STAGE3_FULL; expandReason = ExpandReason.AUTO_NOTIFICATION
         val ping = ValueAnimator.ofFloat(0f, 1f).apply { duration = 100L; addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) } }
-        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 380L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); gridRoot?.alpha = t; gridRoot?.visibility = View.VISIBLE } }
+        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 380L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); gridRoot?.alpha = t; gridRoot?.visibility = View.VISIBLE; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
         val set = AnimatorSet().apply { playSequentially(ping, expand); addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { scheduleAutoCollapse(); updateOutsideWatcherForState() } }) }
         morphAnimator = set; set.start()
     }
@@ -268,9 +283,9 @@ class HyperAccessibilityService : AccessibilityService() {
         currentStage = target; expandReason = reason
         val targetW = dp(getTargetWidth(target)); val targetH = dp(getTargetHeight(target)); val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = if (target == IslandStage.STAGE1_IDLE) 280L else 360L
-            interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else morphInterpolator
-            addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) gridRoot?.alpha = 1f - t }
+            duration = if (target == IslandStage.STAGE1_IDLE) 280L else 400L
+            interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
+            addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) gridRoot?.alpha = 1f - t; if (target != IslandStage.STAGE1_IDLE) islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) }
             addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { if (target == IslandStage.STAGE1_IDLE) { gridRoot?.visibility = View.GONE; notificationMode = false }; updateOutsideWatcherForState(); isProcessingQueue = false } })
         }
         morphAnimator = anim; anim.start()
@@ -286,25 +301,19 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun getTargetRadius(s: IslandStage) = if (s == IslandStage.STAGE3_FULL) AppSettings.getIslandExpandedCornerRadiusDp(this) else AppSettings.getIslandCornerRadiusDp(this)
 
     private fun scheduleAutoCollapse() {
+        if (isReplyMode) return
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         val size = notificationQueue.size
         val delay = when { size == 0 -> 5200L; size in 1..5 -> 3000L; size in 6..19 -> 1500L; size in 20..34 -> 800L; else -> 250L }
         autoCollapseRunnable = Runnable { if (notificationQueue.isNotEmpty()) processNextInQueue() else setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.AUTO_NOTIFICATION) }.also { mainHandler.postDelayed(it, delay) }
     }
 
-    private fun openCurrentNotification() { try { currentPendingIntent?.send() ?: currentPackageName?.let { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } } catch (_: Exception) {}; postCollapseIsland() }
+    private fun openCurrentNotification() { if (isReplyMode) return; try { currentPendingIntent?.send() ?: currentPackageName?.let { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } } catch (_: Exception) {}; postCollapseIsland() }
 
     private fun showIslandInternal() {
         hideIslandInternal()
         val h = dp(AppSettings.getIslandHeightDp(this)); val w = dp(AppSettings.getIslandWidthDp(this)); val r = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
-        
-        // FABLE 5 ANTI-FLICKER: PixelFormat.TRANSLUCENT + windowAnimations = 0
-        visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { 
-            gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1
-            windowAnimations = 0 
-            title = "HyperIslandProVisual" 
-        }
-
+        visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; windowAnimations = 0; title = "HyperIslandProVisual" }
         visualRoot = FrameLayout(this).apply { setBackgroundColor(0)
             try {
                 val observer = viewTreeObserver
@@ -338,7 +347,20 @@ class HyperAccessibilityService : AccessibilityService() {
                     titleText = TextView(context).apply { setTextColor(Color.WHITE); textSize = 15.5f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
                     messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
                     actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
-                    addView(header); addView(titleText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(1) }); addView(messageText, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(1) }); addView(actionScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+                    
+                    // Reply Bar UI
+                    replyBar = LinearLayout(context).apply { 
+                        orientation = LinearLayout.HORIZONTAL; visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0)
+                        replyEditText = EditText(context).apply { 
+                            hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = null; setPadding(dp(8), dp(4), dp(8), dp(4)); layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                        }
+                        sendButton = TextView(context).apply { 
+                            text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(8), 0, 0, 0); setOnClickListener { exitReplyMode() }
+                        }
+                        addView(replyEditText); addView(sendButton)
+                    }
+
+                    addView(header); addView(titleText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(1) }); addView(messageText, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(1) }); addView(actionScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }); addView(replyBar)
                 }
                 addView(iconSec, LinearLayout.LayoutParams(0, -2, 0.2f)); addView(contentSec, LinearLayout.LayoutParams(0, -2, 0.8f))
             }
@@ -350,13 +372,12 @@ class HyperAccessibilityService : AccessibilityService() {
         try { windowManager?.addView(visualRoot, visualParams) } catch (_: Exception) { hideIslandInternal() }
     }
 
-    private fun updateOutsideWatcherForState() { if (currentStage == IslandStage.STAGE3_FULL && expandReason == ExpandReason.MANUAL_USER) ensureOutsideWatcher() else removeOutsideWatcher() }
+    private fun updateOutsideWatcherForState() { if (currentStage == IslandStage.STAGE3_FULL && expandReason == ExpandReason.MANUAL_USER && !isReplyMode) ensureOutsideWatcher() else removeOutsideWatcher() }
     private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) postCollapseIsland() ; false } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 4096 or 512 or 256, -3).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
     private fun removeOutsideWatcher() { try { windowManager?.removeViewImmediate(outsideWatcherView!!) } catch (_: Exception) {}; outsideWatcherView = null }
-
     private fun forceRegionUpdate() { visualRoot?.post { visualRoot?.requestLayout(); visualRoot?.parent?.requestLayout() } }
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
-    private fun hideIslandInternal() { morphAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE }
+    private fun hideIslandInternal() { morphAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
     private fun formatNotificationTime(t: Long) = if (t <= 0L || System.currentTimeMillis() - t < 60000L) "now" else SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(t))
