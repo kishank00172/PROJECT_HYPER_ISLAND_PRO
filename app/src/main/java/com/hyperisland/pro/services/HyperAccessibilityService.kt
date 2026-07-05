@@ -21,6 +21,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -147,6 +148,15 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
+    override fun onKeyEvent(event: KeyEvent?): Boolean {
+        // DETECT BACK BUTTON TO EXIT REPLY MODE
+        if (isReplyMode && event?.keyCode == KeyEvent.KEYCODE_BACK) {
+            exitReplyMode()
+            return true
+        }
+        return super.onKeyEvent(event)
+    }
+
     private fun checkNotificationShadeState(): Boolean {
         val windowList = windows ?: return false
         val screenHeight = resources.displayMetrics.heightPixels
@@ -178,6 +188,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun processNextInQueue() {
+        if (isReplyMode) return // GOAL: PAUSE QUEUE WHILE TYPING
         val next = notificationQueue.poll() ?: run { isProcessingQueue = false; return }
         isProcessingQueue = true; notificationMode = true
         if (currentStage == IslandStage.STAGE1_IDLE) { updateNotificationContent(next); triggerFluidExpansion(); scheduleAutoCollapse() }
@@ -232,25 +243,25 @@ class HyperAccessibilityService : AccessibilityService() {
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         
-        // 1. Fade out buttons
+        // FABLE 5 MORPH: Fade out other buttons and morph input
         actionScroll?.animate()?.alpha(0f)?.setDuration(200)?.setListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator) { actionScroll?.visibility = View.GONE }
         })?.start()
 
-        // 2. Prepare & Morph Reply Bar
         replyBar?.visibility = View.VISIBLE
         replyBar?.alpha = 0f
-        replyBar?.translationY = dp(10).toFloat()
-        replyBar?.animate()?.alpha(1f)?.translationY(0f)?.setDuration(300)?.setStartDelay(100)?.start()
-        
-        // 3. Focus & Keyboard (50ms delay per Claude/Opus)
+        replyBar?.translationX = dp(10).toFloat() // Subtle slide-in
+        replyBar?.animate()?.alpha(1f)?.translationX(0f)?.setDuration(350)?.setInterpolator(expandInterpolator)?.start()
+
+        // Focus & Keyboard (Logic from Claude/Opus for HyperOS)
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        
         visualRoot?.postDelayed({
             windowManager?.updateViewLayout(visualRoot, p)
             replyEditText?.requestFocus()
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(replyEditText, InputMethodManager.SHOW_IMPLICIT)
+            imm.showSoftInput(replyEditText, InputMethodManager.SHOW_FORCED) // Forced for reliability
         }, 50)
     }
 
@@ -271,7 +282,7 @@ class HyperAccessibilityService : AccessibilityService() {
         p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         visualRoot?.postDelayed({
             windowManager?.updateViewLayout(visualRoot, p)
-            postCollapseIsland()
+            if (notificationQueue.isNotEmpty()) processNextInQueue() else postCollapseIsland()
         }, 150)
     }
 
@@ -282,7 +293,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val startR = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat(); val targetR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
         currentStage = IslandStage.STAGE3_FULL; expandReason = ExpandReason.AUTO_NOTIFICATION
         val ping = ValueAnimator.ofFloat(0f, 1f).apply { duration = 100L; addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) } }
-        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 380L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); gridRoot?.alpha = t; gridRoot?.visibility = View.VISIBLE; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
+        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 400L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); gridRoot?.alpha = t; gridRoot?.visibility = View.VISIBLE; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
         val set = AnimatorSet().apply { playSequentially(ping, expand); addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { scheduleAutoCollapse(); updateOutsideWatcherForState() } }) }
         morphAnimator = set; set.start()
     }
@@ -295,9 +306,9 @@ class HyperAccessibilityService : AccessibilityService() {
         currentStage = target; expandReason = reason
         val targetW = dp(getTargetWidth(target)); val targetH = dp(getTargetHeight(target)); val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = if (target == IslandStage.STAGE1_IDLE) 280L else 400L
+            duration = if (target == IslandStage.STAGE1_IDLE) 300L else 450L
             interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
-            addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) gridRoot?.alpha = 1f - t; if (target != IslandStage.STAGE1_IDLE) islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) }
+            addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) gridRoot?.alpha = 1f - t; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) }
             addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { if (target == IslandStage.STAGE1_IDLE) { gridRoot?.visibility = View.GONE; notificationMode = false }; updateOutsideWatcherForState(); isProcessingQueue = false } })
         }
         morphAnimator = anim; anim.start()
@@ -360,20 +371,12 @@ class HyperAccessibilityService : AccessibilityService() {
                     messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
                     actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
                     
-                    // Premium Reply Bar UI
+                    // Reply Bar UI
                     replyBar = LinearLayout(context).apply { 
                         orientation = LinearLayout.HORIZONTAL; visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0)
-                        val inputBg = GradientDrawable().apply { 
-                            shape = GradientDrawable.RECTANGLE; setColor(Color.parseColor("#1A1A1A")); cornerRadius = dp(12).toFloat()
-                            setStroke(dp(1), Color.parseColor("#333333"))
-                        }
-                        replyEditText = EditText(context).apply { 
-                            hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = inputBg
-                            setPadding(dp(12), dp(8), dp(12), dp(8)); layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
-                        }
-                        sendButton = TextView(context).apply { 
-                            text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(12), 0, 0, 0); setOnClickListener { exitReplyMode() }
-                        }
+                        val inputBg = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.parseColor("#1A1A1A")); cornerRadius = dp(12).toFloat(); setStroke(dp(1), Color.parseColor("#333333")) }
+                        replyEditText = EditText(context).apply { hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = inputBg; setPadding(dp(12), dp(8), dp(12), dp(8)); layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f) }
+                        sendButton = TextView(context).apply { text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(12), 0, 0, 0); setOnClickListener { exitReplyMode() } }
                         addView(replyEditText); addView(sendButton)
                     }
 
