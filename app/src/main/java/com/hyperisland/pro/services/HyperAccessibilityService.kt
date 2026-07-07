@@ -149,7 +149,6 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: KeyEvent?): Boolean {
-        // DETECT BACK BUTTON TO EXIT REPLY MODE
         if (isReplyMode && event?.keyCode == KeyEvent.KEYCODE_BACK) {
             exitReplyMode()
             return true
@@ -188,7 +187,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun processNextInQueue() {
-        if (isReplyMode) return // GOAL: PAUSE QUEUE WHILE TYPING
+        if (isReplyMode) return
         val next = notificationQueue.poll() ?: run { isProcessingQueue = false; return }
         isProcessingQueue = true; notificationMode = true
         if (currentStage == IslandStage.STAGE1_IDLE) { updateNotificationContent(next); triggerFluidExpansion(); scheduleAutoCollapse() }
@@ -227,7 +226,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 background = createIslandBackground(dp(16).toFloat()).apply { setColor(Color.parseColor("#222222")); setStroke(dp(1), Color.parseColor("#444444")) }
                 isClickable = true
                 setOnClickListener { 
-                    if (action.title.toString().contains("Reply", true)) enterReplyMode()
+                    if (action.title.toString().contains("Reply", true)) enterReplyMode(btnWidth)
                     else {
                         val oldT = text; text = "✓ $oldT"; setTextColor(Color.GREEN)
                         postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldT; setTextColor(Color.WHITE) } }, 500)
@@ -238,31 +237,44 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun enterReplyMode() {
+    private fun enterReplyMode(initialWidthDp: Int) {
         if (isReplyMode) return
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         
-        // FABLE 5 MORPH: Fade out other buttons and morph input
-        actionScroll?.animate()?.alpha(0f)?.setDuration(200)?.setListener(object : AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: Animator) { actionScroll?.visibility = View.GONE }
-        })?.start()
-
+        // 1. Morph: Hide buttons and scale the reply bar from tile width to full width
+        actionScroll?.animate()?.alpha(0f)?.setDuration(150)?.withEndAction { actionScroll?.visibility = View.GONE }?.start()
+        
         replyBar?.visibility = View.VISIBLE
         replyBar?.alpha = 0f
-        replyBar?.translationX = dp(10).toFloat() // Subtle slide-in
-        replyBar?.animate()?.alpha(1f)?.translationX(0f)?.setDuration(350)?.setInterpolator(expandInterpolator)?.start()
+        
+        val replyLp = replyBar?.layoutParams as? LinearLayout.LayoutParams
+        replyLp?.width = dp(initialWidthDp)
+        replyBar?.layoutParams = replyLp
+        
+        replyBar?.animate()?.alpha(1f)?.setDuration(200)?.start()
+        
+        val widthAnim = ValueAnimator.ofInt(dp(initialWidthDp), LinearLayout.LayoutParams.MATCH_PARENT).apply {
+            duration = 400
+            interpolator = expandInterpolator
+            addUpdateListener { 
+                replyLp?.width = it.animatedValue as Int
+                replyBar?.layoutParams = replyLp
+            }
+        }
+        widthAnim.start()
 
-        // Focus & Keyboard (Logic from Claude/Opus for HyperOS)
+        // 2. Focus & Keyboard (Pro HyperOS Logic)
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
         
         visualRoot?.postDelayed({
             windowManager?.updateViewLayout(visualRoot, p)
             replyEditText?.requestFocus()
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(replyEditText, InputMethodManager.SHOW_FORCED) // Forced for reliability
-        }, 50)
+            imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+        }, 100)
     }
 
     private fun exitReplyMode() {
@@ -270,13 +282,11 @@ class HyperAccessibilityService : AccessibilityService() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(replyEditText?.windowToken, 0)
         
-        replyBar?.animate()?.alpha(0f)?.setDuration(200)?.setListener(object : AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: Animator) { 
-                replyBar?.visibility = View.GONE
-                actionScroll?.visibility = View.VISIBLE
-                actionScroll?.animate()?.alpha(1f)?.setDuration(200)?.start()
-            }
-        })?.start()
+        replyBar?.animate()?.alpha(0f)?.setDuration(200)?.withEndAction { 
+            replyBar?.visibility = View.GONE
+            actionScroll?.visibility = View.VISIBLE
+            actionScroll?.animate()?.alpha(1f)?.setDuration(200)?.start()
+        }?.start()
 
         val p = visualParams ?: return
         p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -293,7 +303,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val startR = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat(); val targetR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
         currentStage = IslandStage.STAGE3_FULL; expandReason = ExpandReason.AUTO_NOTIFICATION
         val ping = ValueAnimator.ofFloat(0f, 1f).apply { duration = 100L; addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) } }
-        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 400L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); gridRoot?.alpha = t; gridRoot?.visibility = View.VISIBLE; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
+        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 450L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); gridRoot?.alpha = t; gridRoot?.visibility = View.VISIBLE; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
         val set = AnimatorSet().apply { playSequentially(ping, expand); addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { scheduleAutoCollapse(); updateOutsideWatcherForState() } }) }
         morphAnimator = set; set.start()
     }
@@ -320,7 +330,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun getTargetWidth(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandWidthDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this); IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedWidthDp(this) }
-    private fun getTargetHeight(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandHeightDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandHeightDp(this) + 4; IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedHeightDp(this) }
+    private fun getTargetHeight(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandHeightDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this) + 4; IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedHeightDp(this) }
     private fun getTargetRadius(s: IslandStage) = if (s == IslandStage.STAGE3_FULL) AppSettings.getIslandExpandedCornerRadiusDp(this) else AppSettings.getIslandCornerRadiusDp(this)
 
     private fun scheduleAutoCollapse() {
