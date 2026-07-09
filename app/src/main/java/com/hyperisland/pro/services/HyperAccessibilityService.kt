@@ -22,10 +22,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.text.TextUtils
 import android.transition.AutoTransition
-import android.transition.ChangeBounds
-import android.transition.Transition
 import android.transition.TransitionManager
-import android.transition.TransitionSet
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -206,8 +203,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun playFluidTransitionAnimation(next: NotificationModel) {
         val isFlash = notificationQueue.size >= 35
-        val exit = ValueAnimator.ofFloat(0f, 1f).apply { duration = if (isFlash) 120L else 200L; interpolator = AccelerateInterpolator(); addUpdateListener { gridRoot?.alpha = 1f - it.animatedValue as Float; gridRoot?.translationY = it.animatedValue as Float * 20f } }
-        val entry = ValueAnimator.ofFloat(0f, 1f).apply { duration = if (isFlash) 150L else 300L; interpolator = morphInterpolator; addUpdateListener { gridRoot?.alpha = it.animatedValue as Float; gridRoot?.translationY = -20f * (1f - it.animatedValue as Float) } }
+        val exit = ValueAnimator.ofFloat(0f, 1f).apply { duration = if (isFlash) 120L else 200L; interpolator = AccelerateInterpolator(); addUpdateListener { this@HyperAccessibilityService.gridRoot?.alpha = 1f - it.animatedValue as Float; this@HyperAccessibilityService.gridRoot?.translationY = it.animatedValue as Float * 20f } }
+        val entry = ValueAnimator.ofFloat(0f, 1f).apply { duration = if (isFlash) 150L else 300L; interpolator = morphInterpolator; addUpdateListener { this@HyperAccessibilityService.gridRoot?.alpha = it.animatedValue as Float; this@HyperAccessibilityService.gridRoot?.translationY = -20f * (1f - it.animatedValue as Float) } }
         exit.addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { updateNotificationContent(next); entry.start() } })
         entry.addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { scheduleAutoCollapse() } })
         exit.start()
@@ -238,7 +235,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 background = createIslandBackground(dp(16).toFloat()).apply { setColor(Color.parseColor("#222222")); setStroke(dp(1), Color.parseColor("#444444")) }
                 isClickable = true
                 setOnClickListener { 
-                    if (action.title.toString().contains("Reply", true)) enterReplyMode()
+                    if (action.title.toString().contains("Reply", true)) enterReplyMode(this)
                     else {
                         val oldT = text; text = "✓ $oldT"; setTextColor(Color.GREEN)
                         postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldT; setTextColor(Color.WHITE) } }, 500)
@@ -249,12 +246,12 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun enterReplyMode() {
+    private fun enterReplyMode(replyButton: View) {
         if (isReplyMode) return
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         
-        // 1. Prepare Window Manager Focus
+        // 1. Switch focus ONCE
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
@@ -262,27 +259,33 @@ class HyperAccessibilityService : AccessibilityService() {
                          WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
 
-        // 2. Pro Morph Transition
-        val morphSet = TransitionSet().apply {
-            addTransition(ChangeBounds())
-            addTransition(android.transition.Fade())
-            duration = 400
-            interpolator = expandInterpolator
-        }
-        TransitionManager.beginDelayedTransition(this@HyperAccessibilityService.gridRoot, morphSet)
-
-        this@HyperAccessibilityService.actionScroll?.visibility = View.GONE
-        this@HyperAccessibilityService.replyBar?.visibility = View.VISIBLE
-        this@HyperAccessibilityService.replyBar?.alpha = 1f
-        this@HyperAccessibilityService.replyBar?.layoutParams = (this@HyperAccessibilityService.replyBar?.layoutParams as LinearLayout.LayoutParams).apply { 
-            width = LinearLayout.LayoutParams.MATCH_PARENT 
-        }
+        // 2. Liquid Width Morph via ValueAnimator (Avoids TransitionManager skips)
+        val initialW = replyButton.width
+        val targetW = this@HyperAccessibilityService.gridRoot?.width ?: dp(AppSettings.getIslandExpandedWidthDp(this))
         
-        this@HyperAccessibilityService.replyEditText?.isFocusable = true
-        this@HyperAccessibilityService.replyEditText?.isFocusableInTouchMode = true
-        this@HyperAccessibilityService.replyEditText?.requestFocus()
+        this@HyperAccessibilityService.actionScroll?.animate()?.alpha(0f)?.setDuration(150)?.withEndAction { 
+            this@HyperAccessibilityService.actionScroll?.visibility = View.GONE 
+        }?.start()
 
-        armImeShowSequence()
+        this@HyperAccessibilityService.replyBar?.visibility = View.VISIBLE
+        this@HyperAccessibilityService.replyBar?.alpha = 0f
+        
+        val replyLp = this@HyperAccessibilityService.replyBar?.layoutParams as? LinearLayout.LayoutParams
+        
+        ValueAnimator.ofInt(initialW, targetW).apply {
+            duration = 450
+            interpolator = expandInterpolator
+            addUpdateListener { 
+                replyLp?.width = it.animatedValue as Int
+                this@HyperAccessibilityService.replyBar?.layoutParams = replyLp
+                this@HyperAccessibilityService.replyBar?.alpha = it.animatedFraction
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    armImeShowSequence()
+                }
+            })
+        }.start()
     }
 
     private fun armImeShowSequence() {
@@ -326,10 +329,11 @@ class HyperAccessibilityService : AccessibilityService() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(this@HyperAccessibilityService.replyEditText?.windowToken, 0)
         
-        TransitionManager.beginDelayedTransition(this@HyperAccessibilityService.gridRoot, AutoTransition().apply { duration = 280 })
-        this@HyperAccessibilityService.replyBar?.visibility = View.GONE
-        this@HyperAccessibilityService.actionScroll?.visibility = View.VISIBLE
-        this@HyperAccessibilityService.actionScroll?.alpha = 1f
+        this@HyperAccessibilityService.replyBar?.animate()?.alpha(0f)?.setDuration(250)?.withEndAction {
+            this@HyperAccessibilityService.replyBar?.visibility = View.GONE
+            this@HyperAccessibilityService.actionScroll?.visibility = View.VISIBLE
+            this@HyperAccessibilityService.actionScroll?.alpha = 1f
+        }?.start()
 
         val p = visualParams ?: return
         p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -347,8 +351,8 @@ class HyperAccessibilityService : AccessibilityService() {
         val startH = dp(AppSettings.getIslandHeightDp(this)); val targetH = dp(AppSettings.getIslandExpandedHeightDp(this))
         val startR = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat(); val targetR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
         currentStage = IslandStage.STAGE3_FULL; expandReason = ExpandReason.AUTO_NOTIFICATION
-        val ping = ValueAnimator.ofFloat(0f, 1f).apply { duration = 100L; addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) } }
-        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 450L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); gridRoot?.alpha = t; gridRoot?.visibility = View.VISIBLE; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
+        val ping = ValueAnimator.ofFloat(0f, 1f).apply { duration = 120L; addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) } }
+        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 450L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); this@HyperAccessibilityService.gridRoot?.alpha = t; this@HyperAccessibilityService.gridRoot?.visibility = View.VISIBLE; this@HyperAccessibilityService.islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
         val set = AnimatorSet().apply { playSequentially(ping, expand); addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { scheduleAutoCollapse(); updateOutsideWatcherForState() } }) }
         morphAnimator = set; set.start()
     }
@@ -357,13 +361,13 @@ class HyperAccessibilityService : AccessibilityService() {
         if (currentStage == target && morphAnimator?.isRunning == true) return
         if (target == IslandStage.STAGE3_FULL && reason == ExpandReason.AUTO_NOTIFICATION) { triggerFluidExpansion(); return }
         morphAnimator?.cancel()
-        val curW = islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this)); val curH = islandLayoutParams?.height ?: dp(AppSettings.getIslandHeightDp(this)); val curR = islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
+        val curW = this@HyperAccessibilityService.islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this)); val curH = this@HyperAccessibilityService.islandLayoutParams?.height ?: dp(AppSettings.getIslandHeightDp(this)); val curR = this@HyperAccessibilityService.islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
         currentStage = target; expandReason = reason
         val targetW = dp(getTargetWidth(target)); val targetH = dp(getTargetHeight(target)); val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = if (target == IslandStage.STAGE1_IDLE) 300L else 450L
             interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
-            addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) gridRoot?.alpha = 1f - t; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) }
+            addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) this@HyperAccessibilityService.gridRoot?.alpha = 1f - t; this@HyperAccessibilityService.islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) }
             addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { if (target == IslandStage.STAGE1_IDLE) { this@HyperAccessibilityService.gridRoot?.visibility = View.GONE; notificationMode = false }; updateOutsideWatcherForState(); isProcessingQueue = false } })
         }
         morphAnimator = anim; anim.start()
