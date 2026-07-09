@@ -70,6 +70,9 @@ class HyperAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
+        // Constant for showing keyboard, added in API 33
+        private const val GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD = 16
+
         @Volatile private var instance: HyperAccessibilityService? = null
         fun isConnected(): Boolean = instance != null
         fun showIslandFromApp(context: Context) = instance?.run { postShowIsland(); true } ?: false
@@ -257,7 +260,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         // 2. Liquid Morph Animation via TransitionManager
         val transition = AutoTransition().apply {
-            duration = 450
+            duration = 400
             interpolator = expandInterpolator
         }
         TransitionManager.beginDelayedTransition(gridRoot, transition)
@@ -296,8 +299,8 @@ class HyperAccessibilityService : AccessibilityService() {
             if (!ok && attempt < 6) {
                 mainHandler.postDelayed({ attemptShow(attempt + 1) }, 100L + (attempt * 100L))
             } else if (!ok) {
-                // Nuclear fallbacks from GPT 5.2 & Fable 5
-                performGlobalAction(AccessibilityService.GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD)
+                // Nuclear fallbacks using hardcoded value 16 for API 33 compatibility
+                performGlobalAction(GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD)
                 imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
                 
                 // Deep touch simulation
