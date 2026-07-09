@@ -19,12 +19,17 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.TextUtils
+import android.transition.AutoTransition
+import android.transition.TransitionManager
+import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
@@ -226,7 +231,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 background = createIslandBackground(dp(16).toFloat()).apply { setColor(Color.parseColor("#222222")); setStroke(dp(1), Color.parseColor("#444444")) }
                 isClickable = true
                 setOnClickListener { 
-                    if (action.title.toString().contains("Reply", true)) enterReplyMode(btnWidth)
+                    if (action.title.toString().contains("Reply", true)) enterReplyMode(this)
                     else {
                         val oldT = text; text = "✓ $oldT"; setTextColor(Color.GREEN)
                         postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldT; setTextColor(Color.WHITE) } }, 500)
@@ -237,44 +242,88 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun enterReplyMode(initialWidthDp: Int) {
+    private fun enterReplyMode(replyButton: View) {
         if (isReplyMode) return
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         
-        // 1. Morph: Hide buttons and scale the reply bar from tile width to full width
-        actionScroll?.animate()?.alpha(0f)?.setDuration(150)?.withEndAction { actionScroll?.visibility = View.GONE }?.start()
-        
-        replyBar?.visibility = View.VISIBLE
-        replyBar?.alpha = 0f
-        
-        val replyLp = replyBar?.layoutParams as? LinearLayout.LayoutParams
-        replyLp?.width = dp(initialWidthDp)
-        replyBar?.layoutParams = replyLp
-        
-        replyBar?.animate()?.alpha(1f)?.setDuration(200)?.start()
-        
-        val widthAnim = ValueAnimator.ofInt(dp(initialWidthDp), LinearLayout.LayoutParams.MATCH_PARENT).apply {
-            duration = 400
-            interpolator = expandInterpolator
-            addUpdateListener { 
-                replyLp?.width = it.animatedValue as Int
-                replyBar?.layoutParams = replyLp
-            }
-        }
-        widthAnim.start()
-
-        // 2. Focus & Keyboard (Pro HyperOS Logic)
+        // 1. Prepare Window Manager for focus (Binder call - Only Once)
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-        p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+        p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+        p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or 
+                         WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
+
+        // 2. Liquid Morph Animation via TransitionManager
+        val transition = AutoTransition().apply {
+            duration = 450
+            interpolator = expandInterpolator
+        }
+        TransitionManager.beginDelayedTransition(gridRoot, transition)
+
+        // Morph effect: start reply bar at the same width as the button
+        val replyLp = replyBar?.layoutParams as? LinearLayout.LayoutParams
+        replyLp?.width = replyButton.width
+        replyBar?.layoutParams = replyLp
         
-        visualRoot?.postDelayed({
-            windowManager?.updateViewLayout(visualRoot, p)
+        actionScroll?.visibility = View.GONE
+        replyBar?.visibility = View.VISIBLE
+        replyBar?.alpha = 1f
+        
+        // After transition starts, set to full width
+        replyEditText?.post {
+            TransitionManager.beginDelayedTransition(gridRoot, transition)
+            replyLp?.width = LinearLayout.LayoutParams.MATCH_PARENT
+            replyBar?.layoutParams = replyLp
+        }
+
+        // 3. Reliable Keyboard Sequence
+        armImeShowSequence()
+    }
+
+    private fun armImeShowSequence() {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+
+        fun attemptShow(attempt: Int) {
+            if (!isReplyMode) return
+            
             replyEditText?.requestFocus()
-            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-        }, 100)
+            imm.restartInput(replyEditText)
+            
+            val ok = imm.showSoftInput(replyEditText, InputMethodManager.SHOW_IMPLICIT)
+            
+            if (!ok && attempt < 6) {
+                mainHandler.postDelayed({ attemptShow(attempt + 1) }, 100L + (attempt * 100L))
+            } else if (!ok) {
+                // Nuclear fallbacks from GPT 5.2 & Fable 5
+                performGlobalAction(AccessibilityService.GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD)
+                imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                
+                // Deep touch simulation
+                visualRoot?.postDelayed({
+                    if (isReplyMode && !imm.isAcceptingText) {
+                        val now = SystemClock.uptimeMillis()
+                        replyEditText?.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 0f, 0f, 0))
+                        replyEditText?.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, 0f, 0f, 0))
+                    }
+                }, 100)
+            }
+        }
+
+        // Wait for genuine system focus confirmed by WMS
+        val vto = visualRoot?.viewTreeObserver
+        vto?.addOnWindowFocusChangeListener(object : ViewTreeObserver.OnWindowFocusChangeListener {
+            override fun onWindowFocusChanged(hasFocus: Boolean) {
+                if (hasFocus && isReplyMode) {
+                    vto.removeOnWindowFocusChangeListener(this)
+                    mainHandler.postDelayed({ attemptShow(0) }, 50)
+                }
+            }
+        })
+        
+        // Safety timeout
+        mainHandler.postDelayed({ if (isReplyMode) attemptShow(0) }, 450)
     }
 
     private fun exitReplyMode() {
@@ -282,16 +331,17 @@ class HyperAccessibilityService : AccessibilityService() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(replyEditText?.windowToken, 0)
         
-        replyBar?.animate()?.alpha(0f)?.setDuration(200)?.withEndAction { 
-            replyBar?.visibility = View.GONE
-            actionScroll?.visibility = View.VISIBLE
-            actionScroll?.animate()?.alpha(1f)?.setDuration(200)?.start()
-        }?.start()
+        TransitionManager.beginDelayedTransition(gridRoot, AutoTransition().apply { duration = 280 })
+        replyBar?.visibility = View.GONE
+        actionScroll?.visibility = View.VISIBLE
+        actionScroll?.alpha = 1f
 
         val p = visualParams ?: return
         p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+        
         visualRoot?.postDelayed({
-            windowManager?.updateViewLayout(visualRoot, p)
+            try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
             if (notificationQueue.isNotEmpty()) processNextInQueue() else postCollapseIsland()
         }, 150)
     }
