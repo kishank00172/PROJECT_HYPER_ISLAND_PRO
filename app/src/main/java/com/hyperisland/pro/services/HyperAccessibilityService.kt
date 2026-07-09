@@ -102,6 +102,7 @@ class HyperAccessibilityService : AccessibilityService() {
     
     private var gridRoot: LinearLayout? = null
     private var appIconView: ImageView? = null
+    private var headerLine: TextView? = null
     private var appNameText: TextView? = null
     private var timeStampText: TextView? = null
     private var titleText: TextView? = null
@@ -214,18 +215,20 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateNotificationContent(model: NotificationModel) {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName
-        appIconView?.setImageDrawable(loadAppIcon(model.packageName))
-        appNameText?.text = model.appName; timeStampText?.text = formatNotificationTime(model.postTime)
-        titleText?.text = model.title; messageText?.text = model.message
-        titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
-        messageText?.visibility = if (model.message.isBlank()) View.GONE else View.VISIBLE
+        this@HyperAccessibilityService.appIconView?.setImageDrawable(loadAppIcon(model.packageName))
+        this@HyperAccessibilityService.appNameText?.text = model.appName
+        this@HyperAccessibilityService.timeStampText?.text = formatNotificationTime(model.postTime)
+        this@HyperAccessibilityService.titleText?.text = model.title
+        this@HyperAccessibilityService.messageText?.text = model.message
+        this@HyperAccessibilityService.titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
+        this@HyperAccessibilityService.messageText?.visibility = if (model.message.isBlank()) View.GONE else View.VISIBLE
         setupActionTiles(model.actions); forceRegionUpdate()
     }
 
     private fun setupActionTiles(actions: List<Notification.Action>) {
-        footerActions?.removeAllViews()
-        if (actions.isEmpty()) { actionScroll?.visibility = View.GONE; return }
-        actionScroll?.visibility = View.VISIBLE
+        this@HyperAccessibilityService.footerActions?.removeAllViews()
+        if (actions.isEmpty()) { this@HyperAccessibilityService.actionScroll?.visibility = View.GONE; return }
+        this@HyperAccessibilityService.actionScroll?.visibility = View.VISIBLE
         val totalWidthDp = AppSettings.getIslandExpandedWidthDp(this) - 56
         val availableWidthDp = (totalWidthDp * 0.8).toInt()
         val btnWidth = when (actions.size) { 1 -> (availableWidthDp * 0.70).toInt(); 2 -> (availableWidthDp * 0.46).toInt(); else -> (availableWidthDp * 0.31).toInt() }
@@ -242,7 +245,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     }
                 }
             }
-            footerActions?.addView(btn, LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) })
+            this@HyperAccessibilityService.footerActions?.addView(btn, LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) })
         }
     }
 
@@ -251,7 +254,7 @@ class HyperAccessibilityService : AccessibilityService() {
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         
-        // 1. ONE-TIME Window Focus Switch
+        // 1. Prepare Window Manager Focus
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
@@ -259,30 +262,26 @@ class HyperAccessibilityService : AccessibilityService() {
                          WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
 
-        // 2. Pro Morph Animation (Using Set of Transitions)
+        // 2. Pro Morph Transition
         val morphSet = TransitionSet().apply {
             addTransition(ChangeBounds())
             addTransition(android.transition.Fade())
             duration = 400
             interpolator = expandInterpolator
         }
-        
-        TransitionManager.beginDelayedTransition(gridRoot, morphSet)
+        TransitionManager.beginDelayedTransition(this@HyperAccessibilityService.gridRoot, morphSet)
 
-        // UI Manipulation: Hide actions, show reply bar at FULL WIDTH immediately
-        // TransitionManager handles the interpolation from small buttons to big box
-        actionScroll?.visibility = View.GONE
-        replyBar?.visibility = View.VISIBLE
-        replyBar?.alpha = 1f
-        replyBar?.layoutParams = (replyBar?.layoutParams as LinearLayout.LayoutParams).apply { 
+        this@HyperAccessibilityService.actionScroll?.visibility = View.GONE
+        this@HyperAccessibilityService.replyBar?.visibility = View.VISIBLE
+        this@HyperAccessibilityService.replyBar?.alpha = 1f
+        this@HyperAccessibilityService.replyBar?.layoutParams = (this@HyperAccessibilityService.replyBar?.layoutParams as LinearLayout.LayoutParams).apply { 
             width = LinearLayout.LayoutParams.MATCH_PARENT 
         }
         
-        replyEditText?.isFocusable = true
-        replyEditText?.isFocusableInTouchMode = true
-        replyEditText?.requestFocus()
+        this@HyperAccessibilityService.replyEditText?.isFocusable = true
+        this@HyperAccessibilityService.replyEditText?.isFocusableInTouchMode = true
+        this@HyperAccessibilityService.replyEditText?.requestFocus()
 
-        // 3. Reliable Keyboard Sequence for HyperOS
         armImeShowSequence()
     }
 
@@ -291,31 +290,25 @@ class HyperAccessibilityService : AccessibilityService() {
 
         fun attemptShow(attempt: Int) {
             if (!isReplyMode) return
-            
-            replyEditText?.requestFocus()
-            imm.restartInput(replyEditText)
-            
-            // FABLE 5: Try standard showSoftInput first
-            val ok = imm.showSoftInput(replyEditText, InputMethodManager.SHOW_IMPLICIT)
+            this@HyperAccessibilityService.replyEditText?.requestFocus()
+            imm.restartInput(this@HyperAccessibilityService.replyEditText)
+            val ok = imm.showSoftInput(this@HyperAccessibilityService.replyEditText, InputMethodManager.SHOW_IMPLICIT)
             
             if (!ok && attempt < 6) {
                 mainHandler.postDelayed({ attemptShow(attempt + 1) }, 100L + (attempt * 100L))
             } else if (!ok) {
-                // Nuclear fallbacks using value 16 for API 33 compatibility
                 performGlobalAction(GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD)
                 imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-                
                 visualRoot?.postDelayed({
                     if (isReplyMode && !imm.isAcceptingText) {
                         val now = SystemClock.uptimeMillis()
-                        replyEditText?.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 0f, 0f, 0))
-                        replyEditText?.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, 0f, 0f, 0))
+                        this@HyperAccessibilityService.replyEditText?.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 0f, 0f, 0))
+                        this@HyperAccessibilityService.replyEditText?.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, 0f, 0f, 0))
                     }
                 }, 100)
             }
         }
 
-        // Wait for Window Focus to be confirmed by System
         val vto = visualRoot?.viewTreeObserver
         vto?.addOnWindowFocusChangeListener(object : ViewTreeObserver.OnWindowFocusChangeListener {
             override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -325,20 +318,18 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
             }
         })
-        
-        // Safety timeout
         mainHandler.postDelayed({ if (isReplyMode) attemptShow(0) }, 450)
     }
 
     private fun exitReplyMode() {
         isReplyMode = false
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.hideSoftInputFromWindow(replyEditText?.windowToken, 0)
+        imm.hideSoftInputFromWindow(this@HyperAccessibilityService.replyEditText?.windowToken, 0)
         
-        TransitionManager.beginDelayedTransition(gridRoot, AutoTransition().apply { duration = 280 })
-        replyBar?.visibility = View.GONE
-        actionScroll?.visibility = View.VISIBLE
-        actionScroll?.alpha = 1f
+        TransitionManager.beginDelayedTransition(this@HyperAccessibilityService.gridRoot, AutoTransition().apply { duration = 280 })
+        this@HyperAccessibilityService.replyBar?.visibility = View.GONE
+        this@HyperAccessibilityService.actionScroll?.visibility = View.VISIBLE
+        this@HyperAccessibilityService.actionScroll?.alpha = 1f
 
         val p = visualParams ?: return
         p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -373,14 +364,14 @@ class HyperAccessibilityService : AccessibilityService() {
             duration = if (target == IslandStage.STAGE1_IDLE) 300L else 450L
             interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
             addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) gridRoot?.alpha = 1f - t; islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) }
-            addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { if (target == IslandStage.STAGE1_IDLE) { gridRoot?.visibility = View.GONE; notificationMode = false }; updateOutsideWatcherForState(); isProcessingQueue = false } })
+            addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { if (target == IslandStage.STAGE1_IDLE) { this@HyperAccessibilityService.gridRoot?.visibility = View.GONE; notificationMode = false }; updateOutsideWatcherForState(); isProcessingQueue = false } })
         }
         morphAnimator = anim; anim.start()
     }
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
-        islandLayoutParams?.width = w; islandLayoutParams?.height = h; islandBackground?.cornerRadius = r
-        outlineRadius = r; islandView?.layoutParams = islandLayoutParams; visualRoot?.invalidateOutline(); forceRegionUpdate()
+        this@HyperAccessibilityService.islandLayoutParams?.width = w; this@HyperAccessibilityService.islandLayoutParams?.height = h; this@HyperAccessibilityService.islandBackground?.cornerRadius = r
+        this@HyperAccessibilityService.outlineRadius = r; this@HyperAccessibilityService.islandView?.layoutParams = this@HyperAccessibilityService.islandLayoutParams; visualRoot?.invalidateOutline(); forceRegionUpdate()
     }
 
     private fun getTargetWidth(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandWidthDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this); IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedWidthDp(this) }
@@ -410,7 +401,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         val info = args[0]
                         info.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType).invoke(info, 3)
                         val region = info.javaClass.getField("touchableRegion").get(info) as Region
-                        val rect = Rect(); islandView?.getGlobalVisibleRect(rect)
+                        val rect = Rect(); this@HyperAccessibilityService.islandView?.getGlobalVisibleRect(rect)
                         if (!rect.isEmpty) region.set(rect)
                     }
                     null
@@ -418,41 +409,41 @@ class HyperAccessibilityService : AccessibilityService() {
                 observer.javaClass.getMethod("addOnComputeInternalInsetsListener", listenerClass).invoke(observer, proxy)
             } catch (_: Exception) {}
         }
-        islandBackground = createIslandBackground(r)
-        islandView = FrameLayout(this).apply {
-            background = islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, outlineRadius) } }
-            gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
+        this@HyperAccessibilityService.islandBackground = createIslandBackground(r)
+        this@HyperAccessibilityService.islandView = FrameLayout(this).apply {
+            background = this@HyperAccessibilityService.islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, this@HyperAccessibilityService.outlineRadius) } }
+            this@HyperAccessibilityService.gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)); visibility = View.GONE; alpha = 0f; weightSum = 1f
-                val iconSec = FrameLayout(context).apply { appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
+                val iconSec = FrameLayout(context).apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
                 val contentSec = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0)
                     val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                    appNameText = TextView(context).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; typeface = Typeface.DEFAULT_BOLD }
-                    timeStampText = TextView(context).apply { setTextColor(Color.GRAY); textSize = 10f; setPadding(dp(6), 0, 0, 0) }
-                    header.addView(appNameText); header.addView(timeStampText)
-                    headerLine = appNameText
-                    titleText = TextView(context).apply { setTextColor(Color.WHITE); textSize = 15.5f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-                    messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-                    actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(footerActions) }
+                    this@HyperAccessibilityService.appNameText = TextView(context).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; typeface = Typeface.DEFAULT_BOLD }
+                    this@HyperAccessibilityService.timeStampText = TextView(context).apply { setTextColor(Color.GRAY); textSize = 10f; setPadding(dp(6), 0, 0, 0) }
+                    header.addView(this@HyperAccessibilityService.appNameText); header.addView(this@HyperAccessibilityService.timeStampText)
+                    this@HyperAccessibilityService.headerLine = this@HyperAccessibilityService.appNameText
+                    this@HyperAccessibilityService.titleText = TextView(context).apply { setTextColor(Color.WHITE); textSize = 15.5f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+                    this@HyperAccessibilityService.messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+                    this@HyperAccessibilityService.actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; this@HyperAccessibilityService.footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(this@HyperAccessibilityService.footerActions) }
                     
                     // Reply Bar UI
-                    replyBar = LinearLayout(context).apply { 
+                    this@HyperAccessibilityService.replyBar = LinearLayout(context).apply { 
                         orientation = LinearLayout.HORIZONTAL; visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0)
                         val inputBg = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.parseColor("#1A1A1A")); cornerRadius = dp(12).toFloat(); setStroke(dp(1), Color.parseColor("#333333")) }
-                        replyEditText = EditText(context).apply { hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = inputBg; setPadding(dp(12), dp(8), dp(12), dp(8)); layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f) }
-                        sendButton = TextView(context).apply { text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(12), 0, 0, 0); setOnClickListener { exitReplyMode() } }
-                        addView(replyEditText); addView(sendButton)
+                        this@HyperAccessibilityService.replyEditText = EditText(context).apply { hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = inputBg; setPadding(dp(12), dp(8), dp(12), dp(8)); layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f) }
+                        this@HyperAccessibilityService.sendButton = TextView(context).apply { text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(12), 0, 0, 0); setOnClickListener { exitReplyMode() } }
+                        addView(this@HyperAccessibilityService.replyEditText); addView(this@HyperAccessibilityService.sendButton)
                     }
 
-                    addView(header); addView(titleText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(1) }); addView(messageText, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(1) }); addView(actionScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }); addView(replyBar)
+                    addView(header); addView(this@HyperAccessibilityService.titleText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(1) }); addView(this@HyperAccessibilityService.messageText, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(1) }); addView(this@HyperAccessibilityService.actionScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }); addView(this@HyperAccessibilityService.replyBar)
                 }
                 addView(iconSec, LinearLayout.LayoutParams(0, -2, 0.2f)); addView(contentSec, LinearLayout.LayoutParams(0, -2, 0.8f))
             }
-            addView(gridRoot, FrameLayout.LayoutParams(-1, -1))
+            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(-1, -1))
             setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_UP) { if (e.rawY - touchStartY < -dp(24)) postCollapseIsland() else if (abs(e.rawY - touchStartY) < dp(10)) postToggleExpanded() } else if (e.action == MotionEvent.ACTION_DOWN) { touchStartY = e.rawY }; true }
         }
-        islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
-        visualRoot?.addView(islandView, islandLayoutParams); updateOutlineForIsland(w, h, r)
+        this@HyperAccessibilityService.islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
+        visualRoot?.addView(this@HyperAccessibilityService.islandView, this@HyperAccessibilityService.islandLayoutParams); updateOutlineForIsland(w, h, r)
         try { windowManager?.addView(visualRoot, visualParams) } catch (_: Exception) { hideIslandInternal() }
     }
 
