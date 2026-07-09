@@ -22,7 +22,10 @@ import android.os.Looper
 import android.os.SystemClock
 import android.text.TextUtils
 import android.transition.AutoTransition
+import android.transition.ChangeBounds
+import android.transition.Transition
 import android.transition.TransitionManager
+import android.transition.TransitionSet
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -70,7 +73,6 @@ class HyperAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
-        // Constant for showing keyboard, added in API 33
         private const val GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD = 16
 
         @Volatile private var instance: HyperAccessibilityService? = null
@@ -100,7 +102,6 @@ class HyperAccessibilityService : AccessibilityService() {
     
     private var gridRoot: LinearLayout? = null
     private var appIconView: ImageView? = null
-    private var headerLine: TextView? = null
     private var appNameText: TextView? = null
     private var timeStampText: TextView? = null
     private var titleText: TextView? = null
@@ -234,7 +235,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 background = createIslandBackground(dp(16).toFloat()).apply { setColor(Color.parseColor("#222222")); setStroke(dp(1), Color.parseColor("#444444")) }
                 isClickable = true
                 setOnClickListener { 
-                    if (action.title.toString().contains("Reply", true)) enterReplyMode(this)
+                    if (action.title.toString().contains("Reply", true)) enterReplyMode()
                     else {
                         val oldT = text; text = "✓ $oldT"; setTextColor(Color.GREEN)
                         postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldT; setTextColor(Color.WHITE) } }, 500)
@@ -245,12 +246,12 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun enterReplyMode(replyButton: View) {
+    private fun enterReplyMode() {
         if (isReplyMode) return
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         
-        // 1. Prepare Window Manager for focus (Binder call - Only Once)
+        // 1. ONE-TIME Window Focus Switch
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
@@ -258,30 +259,30 @@ class HyperAccessibilityService : AccessibilityService() {
                          WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
 
-        // 2. Liquid Morph Animation via TransitionManager
-        val transition = AutoTransition().apply {
+        // 2. Pro Morph Animation (Using Set of Transitions)
+        val morphSet = TransitionSet().apply {
+            addTransition(ChangeBounds())
+            addTransition(android.transition.Fade())
             duration = 400
             interpolator = expandInterpolator
         }
-        TransitionManager.beginDelayedTransition(gridRoot, transition)
-
-        // Morph effect: start reply bar at the same width as the button
-        val replyLp = replyBar?.layoutParams as? LinearLayout.LayoutParams
-        replyLp?.width = replyButton.width
-        replyBar?.layoutParams = replyLp
         
+        TransitionManager.beginDelayedTransition(gridRoot, morphSet)
+
+        // UI Manipulation: Hide actions, show reply bar at FULL WIDTH immediately
+        // TransitionManager handles the interpolation from small buttons to big box
         actionScroll?.visibility = View.GONE
         replyBar?.visibility = View.VISIBLE
         replyBar?.alpha = 1f
-        
-        // After transition starts, set to full width
-        replyEditText?.post {
-            TransitionManager.beginDelayedTransition(gridRoot, transition)
-            replyLp?.width = LinearLayout.LayoutParams.MATCH_PARENT
-            replyBar?.layoutParams = replyLp
+        replyBar?.layoutParams = (replyBar?.layoutParams as LinearLayout.LayoutParams).apply { 
+            width = LinearLayout.LayoutParams.MATCH_PARENT 
         }
+        
+        replyEditText?.isFocusable = true
+        replyEditText?.isFocusableInTouchMode = true
+        replyEditText?.requestFocus()
 
-        // 3. Reliable Keyboard Sequence
+        // 3. Reliable Keyboard Sequence for HyperOS
         armImeShowSequence()
     }
 
@@ -294,16 +295,16 @@ class HyperAccessibilityService : AccessibilityService() {
             replyEditText?.requestFocus()
             imm.restartInput(replyEditText)
             
+            // FABLE 5: Try standard showSoftInput first
             val ok = imm.showSoftInput(replyEditText, InputMethodManager.SHOW_IMPLICIT)
             
             if (!ok && attempt < 6) {
                 mainHandler.postDelayed({ attemptShow(attempt + 1) }, 100L + (attempt * 100L))
             } else if (!ok) {
-                // Nuclear fallbacks using hardcoded value 16 for API 33 compatibility
+                // Nuclear fallbacks using value 16 for API 33 compatibility
                 performGlobalAction(GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD)
                 imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
                 
-                // Deep touch simulation
                 visualRoot?.postDelayed({
                     if (isReplyMode && !imm.isAcceptingText) {
                         val now = SystemClock.uptimeMillis()
@@ -314,7 +315,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Wait for genuine system focus confirmed by WMS
+        // Wait for Window Focus to be confirmed by System
         val vto = visualRoot?.viewTreeObserver
         vto?.addOnWindowFocusChangeListener(object : ViewTreeObserver.OnWindowFocusChangeListener {
             override fun onWindowFocusChanged(hasFocus: Boolean) {
