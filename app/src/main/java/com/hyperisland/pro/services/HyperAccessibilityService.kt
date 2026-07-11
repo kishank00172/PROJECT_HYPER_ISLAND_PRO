@@ -389,6 +389,7 @@ class HyperAccessibilityService : AccessibilityService() {
         visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; windowAnimations = 0; title = "HyperIslandProVisual" }
         
         // THE INTERCEPTOR: Detects touches based on Reply State
+        // Phase 3.5 Fluid — Off-Switch + Reflection Hack (compile-safe)
         visualRoot = object : FrameLayout(this) {
             override fun onTouchEvent(event: MotionEvent): Boolean {
                 if (isReplyMode && event.action == MotionEvent.ACTION_DOWN) {
@@ -401,21 +402,61 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
                 return super.onTouchEvent(event)
             }
-        }.apply { setBackgroundColor(0)
-            viewTreeObserver.addOnComputeInternalInsetsListener { insets ->
-                insets.contentInsets.setEmpty(); insets.visibleInsets.setEmpty(); insets.touchableRegion.setEmpty()
-                try { insets.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType).invoke(insets, 3) } catch (_: Exception) {}
-                
-                if (isReplyMode) {
-                    // FULL SCREEN INTERCEPTION during reply
-                    val rootW = resources.displayMetrics.widthPixels
-                    val rootH = resources.displayMetrics.heightPixels
-                    insets.touchableRegion.set(0, 0, rootW, rootH)
-                } else {
-                    // Normal Island bounds
-                    val rect = Rect(); this@HyperAccessibilityService.islandView?.getGlobalVisibleRect(rect)
-                    if (!rect.isEmpty) insets.touchableRegion.set(rect)
+        }.apply { 
+            setBackgroundColor(0)
+            // Reflection Hack — OnComputeInternalInsetsListener (hidden API)
+            // Master Prompt: Touch Pass-through via Reflection — system UI gestures stay alive
+            try {
+                val observer = viewTreeObserver
+                val listenerClass = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
+                val proxy = Proxy.newProxyInstance(
+                    listenerClass.classLoader,
+                    arrayOf(listenerClass)
+                ) { _, method, args ->
+                    if (method.name == "onComputeInternalInsets") {
+                        val info = args?.get(0) ?: return@newProxyInstance null
+                        try {
+                            // setTouchableInsets(TOUCHABLE_INSETS_REGION = 3)
+                            info.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType)
+                                .invoke(info, 3)
+                        } catch (_: Exception) {}
+
+                        // Clear content / visible insets via reflection if available
+                        try {
+                            val contentInsets = info.javaClass.getField("contentInsets").get(info) as Rect
+                            contentInsets.setEmpty()
+                        } catch (_: Exception) {}
+                        try {
+                            val visibleInsets = info.javaClass.getField("visibleInsets").get(info) as Rect
+                            visibleInsets.setEmpty()
+                        } catch (_: Exception) {}
+
+                        try {
+                            val region = info.javaClass.getField("touchableRegion").get(info) as Region
+                            region.setEmpty()
+
+                            if (isReplyMode) {
+                                // FULL SCREEN INTERCEPTION during reply — Off-Switch
+                                // Prompt #2: "touch ko system ui ko mat do ... animation reverse me chal jayega"
+                                val rootW = resources.displayMetrics.widthPixels
+                                val rootH = resources.displayMetrics.heightPixels
+                                region.set(0, 0, rootW, rootH)
+                            } else {
+                                // Normal Island bounds — Touch Pass-through
+                                val rect = Rect()
+                                this@HyperAccessibilityService.islandView?.getGlobalVisibleRect(rect)
+                                if (!rect.isEmpty()) {
+                                    region.set(rect)
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    null
                 }
+                observer.javaClass.getMethod("addOnComputeInternalInsetsListener", listenerClass)
+                    .invoke(observer, proxy)
+            } catch (_: Exception) {
+                // Reflection failed — fallback to full touch (safe)
             }
         }
         
