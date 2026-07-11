@@ -233,6 +233,10 @@ class HyperAccessibilityService : AccessibilityService() {
         setupActionTiles(model.actions); forceRegionUpdate()
     }
 
+    // Perfect Morph — remember last reply source for reverse animation
+    private var lastReplySourceRect: Rect? = null
+    private var lastReplySourceRadius: Float = dp(16).toFloat()
+
     private fun setupActionTiles(actions: List<Notification.Action>) {
         this@HyperAccessibilityService.footerActions?.removeAllViews()
         if (actions.isEmpty()) { this@HyperAccessibilityService.actionScroll?.visibility = View.GONE; return }
@@ -245,9 +249,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 text = action.title; setTextColor(Color.WHITE); textSize = 11f; gravity = Gravity.CENTER; setPadding(dp(12), 0, dp(12), 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
                 background = createIslandBackground(dp(16).toFloat()).apply { setColor(Color.parseColor("#222222")); setStroke(dp(1), Color.parseColor("#444444")) }
                 isClickable = true
-                setOnClickListener { 
-                    if (action.title.toString().contains("Reply", true)) enterReplyMode()
-                    else {
+                setOnClickListener { v ->
+                    if (action.title.toString().contains("Reply", true)) {
+                        // Perfect Morph — pass source view for tile expansion
+                        enterReplyMode(v)
+                    } else {
                         val oldT = text; text = "✓ $oldT"; setTextColor(Color.GREEN)
                         postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldT; setTextColor(Color.WHITE) } }, 500)
                     }
@@ -257,96 +263,191 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun enterReplyMode() {
+    // Perfect Morph state
+    private var lastReplySourceView: View? = null
+
+    private fun enterReplyMode(sourceView: View? = null) {
         if (isReplyMode) return
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
 
-        // 1. Prepare Window Manager Focus & Intercept touches — Anti-Flicker
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
         p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
         try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
 
-        // 2. SLOW-MO LIQUID MORPH — Master Time Phase Control — NO BLANK FIX
-        // Prompt #1: slow master control, animation animation lage, transition nahi
-        // Bug fix: AutoTransition caused blank frame on HyperOS — use alpha crossfade with Slow-Mo timing
         val actionView = this@HyperAccessibilityService.actionScroll
         val replyView = this@HyperAccessibilityService.replyBar
         val editView = this@HyperAccessibilityService.replyEditText
-
-        // Pre-layout replyBar to MATCH_PARENT BEFORE animation — prevents measure jump / blank
-        replyView?.layoutParams = (replyView?.layoutParams as? LinearLayout.LayoutParams)?.apply {
-            width = LinearLayout.LayoutParams.MATCH_PARENT
-        } ?: replyView?.layoutParams
+        val footer = this@HyperAccessibilityService.footerActions
 
         // Ensure grid stays visible — anti-blank
         this@HyperAccessibilityService.gridRoot?.visibility = View.VISIBLE
         this@HyperAccessibilityService.gridRoot?.alpha = 1f
 
-        // Phase A — fade OUT action tiles — 250ms (Slow-Mo start)
-        actionView?.animate()?.cancel()
-        actionView?.animate()
-            ?.alpha(0f)
-            ?.setDuration(250)
-            ?.setInterpolator(collapseInterpolator)
-            ?.setListener(object : AnimatorListenerAdapter() {
+        // --- PERFECT MORPH REPLY ---
+        // User requirement: "Reply wala button morph hoga textbox mei"
+        // NOT: textbox niche se grow
+        if (sourceView != null && replyView != null && actionView != null && footer != null) {
+            // Save source for reverse morph
+            lastReplySourceView = sourceView
+            val srcRect = Rect()
+            sourceView.getGlobalVisibleRect(srcRect)
+            lastReplySourceRect = Rect(srcRect)
+            try {
+                val bg = sourceView.background
+                if (bg is GradientDrawable) {
+                    lastReplySourceRadius = bg.cornerRadius
+                }
+            } catch (_: Exception) {}
+
+            // Fade out sibling action buttons — keep Reply button visible for morph
+            for (i in 0 until footer.childCount) {
+                val child = footer.getChildAt(i)
+                if (child !== sourceView) {
+                    child.animate()?.cancel()
+                    child.animate()?.alpha(0f)?.setDuration(180)?.setInterpolator(collapseInterpolator)?.start()
+                }
+            }
+
+            // Prepare replyBar — make it measure first, invisible
+            replyView.alpha = 0f
+            replyView.visibility = View.VISIBLE
+            replyView.layoutParams = (replyView.layoutParams as? LinearLayout.LayoutParams)?.apply {
+                width = LinearLayout.LayoutParams.MATCH_PARENT
+            } ?: replyView.layoutParams
+
+            // Wait 1 frame for layout — then morph
+            replyView.post {
+                val targetRect = Rect()
+                replyView.getGlobalVisibleRect(targetRect)
+                if (targetRect.width() == 0 || targetRect.height() == 0) {
+                    // fallback — simple crossfade
+                    actionView.animate()?.alpha(0f)?.setDuration(200)?.start()
+                    replyView.alpha = 1f
+                    return@post
+                }
+
+                // Calculate morph transform: source (Reply button) -> target (replyBar)
+                val scaleX = srcRect.width().toFloat() / targetRect.width().coerceAtLeast(1)
+                val scaleY = srcRect.height().toFloat() / targetRect.height().coerceAtLeast(1)
+                val deltaX = (srcRect.centerX() - targetRect.centerX()).toFloat()
+                val deltaY = (srcRect.centerY() - targetRect.centerY()).toFloat()
+
+                // Start replyBar morphed to button size/position
+                replyView.pivotX = 0f
+                replyView.pivotY = 0f
+                replyView.scaleX = scaleX.coerceIn(0.2f, 1f)
+                replyView.scaleY = scaleY.coerceIn(0.2f, 1f)
+                replyView.translationX = deltaX
+                replyView.translationY = deltaY
+                replyView.alpha = 0.92f
+
+                // Hide original Reply button — we are morphing FROM it
+                sourceView.animate()?.alpha(0f)?.setDuration(120)?.start()
+
+                // Fade out actionScroll container background during morph — keep island shape
+                actionView.animate()?.alpha(0f)?.setDuration(220)?.setListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        actionView.visibility = View.INVISIBLE // keep space to avoid jump, not GONE
+                    }
+                })?.start()
+
+                // MASTER TIME PHASE — 750ms Slow-Mo Liquid Morph
+                // "animation animation lagega transition nhi"
+                replyView.animate()?.cancel()
+                replyView.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationX(0f)
+                    .translationY(0f)
+                    .alpha(1f)
+                    .setDuration(720)
+                    .setInterpolator(expandInterpolator)
+                    .setListener(object : AnimatorListenerAdapter() {
+                        override fun onAnimationEnd(animation: Animator) {
+                            replyView.scaleX = 1f
+                            replyView.scaleY = 1f
+                            replyView.translationX = 0f
+                            replyView.translationY = 0f
+                            replyView.alpha = 1f
+                            // fully hide actionScroll after morph completes
+                            actionView.visibility = View.GONE
+                            forceRegionUpdate()
+                        }
+                    })
+                    .start()
+
+                // Corner radius morph — button 16dp -> textbox 12dp — smooth
+                try {
+                    val replyBg = replyView.background
+                    if (replyBg is GradientDrawable) {
+                        val startR = lastReplySourceRadius
+                        val endR = dp(12).toFloat()
+                        ValueAnimator.ofFloat(0f, 1f).apply {
+                            duration = 650
+                            interpolator = morphInterpolator
+                            addUpdateListener {
+                                val t = it.animatedValue as Float
+                                replyBg.cornerRadius = startR + (endR - startR) * t
+                            }
+                            start()
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // EditText fade-in stagger — 220ms delay, so text appears mid-morph — Apple-like
+                editView?.alpha = 0f
+                editView?.animate()?.alpha(1f)?.setStartDelay(220)?.setDuration(380)?.setInterpolator(morphInterpolator)?.start()
+                sendButton?.alpha = 0f
+                sendButton?.animate()?.alpha(1f)?.setStartDelay(320)?.setDuration(300)?.start()
+            }
+
+        } else {
+            // Fallback — no source view — classic crossfade (no blank)
+            actionView?.animate()?.cancel()
+            actionView?.animate()?.alpha(0f)?.setDuration(220)?.setInterpolator(collapseInterpolator)?.setListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     actionView.visibility = View.GONE
-                    actionView.alpha = 1f // reset for next time
+                    actionView.alpha = 1f
                 }
             })?.start()
 
-        // Phase B — fade IN reply bar — 500ms Slow-Mo, startDelay 220ms = total ~720ms ≈ 750ms master
-        replyView?.apply {
-            visibility = View.VISIBLE
-            alpha = 0f
-            translationY = dp(14).toFloat()
-            animate()?.cancel()
-            animate()
-                ?.alpha(1f)
-                ?.translationY(0f)
-                ?.setStartDelay(220)
-                ?.setDuration(500)
-                ?.setInterpolator(expandInterpolator)
-                ?.setListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
-                        alpha = 1f
-                        translationY = 0f
-                    }
-                })?.start()
+            replyView?.apply {
+                visibility = View.VISIBLE
+                alpha = 0f
+                translationY = 0f // NO niche se grow — direct fade
+                scaleX = 0.94f
+                scaleY = 0.94f
+                animate()?.cancel()
+                animate()
+                    ?.alpha(1f)
+                    ?.scaleX(1f)
+                    ?.scaleY(1f)
+                    ?.setDuration(550)
+                    ?.setInterpolator(expandInterpolator)
+                    ?.start()
+            }
         }
 
-        // INTERCEPTOR UPDATE: Full screen touchable — Off-Switch
-        // Prompt #2: outside touch = back, system UI ko mat do, reverse animation
+        // INTERCEPTOR — Off-Switch full screen
         forceRegionUpdate()
-        // Extra region refresh after layout settles — prevents blank touch area
         mainHandler.postDelayed({ forceRegionUpdate() }, 80)
-        mainHandler.postDelayed({ forceRegionUpdate() }, 300)
+        mainHandler.postDelayed({ forceRegionUpdate() }, 350)
 
-        // 3. Trigger Keyboard — HyperOS Nuclear Chain — with focus guard
+        // Keyboard — Nuclear Chain — delayed to let morph be visible first (your SS shows keyboard covering — purposely delay IME)
         mainHandler.postDelayed({
             editView?.requestFocus()
             editView?.isCursorVisible = true
-
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
             imm.restartInput(editView)
-
-            // NUCLEAR CHAIN Step 3
-            try {
-                performGlobalAction(GLOBAL_ACTION_SHOW_KEYBOARD)
-            } catch (_: Exception) {}
-
-            // Triple fallback
+            try { performGlobalAction(GLOBAL_ACTION_SHOW_KEYBOARD) } catch (_: Exception) {}
             imm.showSoftInput(editView, InputMethodManager.SHOW_IMPLICIT)
-            // Small delay then forced toggle — HyperOS needs time after performGlobalAction
             mainHandler.postDelayed({
-                try {
-                    imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-                } catch (_: Exception) {}
+                try { imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0) } catch (_: Exception) {}
             }, 120)
-        }, 180) // Anti-Flicker: 100-180ms after updateViewLayout — let 750ms morph start first
+        }, 380) // let morph be 50% complete before keyboard pops — prevents blank flash in your SS
     }
 
     private fun exitReplyMode() {
