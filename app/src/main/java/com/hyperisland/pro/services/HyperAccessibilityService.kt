@@ -261,79 +261,153 @@ class HyperAccessibilityService : AccessibilityService() {
         if (isReplyMode) return
         isReplyMode = true
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
-        
-        // 1. Prepare Window Manager Focus & Intercept touches
-        // Master Prompt: Anti-Flicker — updateViewLayout, then 50-100ms delay, then IME
+
+        // 1. Prepare Window Manager Focus & Intercept touches — Anti-Flicker
         val p = visualParams ?: return
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
         p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
         try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
 
-        // 2. SLOW-MO LIQUID MORPH (750ms) — Master Time Phase Control
-        // Prompt #1: "ham sabkuchh slow kar denge jisse animation smooth hoga, animation animation lagega transition nhi"
-        // Pure overall animation ko ek time phase me — master control
-        val transition = AutoTransition().apply {
-            duration = 750
-            interpolator = expandInterpolator
-        }
-        TransitionManager.beginDelayedTransition(this@HyperAccessibilityService.gridRoot, transition)
+        // 2. SLOW-MO LIQUID MORPH — Master Time Phase Control — NO BLANK FIX
+        // Prompt #1: slow master control, animation animation lage, transition nahi
+        // Bug fix: AutoTransition caused blank frame on HyperOS — use alpha crossfade with Slow-Mo timing
+        val actionView = this@HyperAccessibilityService.actionScroll
+        val replyView = this@HyperAccessibilityService.replyBar
+        val editView = this@HyperAccessibilityService.replyEditText
 
-        this@HyperAccessibilityService.actionScroll?.visibility = View.GONE
-        this@HyperAccessibilityService.replyBar?.visibility = View.VISIBLE
-        this@HyperAccessibilityService.replyBar?.alpha = 1f
-        this@HyperAccessibilityService.replyBar?.layoutParams = (this@HyperAccessibilityService.replyBar?.layoutParams as LinearLayout.LayoutParams).apply { 
-            width = LinearLayout.LayoutParams.MATCH_PARENT 
+        // Pre-layout replyBar to MATCH_PARENT BEFORE animation — prevents measure jump / blank
+        replyView?.layoutParams = (replyView?.layoutParams as? LinearLayout.LayoutParams)?.apply {
+            width = LinearLayout.LayoutParams.MATCH_PARENT
+        } ?: replyView?.layoutParams
+
+        // Ensure grid stays visible — anti-blank
+        this@HyperAccessibilityService.gridRoot?.visibility = View.VISIBLE
+        this@HyperAccessibilityService.gridRoot?.alpha = 1f
+
+        // Phase A — fade OUT action tiles — 250ms (Slow-Mo start)
+        actionView?.animate()?.cancel()
+        actionView?.animate()
+            ?.alpha(0f)
+            ?.setDuration(250)
+            ?.setInterpolator(collapseInterpolator)
+            ?.setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    actionView.visibility = View.GONE
+                    actionView.alpha = 1f // reset for next time
+                }
+            })?.start()
+
+        // Phase B — fade IN reply bar — 500ms Slow-Mo, startDelay 220ms = total ~720ms ≈ 750ms master
+        replyView?.apply {
+            visibility = View.VISIBLE
+            alpha = 0f
+            translationY = dp(14).toFloat()
+            animate()?.cancel()
+            animate()
+                ?.alpha(1f)
+                ?.translationY(0f)
+                ?.setStartDelay(220)
+                ?.setDuration(500)
+                ?.setInterpolator(expandInterpolator)
+                ?.setListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        alpha = 1f
+                        translationY = 0f
+                    }
+                })?.start()
         }
-        
-        // INTERCEPTOR UPDATE: Full screen touchable to act as "Back/Off-Switch"
-        // Prompt #2: "reply pe click karne ke baad ... touch ko system ui ko mat do ... use touch ka matlab hoga ... animation reverse me chal jayega"
+
+        // INTERCEPTOR UPDATE: Full screen touchable — Off-Switch
+        // Prompt #2: outside touch = back, system UI ko mat do, reverse animation
         forceRegionUpdate()
+        // Extra region refresh after layout settles — prevents blank touch area
+        mainHandler.postDelayed({ forceRegionUpdate() }, 80)
+        mainHandler.postDelayed({ forceRegionUpdate() }, 300)
 
-        // 3. Trigger Keyboard — HyperOS Keyboard "Nuclear" Chain
-        // Master Prompt §3.5:
-        // 1. Clear FLAG_ALT_FOCUSABLE_IM (done above)
-        // 2. imm.restartInput(view)
-        // 3. performGlobalAction(16) — GLOBAL_ACTION_SHOW_ON_SCREEN_KEYBOARD
-        // 4. Wait for OnWindowFocusChangeListener
+        // 3. Trigger Keyboard — HyperOS Nuclear Chain — with focus guard
         mainHandler.postDelayed({
-            this@HyperAccessibilityService.replyEditText?.requestFocus()
-            
-            // Anti-Flicker: ensure focus first
+            editView?.requestFocus()
+            editView?.isCursorVisible = true
+
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.restartInput(this@HyperAccessibilityService.replyEditText)
-            
-            // NUCLEAR CHAIN — Step 3: performGlobalAction for Xiaomi HyperOS
+            imm.restartInput(editView)
+
+            // NUCLEAR CHAIN Step 3
             try {
                 performGlobalAction(GLOBAL_ACTION_SHOW_KEYBOARD)
             } catch (_: Exception) {}
-            
-            // Step 4: Triple fallback
-            imm.showSoftInput(this@HyperAccessibilityService.replyEditText, InputMethodManager.SHOW_IMPLICIT)
-            imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-        }, 100) // Anti-Flicker Rule: 50-100ms delay after updateViewLayout
+
+            // Triple fallback
+            imm.showSoftInput(editView, InputMethodManager.SHOW_IMPLICIT)
+            // Small delay then forced toggle — HyperOS needs time after performGlobalAction
+            mainHandler.postDelayed({
+                try {
+                    imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                } catch (_: Exception) {}
+            }, 120)
+        }, 180) // Anti-Flicker: 100-180ms after updateViewLayout — let 750ms morph start first
     }
 
     private fun exitReplyMode() {
+        if (!isReplyMode) {
+            // already exiting — guard double call
+        }
         isReplyMode = false
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.hideSoftInputFromWindow(this@HyperAccessibilityService.replyEditText?.windowToken, 0)
-        
-        // SLOW-MO REVERSE MORPH
-        TransitionManager.beginDelayedTransition(this@HyperAccessibilityService.gridRoot, AutoTransition().apply { duration = 500 })
-        this@HyperAccessibilityService.replyBar?.visibility = View.GONE
-        this@HyperAccessibilityService.actionScroll?.visibility = View.VISIBLE
-        this@HyperAccessibilityService.actionScroll?.alpha = 1f
+        try {
+            imm.hideSoftInputFromWindow(this@HyperAccessibilityService.replyEditText?.windowToken, 0)
+        } catch (_: Exception) {}
 
-        val p = visualParams ?: return
-        p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
-        
-        visualRoot?.postDelayed({
-            try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
+        val replyView = this@HyperAccessibilityService.replyBar
+        val actionView = this@HyperAccessibilityService.actionScroll
+
+        // SLOW-MO REVERSE MORPH — no blank — alpha crossfade
+        // Reverse of enter: reply fade out 220ms, actions fade in 400ms
+        replyView?.animate()?.cancel()
+        replyView?.animate()
+            ?.alpha(0f)
+            ?.translationY((-dp(10)).toFloat())
+            ?.setDuration(220)
+            ?.setInterpolator(collapseInterpolator)
+            ?.setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    replyView.visibility = View.GONE
+                    replyView.alpha = 1f
+                    replyView.translationY = 0f
+                    // actions fade in
+                    actionView?.apply {
+                        alpha = 0f
+                        visibility = View.VISIBLE
+                        animate()?.cancel()
+                        animate()
+                            ?.alpha(1f)
+                            ?.setDuration(380)
+                            ?.setInterpolator(morphInterpolator)
+                            ?.start()
+                    }
+                }
+            })?.start()
+
+        // Window flags back — NOT_FOCUSABLE restore
+        val p = visualParams
+        if (p != null) {
+            p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+            visualRoot?.postDelayed({
+                try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
+                forceRegionUpdate()
+            }, 80)
+        }
+
+        // Continue queue after reverse morph completes (~600ms)
+        mainHandler.postDelayed({
             forceRegionUpdate()
-            if (notificationQueue.isNotEmpty()) processNextInQueue() else postCollapseIsland()
-        }, 150)
+            if (notificationQueue.isNotEmpty()) processNextInQueue() else {
+                // stay expanded if user manually opened, else respect auto-collpase
+                // postCollapseIsland() is called by caller if needed
+            }
+        }, 620)
     }
 
     private fun triggerFluidExpansion() {
