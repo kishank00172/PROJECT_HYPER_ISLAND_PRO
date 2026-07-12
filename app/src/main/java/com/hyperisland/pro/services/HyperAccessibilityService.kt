@@ -241,33 +241,161 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun setupActionTiles(actions: List<Notification.Action>) {
         this@HyperAccessibilityService.footerActions?.removeAllViews()
-        if (actions.isEmpty()) { this@HyperAccessibilityService.actionScroll?.visibility = View.GONE; return }
+        replyTileAnimator?.cancel()
+        replyMorphTile = null
+        replyMorphLabel = null
+        replyMorphEditText = null
+        replyMorphSendButton = null
+        replyMorphBg = null
+        replyMorphOriginalWidth = 0
+        replyMorphOriginalHeight = 0
+        this@HyperAccessibilityService.replyBar?.visibility = View.GONE
+
+        if (actions.isEmpty()) {
+            this@HyperAccessibilityService.actionScroll?.visibility = View.GONE
+            return
+        }
+
         this@HyperAccessibilityService.actionScroll?.visibility = View.VISIBLE
+        this@HyperAccessibilityService.actionScroll?.alpha = 1f
+
         val totalWidthDp = AppSettings.getIslandExpandedWidthDp(this) - 56
         val availableWidthDp = (totalWidthDp * 0.8).toInt()
-        val btnWidth = when (actions.size) { 1 -> (availableWidthDp * 0.70).toInt(); 2 -> (availableWidthDp * 0.46).toInt(); else -> (availableWidthDp * 0.31).toInt() }
+        val btnWidth = when (actions.size) {
+            1 -> (availableWidthDp * 0.70).toInt()
+            2 -> (availableWidthDp * 0.46).toInt()
+            else -> (availableWidthDp * 0.31).toInt()
+        }
+
         actions.forEach { action ->
-            val btn = TextView(this).apply {
-                text = action.title; setTextColor(Color.WHITE); textSize = 11f; gravity = Gravity.CENTER; setPadding(dp(12), 0, dp(12), 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-                background = createIslandBackground(dp(16).toFloat()).apply { setColor(Color.parseColor("#222222")); setStroke(dp(1), Color.parseColor("#444444")) }
-                isClickable = true
-                setOnClickListener { v ->
-                    if (action.title.toString().contains("Reply", true)) {
-                        // Perfect Morph — pass source view for tile expansion
-                        enterReplyMode(v)
-                    } else {
-                        val oldT = text; text = "✓ $oldT"; setTextColor(Color.GREEN)
-                        postDelayed({ try { action.actionIntent.send(); postCollapseIsland() } catch (_: Exception) { text = oldT; setTextColor(Color.WHITE) } }, 500)
+            val actionTitle = action.title?.toString().orEmpty().ifBlank { "Action" }
+
+            if (actionTitle.contains("Reply", true)) {
+                // TRUE MORPH SOURCE: the Reply action tile itself contains the hidden textbox.
+                // Click karne par yehi tile expand hoga — separate replyBar side/bottom se nahi aayega.
+                val tileBg = createIslandBackground(dp(16).toFloat()).apply {
+                    setColor(Color.parseColor("#222222"))
+                    setStroke(dp(1), Color.parseColor("#444444"))
+                }
+
+                val tile = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), 0, dp(10), 0)
+                    background = tileBg
+                    isClickable = true
+                    isFocusable = true
+                    setClipChildren(false)
+                    setClipToPadding(false)
+                }
+
+                val label = TextView(this).apply {
+                    text = actionTitle
+                    setTextColor(Color.WHITE)
+                    textSize = 11f
+                    gravity = Gravity.CENTER
+                    typeface = Typeface.DEFAULT_BOLD
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    setIncludeFontPadding(false)
+                }
+
+                val input = EditText(this).apply {
+                    visibility = View.GONE
+                    alpha = 0f
+                    hint = "Type a reply..."
+                    setHintTextColor(Color.GRAY)
+                    setTextColor(Color.WHITE)
+                    textSize = 13f
+                    setSingleLine(true)
+                    maxLines = 1
+                    background = null
+                    setPadding(0, 0, dp(8), 0)
+                    setIncludeFontPadding(false)
+                }
+
+                val send = TextView(this).apply {
+                    visibility = View.GONE
+                    alpha = 0f
+                    text = "SEND"
+                    setTextColor(Color.rgb(0, 150, 255))
+                    textSize = 11f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setIncludeFontPadding(false)
+                    setPadding(dp(8), 0, 0, 0)
+                    setOnClickListener { exitReplyMode() }
+                }
+
+                tile.addView(label, LinearLayout.LayoutParams(-1, -1))
+                tile.addView(input, LinearLayout.LayoutParams(0, -1, 1f))
+                tile.addView(send, LinearLayout.LayoutParams(-2, -1))
+
+                tile.setOnClickListener { v ->
+                    enterReplyMode(v)
+                }
+
+                replyMorphTile = tile
+                replyMorphLabel = label
+                replyMorphEditText = input
+                replyMorphSendButton = send
+                replyMorphBg = tileBg
+                this@HyperAccessibilityService.replyEditText = input
+                this@HyperAccessibilityService.sendButton = send
+
+                this@HyperAccessibilityService.footerActions?.addView(
+                    tile,
+                    LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) }
+                )
+            } else {
+                val btn = TextView(this).apply {
+                    text = actionTitle
+                    setTextColor(Color.WHITE)
+                    textSize = 11f
+                    gravity = Gravity.CENTER
+                    setPadding(dp(12), 0, dp(12), 0)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    background = createIslandBackground(dp(16).toFloat()).apply {
+                        setColor(Color.parseColor("#222222"))
+                        setStroke(dp(1), Color.parseColor("#444444"))
+                    }
+                    isClickable = true
+                    setOnClickListener {
+                        val oldT = text
+                        text = "✓ $oldT"
+                        setTextColor(Color.GREEN)
+                        postDelayed({
+                            try {
+                                action.actionIntent.send()
+                                postCollapseIsland()
+                            } catch (_: Exception) {
+                                text = oldT
+                                setTextColor(Color.WHITE)
+                            }
+                        }, 500)
                     }
                 }
+
+                this@HyperAccessibilityService.footerActions?.addView(
+                    btn,
+                    LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) }
+                )
             }
-            this@HyperAccessibilityService.footerActions?.addView(btn, LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) })
         }
     }
 
     // Perfect Morph state
     private var lastReplySourceView: View? = null
     private var replyModeSessionId: Int = 0
+    private var replyTileAnimator: Animator? = null
+    private var replyMorphTile: LinearLayout? = null
+    private var replyMorphLabel: TextView? = null
+    private var replyMorphEditText: EditText? = null
+    private var replyMorphSendButton: TextView? = null
+    private var replyMorphBg: GradientDrawable? = null
+    private var replyMorphOriginalWidth: Int = 0
+    private var replyMorphOriginalHeight: Int = 0
 
     private fun enterReplyMode(sourceView: View? = null) {
         if (isReplyMode) return
@@ -276,169 +404,157 @@ class HyperAccessibilityService : AccessibilityService() {
         val sessionId = replyModeSessionId
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
 
-        val p = visualParams ?: return
+        val p = visualParams
+        if (p == null) {
+            isReplyMode = false
+            return
+        }
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
         p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
         try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
 
         val actionView = this@HyperAccessibilityService.actionScroll
-        val replyView = this@HyperAccessibilityService.replyBar
-        val editView = this@HyperAccessibilityService.replyEditText
         val footer = this@HyperAccessibilityService.footerActions
+        val tile = (sourceView as? LinearLayout) ?: replyMorphTile
+        val label = replyMorphLabel
+        val editView = replyMorphEditText ?: this@HyperAccessibilityService.replyEditText
+        val sendView = replyMorphSendButton ?: this@HyperAccessibilityService.sendButton
+        val tileBg = replyMorphBg ?: (tile?.background as? GradientDrawable)
 
-        // Ensure grid stays visible — anti-blank
+        // Old separate replyBar must never appear. User wants Reply tab itself -> textbox.
+        this@HyperAccessibilityService.replyBar?.animate()?.cancel()
+        this@HyperAccessibilityService.replyBar?.visibility = View.GONE
+
+        // Ensure grid/action row stays visible — no blank, no side textbox.
         this@HyperAccessibilityService.gridRoot?.visibility = View.VISIBLE
         this@HyperAccessibilityService.gridRoot?.alpha = 1f
+        actionView?.animate()?.setListener(null)
+        actionView?.animate()?.cancel()
+        actionView?.visibility = View.VISIBLE
+        actionView?.alpha = 1f
 
-        // --- PERFECT MORPH REPLY ---
-        // User requirement: "Reply wala button morph hoga textbox mei"
-        // NOT: textbox niche se grow
-        if (sourceView != null && replyView != null && actionView != null && footer != null) {
-            // Save source for reverse morph
-            lastReplySourceView = sourceView
-            val srcRect = Rect()
-            sourceView.getGlobalVisibleRect(srcRect)
-            lastReplySourceRect = Rect(srcRect)
-            // Safe now: service is attached, so dp()/resources can be used inside methods.
-            lastReplySourceRadius = dp(16).toFloat()
-            try {
-                val bg = sourceView.background
-                if (bg is GradientDrawable) {
-                    lastReplySourceRadius = bg.cornerRadius
-                }
-            } catch (_: Exception) {}
+        if (tile != null && actionView != null && footer != null && label != null && editView != null && sendView != null) {
+            lastReplySourceView = tile
+            replyTileAnimator?.cancel()
+            tile.animate()?.setListener(null)
+            tile.animate()?.cancel()
+            tile.visibility = View.VISIBLE
+            tile.alpha = 1f
+            tile.scaleX = 1f
+            tile.scaleY = 1f
+            tile.translationX = 0f
+            tile.translationY = 0f
+            tile.isClickable = false
 
-            // Fade out sibling action buttons — keep Reply button visible for morph
+            // Fade out only the other action tabs. Reply tile stays there and becomes textbox.
             for (i in 0 until footer.childCount) {
                 val child = footer.getChildAt(i)
-                if (child !== sourceView) {
-                    child.animate()?.cancel()
-                    child.animate()?.alpha(0f)?.setDuration(180)?.setInterpolator(collapseInterpolator)?.start()
+                child.animate()?.setListener(null)
+                child.animate()?.cancel()
+                if (child !== tile) {
+                    child.animate()
+                        ?.alpha(0f)
+                        ?.scaleX(0.92f)
+                        ?.scaleY(0.92f)
+                        ?.setDuration(180)
+                        ?.setInterpolator(collapseInterpolator)
+                        ?.start()
+                } else {
+                    child.alpha = 1f
+                    child.scaleX = 1f
+                    child.scaleY = 1f
                 }
             }
 
-            // Prepare replyBar — make it measure first, invisible
-            replyView.alpha = 0f
-            replyView.visibility = View.VISIBLE
-            replyView.layoutParams = (replyView.layoutParams as? LinearLayout.LayoutParams)?.apply {
-                width = LinearLayout.LayoutParams.MATCH_PARENT
-            } ?: replyView.layoutParams
+            tile.post {
+                if (!isReplyMode || sessionId != replyModeSessionId) return@post
 
-            // Wait 1 frame for layout — then morph
-            replyView.post {
-                val targetRect = Rect()
-                replyView.getGlobalVisibleRect(targetRect)
-                if (targetRect.width() == 0 || targetRect.height() == 0) {
-                    // fallback — simple crossfade
-                    actionView.animate()?.alpha(0f)?.setDuration(200)?.start()
-                    replyView.alpha = 1f
-                    return@post
+                val startW = (tile.layoutParams?.width ?: 0).takeIf { it > 0 } ?: tile.width.takeIf { it > 0 } ?: dp(92)
+                val startH = (tile.layoutParams?.height ?: 0).takeIf { it > 0 } ?: tile.height.takeIf { it > 0 } ?: dp(32)
+                if (replyMorphOriginalWidth <= 0) replyMorphOriginalWidth = startW
+                if (replyMorphOriginalHeight <= 0) replyMorphOriginalHeight = startH
+
+                val targetW = (actionView.width - dp(12)).coerceAtLeast(dp(220))
+                val targetH = dp(40)
+                val startR = tileBg?.cornerRadius ?: dp(16).toFloat()
+                val endR = dp(12).toFloat()
+                lastReplySourceRadius = startR
+
+                label.visibility = View.VISIBLE
+                label.alpha = 1f
+                editView.visibility = View.VISIBLE
+                sendView.visibility = View.VISIBLE
+                editView.alpha = 0f
+                sendView.alpha = 0f
+
+                // Start exactly as Reply button: label owns the tile width, input is inside but invisible.
+                (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                    lp.width = (startW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40))
+                    lp.weight = 0f
+                    label.layoutParams = lp
+                }
+                (editView.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                    lp.width = 0
+                    lp.weight = 1f
+                    editView.layoutParams = lp
                 }
 
-                // Calculate morph transform: source (Reply button) -> target (replyBar)
-                val scaleX = srcRect.width().toFloat() / targetRect.width().coerceAtLeast(1)
-                val scaleY = srcRect.height().toFloat() / targetRect.height().coerceAtLeast(1)
-                val deltaX = (srcRect.centerX() - targetRect.centerX()).toFloat()
-                val deltaY = (srcRect.centerY() - targetRect.centerY()).toFloat()
-
-                // Start replyBar morphed to button size/position
-                replyView.pivotX = 0f
-                replyView.pivotY = 0f
-                replyView.scaleX = scaleX.coerceIn(0.2f, 1f)
-                replyView.scaleY = scaleY.coerceIn(0.2f, 1f)
-                replyView.translationX = deltaX
-                replyView.translationY = deltaY
-                replyView.alpha = 0.92f
-
-                // Hide original Reply button — we are morphing FROM it
-                sourceView.animate()?.alpha(0f)?.setDuration(120)?.start()
-
-                // Fade out actionScroll container background during morph — keep island shape
-                actionView.animate()?.alpha(0f)?.setDuration(220)?.setListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
+                val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = 760L
+                    interpolator = expandInterpolator
+                    addUpdateListener { va ->
                         if (isReplyMode && sessionId == replyModeSessionId) {
-                            actionView.visibility = View.INVISIBLE // keep space to avoid jump, not GONE
+                            val t = va.animatedValue as Float
+
+                            // The actual morph: the SAME Reply tile changes size and radius.
+                            (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                                lp.width = lerpEven(startW, targetW, t)
+                                lp.height = lerpEven(startH, targetH, t)
+                                tile.layoutParams = lp
+                            }
+                            tileBg?.cornerRadius = lerp(startR, endR, t)
+
+                            // Reply text dissolves into input controls inside the same tile.
+                            val labelPhase = (t / 0.32f).coerceIn(0f, 1f)
+                            val inputPhase = ((t - 0.22f) / 0.58f).coerceIn(0f, 1f)
+                            val sendPhase = ((t - 0.36f) / 0.46f).coerceIn(0f, 1f)
+
+                            label.alpha = 1f - labelPhase
+                            (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                                lp.width = lerpEven((startW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40)), 0, labelPhase)
+                                lp.weight = 0f
+                                label.layoutParams = lp
+                            }
+                            editView.alpha = inputPhase
+                            sendView.alpha = sendPhase
                         }
                     }
-                })?.start()
-
-                // MASTER TIME PHASE — 750ms Slow-Mo Liquid Morph
-                // "animation animation lagega transition nhi"
-                replyView.animate()?.cancel()
-                replyView.animate()
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .translationX(0f)
-                    .translationY(0f)
-                    .alpha(1f)
-                    .setDuration(720)
-                    .setInterpolator(expandInterpolator)
-                    .setListener(object : AnimatorListenerAdapter() {
+                    addListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
                             if (!isReplyMode || sessionId != replyModeSessionId) return
-                            replyView.scaleX = 1f
-                            replyView.scaleY = 1f
-                            replyView.translationX = 0f
-                            replyView.translationY = 0f
-                            replyView.alpha = 1f
-                            // fully hide actionScroll after morph completes
-                            actionView.visibility = View.GONE
+                            label.visibility = View.GONE
+                            editView.alpha = 1f
+                            sendView.alpha = 1f
+                            (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                                lp.width = targetW
+                                lp.height = targetH
+                                tile.layoutParams = lp
+                            }
+                            tileBg?.cornerRadius = endR
+                            editView.requestFocus()
+                            editView.isCursorVisible = true
                             forceRegionUpdate()
                         }
                     })
-                    .start()
-
-                // Corner radius morph — button 16dp -> textbox 12dp — smooth
-                try {
-                    val replyBg = replyView.background
-                    if (replyBg is GradientDrawable) {
-                        val startR = lastReplySourceRadius
-                        val endR = dp(12).toFloat()
-                        ValueAnimator.ofFloat(0f, 1f).apply {
-                            duration = 650
-                            interpolator = morphInterpolator
-                            addUpdateListener {
-                                val t = it.animatedValue as Float
-                                replyBg.cornerRadius = startR + (endR - startR) * t
-                            }
-                            start()
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                // EditText fade-in stagger — 220ms delay, so text appears mid-morph — Apple-like
-                editView?.alpha = 0f
-                editView?.animate()?.alpha(1f)?.setStartDelay(220)?.setDuration(380)?.setInterpolator(morphInterpolator)?.start()
-                sendButton?.alpha = 0f
-                sendButton?.animate()?.alpha(1f)?.setStartDelay(320)?.setDuration(300)?.start()
-            }
-
-        } else {
-            // Fallback — no source view — classic crossfade (no blank)
-            actionView?.animate()?.cancel()
-            actionView?.animate()?.alpha(0f)?.setDuration(220)?.setInterpolator(collapseInterpolator)?.setListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    actionView.visibility = View.GONE
-                    actionView.alpha = 1f
                 }
-            })?.start()
-
-            replyView?.apply {
-                visibility = View.VISIBLE
-                alpha = 0f
-                translationY = 0f // NO niche se grow — direct fade
-                scaleX = 0.94f
-                scaleY = 0.94f
-                animate()?.cancel()
-                animate()
-                    ?.alpha(1f)
-                    ?.scaleX(1f)
-                    ?.scaleY(1f)
-                    ?.setDuration(550)
-                    ?.setInterpolator(expandInterpolator)
-                    ?.start()
+                replyTileAnimator = animator
+                animator.start()
             }
+        } else {
+            // Rare fallback: keep UI safe, but do not show the old below/side-growing replyBar.
+            actionView?.visibility = View.VISIBLE
+            actionView?.alpha = 1f
         }
 
         // INTERCEPTOR — Off-Switch full screen
@@ -446,114 +562,169 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.postDelayed({ forceRegionUpdate() }, 80)
         mainHandler.postDelayed({ forceRegionUpdate() }, 350)
 
-        // Keyboard — Nuclear Chain — delayed to let morph be visible first (your SS shows keyboard covering — purposely delay IME)
+        // Keyboard — delayed so the tile morph is visible first.
         mainHandler.postDelayed({
             if (!isReplyMode || sessionId != replyModeSessionId) return@postDelayed
-            editView?.requestFocus()
-            editView?.isCursorVisible = true
+            val activeEdit = replyMorphEditText ?: this@HyperAccessibilityService.replyEditText ?: return@postDelayed
+            activeEdit.requestFocus()
+            activeEdit.isCursorVisible = true
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.restartInput(editView)
+            imm.restartInput(activeEdit)
             try { performGlobalAction(GLOBAL_ACTION_SHOW_KEYBOARD) } catch (_: Exception) {}
-            imm.showSoftInput(editView, InputMethodManager.SHOW_IMPLICIT)
+            imm.showSoftInput(activeEdit, InputMethodManager.SHOW_IMPLICIT)
             mainHandler.postDelayed({
                 if (!isReplyMode || sessionId != replyModeSessionId) return@postDelayed
                 try { imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0) } catch (_: Exception) {}
             }, 120)
-        }, 380) // let morph be 50% complete before keyboard pops — prevents blank flash in your SS
+        }, 420)
     }
 
     private fun exitReplyMode() {
         if (!isReplyMode) return
 
-        // Invalidate every delayed enter-reply callback/listener.
-        // Fix: if user taps outside while morph is running, old enter listener must NOT hide action tabs later.
         isReplyMode = false
         replyModeSessionId++
+        val sessionId = replyModeSessionId
 
+        val activeEdit = replyMorphEditText ?: this@HyperAccessibilityService.replyEditText
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         try {
-            imm.hideSoftInputFromWindow(this@HyperAccessibilityService.replyEditText?.windowToken, 0)
+            imm.hideSoftInputFromWindow(activeEdit?.windowToken, 0)
         } catch (_: Exception) {}
-        this@HyperAccessibilityService.replyEditText?.clearFocus()
+        activeEdit?.clearFocus()
 
-        val replyView = this@HyperAccessibilityService.replyBar
         val actionView = this@HyperAccessibilityService.actionScroll
         val footer = this@HyperAccessibilityService.footerActions
+        val tile = replyMorphTile ?: (lastReplySourceView as? LinearLayout)
+        val label = replyMorphLabel
+        val editView = replyMorphEditText ?: this@HyperAccessibilityService.replyEditText
+        val sendView = replyMorphSendButton ?: this@HyperAccessibilityService.sendButton
+        val tileBg = replyMorphBg ?: (tile?.background as? GradientDrawable)
 
-        // CRITICAL FIX: enterReplyMode() fades individual action children to alpha=0.
-        // Back/off-switch was only fading parent actionScroll back to alpha=1,
-        // so all tabs stayed invisible. Reset every tile before parent fade-in.
-        footer?.let { tabs ->
-            for (i in 0 until tabs.childCount) {
-                val child = tabs.getChildAt(i)
-                child.animate()?.setListener(null)
-                child.animate()?.cancel()
-                child.visibility = View.VISIBLE
-                child.alpha = 1f
-                child.scaleX = 1f
-                child.scaleY = 1f
-                child.translationX = 0f
-                child.translationY = 0f
-            }
-        }
-        lastReplySourceView?.let { source ->
-            source.animate()?.setListener(null)
-            source.animate()?.cancel()
-            source.visibility = View.VISIBLE
-            source.alpha = 1f
-            source.scaleX = 1f
-            source.scaleY = 1f
-            source.translationX = 0f
-            source.translationY = 0f
-        }
+        this@HyperAccessibilityService.replyBar?.animate()?.cancel()
+        this@HyperAccessibilityService.replyBar?.visibility = View.GONE
 
         actionView?.animate()?.setListener(null)
         actionView?.animate()?.cancel()
         actionView?.visibility = View.VISIBLE
-        actionView?.alpha = 0f
-        actionView?.scaleX = 1f
-        actionView?.scaleY = 1f
-        actionView?.translationX = 0f
-        actionView?.translationY = 0f
+        actionView?.alpha = 1f
 
-        // SLOW-MO REVERSE — no blank — reply goes away, action tabs return fully visible.
-        replyView?.animate()?.setListener(null)
-        replyView?.animate()?.cancel()
-        replyView?.animate()
-            ?.alpha(0f)
-            ?.scaleX(0.96f)
-            ?.scaleY(0.96f)
-            ?.translationY((-dp(6)).toFloat())
-            ?.setDuration(220)
-            ?.setInterpolator(collapseInterpolator)
-            ?.setListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    replyView.visibility = View.GONE
-                    replyView.alpha = 1f
-                    replyView.scaleX = 1f
-                    replyView.scaleY = 1f
-                    replyView.translationX = 0f
-                    replyView.translationY = 0f
-                }
-            })?.start()
+        if (tile != null && footer != null && label != null && editView != null && sendView != null) {
+            replyTileAnimator?.cancel()
+            tile.animate()?.setListener(null)
+            tile.animate()?.cancel()
+            tile.visibility = View.VISIBLE
+            tile.alpha = 1f
+            tile.scaleX = 1f
+            tile.scaleY = 1f
+            tile.translationX = 0f
+            tile.translationY = 0f
 
-        actionView?.animate()
-            ?.alpha(1f)
-            ?.setStartDelay(80)
-            ?.setDuration(360)
-            ?.setInterpolator(morphInterpolator)
-            ?.setListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    actionView.alpha = 1f
-                    actionView.visibility = View.VISIBLE
-                    footer?.let { tabs ->
-                        for (i in 0 until tabs.childCount) {
-                            tabs.getChildAt(i).alpha = 1f
-                        }
+            val startW = (tile.layoutParams?.width ?: 0).takeIf { it > 0 } ?: tile.width.takeIf { it > 0 } ?: dp(220)
+            val startH = (tile.layoutParams?.height ?: 0).takeIf { it > 0 } ?: tile.height.takeIf { it > 0 } ?: dp(40)
+            val endW = replyMorphOriginalWidth.takeIf { it > 0 } ?: dp(92)
+            val endH = replyMorphOriginalHeight.takeIf { it > 0 } ?: dp(32)
+            val startR = tileBg?.cornerRadius ?: dp(12).toFloat()
+            val endR = lastReplySourceRadius.takeIf { it > 0f } ?: dp(16).toFloat()
+            val labelEndWidth = (endW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40))
+
+            label.visibility = View.VISIBLE
+            editView.visibility = View.VISIBLE
+            sendView.visibility = View.VISIBLE
+
+            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 560L
+                interpolator = collapseInterpolator
+                addUpdateListener { va ->
+                    val t = va.animatedValue as Float
+
+                    // Reverse true morph: textbox shrinks back into the same Reply tile.
+                    (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                        lp.width = lerpEven(startW, endW, t)
+                        lp.height = lerpEven(startH, endH, t)
+                        tile.layoutParams = lp
                     }
-                    forceRegionUpdate()
+                    tileBg?.cornerRadius = lerp(startR, endR, t)
+
+                    val labelPhase = ((t - 0.28f) / 0.55f).coerceIn(0f, 1f)
+                    val inputPhase = (1f - (t / 0.42f).coerceIn(0f, 1f))
+                    val sendPhase = (1f - (t / 0.34f).coerceIn(0f, 1f))
+
+                    label.alpha = labelPhase
+                    (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                        lp.width = lerpEven(0, labelEndWidth, labelPhase)
+                        lp.weight = 0f
+                        label.layoutParams = lp
+                    }
+                    editView.alpha = inputPhase
+                    sendView.alpha = sendPhase
                 }
-            })?.start()
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        label.alpha = 1f
+                        label.visibility = View.VISIBLE
+                        editView.alpha = 0f
+                        editView.visibility = View.GONE
+                        sendView.alpha = 0f
+                        sendView.visibility = View.GONE
+                        tile.isClickable = true
+                        (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                            lp.width = endW
+                            lp.height = endH
+                            tile.layoutParams = lp
+                        }
+                        (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                            lp.width = -1
+                            lp.weight = 0f
+                            label.layoutParams = lp
+                        }
+                        tileBg?.cornerRadius = endR
+                        replyMorphOriginalWidth = 0
+                        replyMorphOriginalHeight = 0
+                        forceRegionUpdate()
+                    }
+                })
+            }
+            replyTileAnimator = animator
+            animator.start()
+
+            // Other action tabs return after the Reply tile starts shrinking.
+            mainHandler.postDelayed({
+                if (isReplyMode || sessionId != replyModeSessionId) return@postDelayed
+                for (i in 0 until footer.childCount) {
+                    val child = footer.getChildAt(i)
+                    if (child !== tile) {
+                        child.visibility = View.VISIBLE
+                        child.animate()?.setListener(null)
+                        child.animate()?.cancel()
+                        child.animate()
+                            ?.alpha(1f)
+                            ?.scaleX(1f)
+                            ?.scaleY(1f)
+                            ?.setDuration(300)
+                            ?.setInterpolator(morphInterpolator)
+                            ?.start()
+                    } else {
+                        child.alpha = 1f
+                    }
+                }
+            }, 180)
+        } else {
+            // Safety reset: if tile refs are unavailable, at least restore all action tabs.
+            footer?.let { tabs ->
+                for (i in 0 until tabs.childCount) {
+                    val child = tabs.getChildAt(i)
+                    child.animate()?.setListener(null)
+                    child.animate()?.cancel()
+                    child.visibility = View.VISIBLE
+                    child.alpha = 1f
+                    child.scaleX = 1f
+                    child.scaleY = 1f
+                    child.translationX = 0f
+                    child.translationY = 0f
+                }
+            }
+        }
 
         // Window flags back — NOT_FOCUSABLE restore
         val p = visualParams
@@ -566,14 +737,11 @@ class HyperAccessibilityService : AccessibilityService() {
             }, 80)
         }
 
-        // Continue queue after action tabs return (~600ms)
+        // Continue queue after reverse morph completes.
         mainHandler.postDelayed({
             forceRegionUpdate()
-            if (notificationQueue.isNotEmpty()) processNextInQueue() else {
-                // stay expanded if user manually opened, else respect auto-collapse
-                // postCollapseIsland() is called by caller if needed
-            }
-        }, 620)
+            if (notificationQueue.isNotEmpty()) processNextInQueue()
+        }, 650)
     }
 
     private fun triggerFluidExpansion() {
