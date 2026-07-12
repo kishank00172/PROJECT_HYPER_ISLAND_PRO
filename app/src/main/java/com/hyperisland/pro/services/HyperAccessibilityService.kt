@@ -267,10 +267,13 @@ class HyperAccessibilityService : AccessibilityService() {
 
     // Perfect Morph state
     private var lastReplySourceView: View? = null
+    private var replyModeSessionId: Int = 0
 
     private fun enterReplyMode(sourceView: View? = null) {
         if (isReplyMode) return
         isReplyMode = true
+        replyModeSessionId++
+        val sessionId = replyModeSessionId
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
 
         val p = visualParams ?: return
@@ -354,7 +357,9 @@ class HyperAccessibilityService : AccessibilityService() {
                 // Fade out actionScroll container background during morph — keep island shape
                 actionView.animate()?.alpha(0f)?.setDuration(220)?.setListener(object : AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: Animator) {
-                        actionView.visibility = View.INVISIBLE // keep space to avoid jump, not GONE
+                        if (isReplyMode && sessionId == replyModeSessionId) {
+                            actionView.visibility = View.INVISIBLE // keep space to avoid jump, not GONE
+                        }
                     }
                 })?.start()
 
@@ -371,6 +376,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     .setInterpolator(expandInterpolator)
                     .setListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
+                            if (!isReplyMode || sessionId != replyModeSessionId) return
                             replyView.scaleX = 1f
                             replyView.scaleY = 1f
                             replyView.translationX = 0f
@@ -442,6 +448,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         // Keyboard — Nuclear Chain — delayed to let morph be visible first (your SS shows keyboard covering — purposely delay IME)
         mainHandler.postDelayed({
+            if (!isReplyMode || sessionId != replyModeSessionId) return@postDelayed
             editView?.requestFocus()
             editView?.isCursorVisible = true
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
@@ -449,48 +456,102 @@ class HyperAccessibilityService : AccessibilityService() {
             try { performGlobalAction(GLOBAL_ACTION_SHOW_KEYBOARD) } catch (_: Exception) {}
             imm.showSoftInput(editView, InputMethodManager.SHOW_IMPLICIT)
             mainHandler.postDelayed({
+                if (!isReplyMode || sessionId != replyModeSessionId) return@postDelayed
                 try { imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0) } catch (_: Exception) {}
             }, 120)
         }, 380) // let morph be 50% complete before keyboard pops — prevents blank flash in your SS
     }
 
     private fun exitReplyMode() {
-        if (!isReplyMode) {
-            // already exiting — guard double call
-        }
+        if (!isReplyMode) return
+
+        // Invalidate every delayed enter-reply callback/listener.
+        // Fix: if user taps outside while morph is running, old enter listener must NOT hide action tabs later.
         isReplyMode = false
+        replyModeSessionId++
+
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         try {
             imm.hideSoftInputFromWindow(this@HyperAccessibilityService.replyEditText?.windowToken, 0)
         } catch (_: Exception) {}
+        this@HyperAccessibilityService.replyEditText?.clearFocus()
 
         val replyView = this@HyperAccessibilityService.replyBar
         val actionView = this@HyperAccessibilityService.actionScroll
+        val footer = this@HyperAccessibilityService.footerActions
 
-        // SLOW-MO REVERSE MORPH — no blank — alpha crossfade
-        // Reverse of enter: reply fade out 220ms, actions fade in 400ms
+        // CRITICAL FIX: enterReplyMode() fades individual action children to alpha=0.
+        // Back/off-switch was only fading parent actionScroll back to alpha=1,
+        // so all tabs stayed invisible. Reset every tile before parent fade-in.
+        footer?.let { tabs ->
+            for (i in 0 until tabs.childCount) {
+                val child = tabs.getChildAt(i)
+                child.animate()?.setListener(null)
+                child.animate()?.cancel()
+                child.visibility = View.VISIBLE
+                child.alpha = 1f
+                child.scaleX = 1f
+                child.scaleY = 1f
+                child.translationX = 0f
+                child.translationY = 0f
+            }
+        }
+        lastReplySourceView?.let { source ->
+            source.animate()?.setListener(null)
+            source.animate()?.cancel()
+            source.visibility = View.VISIBLE
+            source.alpha = 1f
+            source.scaleX = 1f
+            source.scaleY = 1f
+            source.translationX = 0f
+            source.translationY = 0f
+        }
+
+        actionView?.animate()?.setListener(null)
+        actionView?.animate()?.cancel()
+        actionView?.visibility = View.VISIBLE
+        actionView?.alpha = 0f
+        actionView?.scaleX = 1f
+        actionView?.scaleY = 1f
+        actionView?.translationX = 0f
+        actionView?.translationY = 0f
+
+        // SLOW-MO REVERSE — no blank — reply goes away, action tabs return fully visible.
+        replyView?.animate()?.setListener(null)
         replyView?.animate()?.cancel()
         replyView?.animate()
             ?.alpha(0f)
-            ?.translationY((-dp(10)).toFloat())
+            ?.scaleX(0.96f)
+            ?.scaleY(0.96f)
+            ?.translationY((-dp(6)).toFloat())
             ?.setDuration(220)
             ?.setInterpolator(collapseInterpolator)
             ?.setListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     replyView.visibility = View.GONE
                     replyView.alpha = 1f
+                    replyView.scaleX = 1f
+                    replyView.scaleY = 1f
+                    replyView.translationX = 0f
                     replyView.translationY = 0f
-                    // actions fade in
-                    actionView?.apply {
-                        alpha = 0f
-                        visibility = View.VISIBLE
-                        animate()?.cancel()
-                        animate()
-                            ?.alpha(1f)
-                            ?.setDuration(380)
-                            ?.setInterpolator(morphInterpolator)
-                            ?.start()
+                }
+            })?.start()
+
+        actionView?.animate()
+            ?.alpha(1f)
+            ?.setStartDelay(80)
+            ?.setDuration(360)
+            ?.setInterpolator(morphInterpolator)
+            ?.setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    actionView.alpha = 1f
+                    actionView.visibility = View.VISIBLE
+                    footer?.let { tabs ->
+                        for (i in 0 until tabs.childCount) {
+                            tabs.getChildAt(i).alpha = 1f
+                        }
                     }
+                    forceRegionUpdate()
                 }
             })?.start()
 
@@ -505,11 +566,11 @@ class HyperAccessibilityService : AccessibilityService() {
             }, 80)
         }
 
-        // Continue queue after reverse morph completes (~600ms)
+        // Continue queue after action tabs return (~600ms)
         mainHandler.postDelayed({
             forceRegionUpdate()
             if (notificationQueue.isNotEmpty()) processNextInQueue() else {
-                // stay expanded if user manually opened, else respect auto-collpase
+                // stay expanded if user manually opened, else respect auto-collapse
                 // postCollapseIsland() is called by caller if needed
             }
         }, 620)
