@@ -235,7 +235,9 @@ class HyperAccessibilityService : AccessibilityService() {
 
     // Perfect Morph — remember last reply source for reverse animation
     private var lastReplySourceRect: Rect? = null
-    private var lastReplySourceRadius: Float = dp(16).toFloat()
+    // IMPORTANT: never call dp()/resources in field initializers — Service context is not attached yet.
+    // Calling dp() here caused: NPE getResources() while creating HyperAccessibilityService.
+    private var lastReplySourceRadius: Float = 0f
 
     private fun setupActionTiles(actions: List<Notification.Action>) {
         this@HyperAccessibilityService.footerActions?.removeAllViews()
@@ -295,6 +297,8 @@ class HyperAccessibilityService : AccessibilityService() {
             val srcRect = Rect()
             sourceView.getGlobalVisibleRect(srcRect)
             lastReplySourceRect = Rect(srcRect)
+            // Safe now: service is attached, so dp()/resources can be used inside methods.
+            lastReplySourceRadius = dp(16).toFloat()
             try {
                 val bg = sourceView.background
                 if (bg is GradientDrawable) {
