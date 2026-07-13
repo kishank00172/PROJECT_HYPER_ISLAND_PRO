@@ -488,9 +488,10 @@ class HyperAccessibilityService : AccessibilityService() {
                 editView.alpha = 0f
                 sendView.alpha = 0f
 
-                // Start exactly as Reply button: label owns the tile width, input is inside but invisible.
+                // Keep inner layout stable. No per-frame child width relayout.
+                val labelStartWidth = (targetW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40))
                 (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                    lp.width = (startW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40))
+                    lp.width = labelStartWidth
                     lp.weight = 0f
                     label.layoutParams = lp
                 }
@@ -500,59 +501,86 @@ class HyperAccessibilityService : AccessibilityService() {
                     editView.layoutParams = lp
                 }
 
-                val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                // SMOOTH FIX:
+                // Do NOT update layoutParams.width on every frame — that causes re-measure jank.
+                // Set final layout once, then GPU-scale the same Reply tile from button size to textbox size.
+                (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                    lp.width = targetW
+                    lp.height = targetH
+                    tile.layoutParams = lp
+                }
+                tile.pivotX = 0f
+                tile.pivotY = targetH / 2f
+                tile.scaleX = (startW.toFloat() / targetW.coerceAtLeast(1)).coerceIn(0.15f, 1f)
+                tile.scaleY = (startH.toFloat() / targetH.coerceAtLeast(1)).coerceIn(0.15f, 1f)
+
+                replyTileAnimator?.cancel()
+                val radiusAnimator = ValueAnimator.ofFloat(startR, endR).apply {
                     duration = 760L
-                    // IMPORTANT: width/corner-radius must NOT use overshoot spring.
-                    // expandInterpolator can return > 1f, so textbox right edge crosses island boundary.
-                    // morphInterpolator keeps the tile inside island while still feeling smooth.
                     interpolator = morphInterpolator
                     addUpdateListener { va ->
+                        tileBg?.cornerRadius = va.animatedValue as Float
+                    }
+                }
+                replyTileAnimator = radiusAnimator
+                radiusAnimator.start()
+
+                label.animate()?.setListener(null)
+                editView.animate()?.setListener(null)
+                sendView.animate()?.setListener(null)
+                label.animate()?.cancel()
+                editView.animate()?.cancel()
+                sendView.animate()?.cancel()
+
+                label.animate()
+                    ?.alpha(0f)
+                    ?.setDuration(240L)
+                    ?.setInterpolator(collapseInterpolator)
+                    ?.withEndAction {
                         if (isReplyMode && sessionId == replyModeSessionId) {
-                            val t = (va.animatedValue as Float).coerceIn(0f, 1f)
-
-                            // The actual morph: the SAME Reply tile changes size and radius.
-                            (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                                lp.width = lerpEven(startW, targetW, t)
-                                lp.height = lerpEven(startH, targetH, t)
-                                tile.layoutParams = lp
-                            }
-                            tileBg?.cornerRadius = lerp(startR, endR, t)
-
-                            // Reply text dissolves into input controls inside the same tile.
-                            val labelPhase = (t / 0.32f).coerceIn(0f, 1f)
-                            val inputPhase = ((t - 0.22f) / 0.58f).coerceIn(0f, 1f)
-                            val sendPhase = ((t - 0.36f) / 0.46f).coerceIn(0f, 1f)
-
-                            label.alpha = 1f - labelPhase
-                            (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                                lp.width = lerpEven((startW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40)), 0, labelPhase)
-                                lp.weight = 0f
-                                label.layoutParams = lp
-                            }
-                            editView.alpha = inputPhase
-                            sendView.alpha = sendPhase
+                            label.visibility = View.GONE
                         }
                     }
-                    addListener(object : AnimatorListenerAdapter() {
+                    ?.start()
+
+                editView.animate()
+                    ?.alpha(1f)
+                    ?.setStartDelay(210L)
+                    ?.setDuration(420L)
+                    ?.setInterpolator(morphInterpolator)
+                    ?.start()
+
+                sendView.animate()
+                    ?.alpha(1f)
+                    ?.setStartDelay(330L)
+                    ?.setDuration(320L)
+                    ?.setInterpolator(morphInterpolator)
+                    ?.start()
+
+                tile.animate()
+                    ?.setListener(null)
+                    ?.cancel()
+                tile.animate()
+                    ?.withLayer()
+                    ?.scaleX(1f)
+                    ?.scaleY(1f)
+                    ?.setDuration(760L)
+                    ?.setInterpolator(morphInterpolator)
+                    ?.setListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
                             if (!isReplyMode || sessionId != replyModeSessionId) return
+                            tile.scaleX = 1f
+                            tile.scaleY = 1f
                             label.visibility = View.GONE
                             editView.alpha = 1f
                             sendView.alpha = 1f
-                            (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                                lp.width = targetW
-                                lp.height = targetH
-                                tile.layoutParams = lp
-                            }
                             tileBg?.cornerRadius = endR
                             editView.requestFocus()
                             editView.isCursorVisible = true
                             forceRegionUpdate()
                         }
                     })
-                }
-                replyTileAnimator = animator
-                animator.start()
+                    ?.start()
             }
         } else {
             // Rare fallback: keep UI safe, but do not show the old below/side-growing replyBar.
@@ -629,41 +657,90 @@ class HyperAccessibilityService : AccessibilityService() {
             val endH = replyMorphOriginalHeight.takeIf { it > 0 } ?: dp(32)
             val startR = tileBg?.cornerRadius ?: dp(12).toFloat()
             val endR = lastReplySourceRadius.takeIf { it > 0f } ?: dp(16).toFloat()
-            val labelEndWidth = (endW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40))
+            val labelEndWidth = (startW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40))
 
             label.visibility = View.VISIBLE
             editView.visibility = View.VISIBLE
             sendView.visibility = View.VISIBLE
 
-            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            // Smooth reverse: no per-frame layout width updates.
+            // Keep textbox layout size, GPU-scale it back to Reply button visual size,
+            // then commit real small layout at the end.
+            (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.width = startW
+                lp.height = startH
+                tile.layoutParams = lp
+            }
+            tile.pivotX = 0f
+            tile.pivotY = startH / 2f
+            tile.scaleX = 1f
+            tile.scaleY = 1f
+
+            (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.width = labelEndWidth
+                lp.weight = 0f
+                label.layoutParams = lp
+            }
+            label.alpha = 0f
+            editView.alpha = 1f
+            sendView.alpha = 1f
+
+            replyTileAnimator?.cancel()
+            val radiusAnimator = ValueAnimator.ofFloat(startR, endR).apply {
                 duration = 560L
                 interpolator = collapseInterpolator
                 addUpdateListener { va ->
-                    val t = va.animatedValue as Float
-
-                    // Reverse true morph: textbox shrinks back into the same Reply tile.
-                    (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                        lp.width = lerpEven(startW, endW, t)
-                        lp.height = lerpEven(startH, endH, t)
-                        tile.layoutParams = lp
-                    }
-                    tileBg?.cornerRadius = lerp(startR, endR, t)
-
-                    val labelPhase = ((t - 0.28f) / 0.55f).coerceIn(0f, 1f)
-                    val inputPhase = (1f - (t / 0.42f).coerceIn(0f, 1f))
-                    val sendPhase = (1f - (t / 0.34f).coerceIn(0f, 1f))
-
-                    label.alpha = labelPhase
-                    (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                        lp.width = lerpEven(0, labelEndWidth, labelPhase)
-                        lp.weight = 0f
-                        label.layoutParams = lp
-                    }
-                    editView.alpha = inputPhase
-                    sendView.alpha = sendPhase
+                    tileBg?.cornerRadius = va.animatedValue as Float
                 }
-                addListener(object : AnimatorListenerAdapter() {
+            }
+            replyTileAnimator = radiusAnimator
+            radiusAnimator.start()
+
+            label.animate()?.setListener(null)
+            editView.animate()?.setListener(null)
+            sendView.animate()?.setListener(null)
+            label.animate()?.cancel()
+            editView.animate()?.cancel()
+            sendView.animate()?.cancel()
+
+            editView.animate()
+                ?.alpha(0f)
+                ?.setDuration(220L)
+                ?.setInterpolator(collapseInterpolator)
+                ?.start()
+
+            sendView.animate()
+                ?.alpha(0f)
+                ?.setDuration(180L)
+                ?.setInterpolator(collapseInterpolator)
+                ?.start()
+
+            label.animate()
+                ?.alpha(1f)
+                ?.setStartDelay(170L)
+                ?.setDuration(280L)
+                ?.setInterpolator(morphInterpolator)
+                ?.start()
+
+            tile.animate()
+                ?.setListener(null)
+                ?.cancel()
+            tile.animate()
+                ?.withLayer()
+                ?.scaleX((endW.toFloat() / startW.coerceAtLeast(1)).coerceIn(0.15f, 1f))
+                ?.scaleY((endH.toFloat() / startH.coerceAtLeast(1)).coerceIn(0.15f, 1f))
+                ?.setDuration(560L)
+                ?.setInterpolator(collapseInterpolator)
+                ?.setListener(object : AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: Animator) {
+                        // Commit real small layout only once after visual shrink.
+                        (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                            lp.width = endW
+                            lp.height = endH
+                            tile.layoutParams = lp
+                        }
+                        tile.scaleX = 1f
+                        tile.scaleY = 1f
                         label.alpha = 1f
                         label.visibility = View.VISIBLE
                         editView.alpha = 0f
@@ -671,11 +748,6 @@ class HyperAccessibilityService : AccessibilityService() {
                         sendView.alpha = 0f
                         sendView.visibility = View.GONE
                         tile.isClickable = true
-                        (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                            lp.width = endW
-                            lp.height = endH
-                            tile.layoutParams = lp
-                        }
                         (label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
                             lp.width = -1
                             lp.weight = 0f
@@ -687,9 +759,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         forceRegionUpdate()
                     }
                 })
-            }
-            replyTileAnimator = animator
-            animator.start()
+                ?.start()
 
             // Other action tabs return after the Reply tile starts shrinking.
             mainHandler.postDelayed({
