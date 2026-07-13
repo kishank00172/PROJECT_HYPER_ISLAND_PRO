@@ -19,10 +19,19 @@ object AppSettings {
     private const val KEY_ISLAND_EXPANDED_WIDTH_DP = "island_expanded_width_dp"
     private const val KEY_ISLAND_EXPANDED_HEIGHT_DP = "island_expanded_height_dp"
     private const val KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP = "island_expanded_corner_radius_dp"
+    private const val KEY_REPLY_ANIMATION_MODE = "reply_animation_mode"
 
     const val ENGINE_NONE = "none"
     const val ENGINE_ACCESSIBILITY = "accessibility"
     const val ENGINE_APPLICATION = "application"
+
+    const val REPLY_ANIM_CLASSIC_LAYOUT = 0
+    const val REPLY_ANIM_GPU_SMOOTH = 1
+    const val REPLY_ANIM_MAGNETIC_DOCK = 2
+    const val REPLY_ANIM_LIQUID_FILL = 3
+    const val REPLY_ANIM_ELASTIC_BUBBLE = 4
+    const val REPLY_ANIM_MINIMAL_PRO = 5
+    const val DEFAULT_REPLY_ANIMATION_MODE = REPLY_ANIM_MAGNETIC_DOCK
 
     private const val CURRENT_DEFAULTS_VERSION = 5
 
@@ -80,6 +89,25 @@ object AppSettings {
     fun setIslandExpandedHeightDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_EXPANDED_HEIGHT_DP, v).apply()
     fun getIslandExpandedCornerRadiusDp(context: Context) = prefs(context).getInt(KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP, DEFAULT_ISLAND_EXPANDED_CORNER_RADIUS_DP)
     fun setIslandExpandedCornerRadiusDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP, v).apply()
+
+    fun getReplyAnimationMode(context: Context): Int {
+        val mode = prefs(context).getInt(KEY_REPLY_ANIMATION_MODE, DEFAULT_REPLY_ANIMATION_MODE)
+        return mode.coerceIn(REPLY_ANIM_CLASSIC_LAYOUT, REPLY_ANIM_MINIMAL_PRO)
+    }
+
+    fun setReplyAnimationMode(context: Context, mode: Int) {
+        prefs(context).edit().putInt(KEY_REPLY_ANIMATION_MODE, mode.coerceIn(REPLY_ANIM_CLASSIC_LAYOUT, REPLY_ANIM_MINIMAL_PRO)).apply()
+    }
+
+    fun getReplyAnimationModeName(mode: Int): String = when (mode.coerceIn(REPLY_ANIM_CLASSIC_LAYOUT, REPLY_ANIM_MINIMAL_PRO)) {
+        REPLY_ANIM_CLASSIC_LAYOUT -> "Classic Layout Morph"
+        REPLY_ANIM_GPU_SMOOTH -> "GPU Smooth Scale"
+        REPLY_ANIM_MAGNETIC_DOCK -> "Magnetic Dock Morph"
+        REPLY_ANIM_LIQUID_FILL -> "Liquid Fill Reveal"
+        REPLY_ANIM_ELASTIC_BUBBLE -> "Elastic Bubble"
+        REPLY_ANIM_MINIMAL_PRO -> "Minimal Pro Fade"
+        else -> "Magnetic Dock Morph"
+    }
 
     fun resetIslandDefaults(context: Context) {
         prefs(context).edit().clear().putInt(KEY_DEFAULTS_VERSION, CURRENT_DEFAULTS_VERSION).apply()
