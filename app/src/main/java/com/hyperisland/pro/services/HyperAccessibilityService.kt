@@ -502,10 +502,13 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 val animator = ValueAnimator.ofFloat(0f, 1f).apply {
                     duration = 760L
-                    interpolator = expandInterpolator
+                    // IMPORTANT: width/corner-radius must NOT use overshoot spring.
+                    // expandInterpolator can return > 1f, so textbox right edge crosses island boundary.
+                    // morphInterpolator keeps the tile inside island while still feeling smooth.
+                    interpolator = morphInterpolator
                     addUpdateListener { va ->
                         if (isReplyMode && sessionId == replyModeSessionId) {
-                            val t = va.animatedValue as Float
+                            val t = (va.animatedValue as Float).coerceIn(0f, 1f)
 
                             // The actual morph: the SAME Reply tile changes size and radius.
                             (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
