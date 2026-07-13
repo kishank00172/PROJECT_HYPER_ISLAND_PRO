@@ -16,6 +16,7 @@ import android.graphics.Rect
 import android.graphics.Region
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -92,6 +93,8 @@ class HyperAccessibilityService : AccessibilityService() {
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
         fun showNotificationFromApp(context: Context, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) =
             instance?.run { postNotificationEvent("NotificationListener", packageName, appName, title, message, postTime, contentIntent, actions); true } ?: false
+        fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
+            instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -202,6 +205,77 @@ class HyperAccessibilityService : AccessibilityService() {
             notificationQueue.add(NotificationModel(packageName, appName, title, message, postTime, contentIntent, actions))
             if (!isProcessingQueue) processNextInQueue() else scheduleAutoCollapse()
         }
+    }
+
+
+    private fun postPreviewReplyAnimation(replySecond: Boolean) {
+        mainHandler.post {
+            if (!AppSettings.isIslandEnabled(this)) return@post
+            if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
+            if (isReplyMode) {
+                exitReplyMode()
+                mainHandler.postDelayed({ runReplyAnimationPreview(replySecond) }, 720)
+            } else {
+                runReplyAnimationPreview(replySecond)
+            }
+        }
+    }
+
+    private fun runReplyAnimationPreview(replySecond: Boolean) {
+        autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
+        notificationQueue.clear()
+        isProcessingQueue = true
+        notificationMode = true
+
+        val actions = if (replySecond) {
+            listOf(
+                buildPreviewAction("Mark as read", 1),
+                buildPreviewAction("Reply", 2)
+            )
+        } else {
+            listOf(
+                buildPreviewAction("Reply", 3),
+                buildPreviewAction("Mark as read", 4)
+            )
+        }
+
+        val modeName = AppSettings.getReplyAnimationModeName(AppSettings.getReplyAnimationMode(this))
+        val model = NotificationModel(
+            packageName = this@HyperAccessibilityService.packageName,
+            appName = "Test Lab",
+            title = if (replySecond) "Reply is second action" else "Reply is first action",
+            message = modeName,
+            postTime = System.currentTimeMillis(),
+            contentIntent = null,
+            actions = actions
+        )
+
+        val wasFull = currentStage == IslandStage.STAGE3_FULL
+        updateNotificationContent(model)
+        this@HyperAccessibilityService.gridRoot?.visibility = View.VISIBLE
+        this@HyperAccessibilityService.gridRoot?.alpha = 1f
+
+        if (!wasFull) {
+            triggerFluidExpansion()
+        } else {
+            updateAllToCurrentState()
+            forceRegionUpdate()
+        }
+
+        mainHandler.postDelayed({
+            if (!isReplyMode) {
+                this@HyperAccessibilityService.replyMorphTile?.performClick()
+            }
+        }, if (wasFull) 360L else 980L)
+    }
+
+    private fun buildPreviewAction(title: String, requestCode: Int): Notification.Action {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: Intent().setClassName(packageName, "$packageName.ui.TestLabActivity")
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pi = PendingIntent.getActivity(this, 7300 + requestCode, launchIntent, flags)
+        val icon = Icon.createWithResource(this, android.R.drawable.ic_menu_send)
+        return Notification.Action.Builder(icon, title, pi).build()
     }
 
     private fun processNextInQueue() {
@@ -480,16 +554,54 @@ class HyperAccessibilityService : AccessibilityService() {
                 val targetW = (actionView.width - dp(12)).coerceAtLeast(dp(220))
                 val targetH = dp(40)
 
-                // Magnetic Dock Morph:
+                val replyAnimMode = AppSettings.getReplyAnimationMode(this)
+                val useDocking = replyAnimMode == AppSettings.REPLY_ANIM_MAGNETIC_DOCK ||
+                    replyAnimMode == AppSettings.REPLY_ANIM_LIQUID_FILL ||
+                    replyAnimMode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE ||
+                    replyAnimMode == AppSettings.REPLY_ANIM_MINIMAL_PRO
+                val morphDuration = when (replyAnimMode) {
+                    AppSettings.REPLY_ANIM_CLASSIC_LAYOUT -> 780L
+                    AppSettings.REPLY_ANIM_GPU_SMOOTH -> 680L
+                    AppSettings.REPLY_ANIM_MAGNETIC_DOCK -> 760L
+                    AppSettings.REPLY_ANIM_LIQUID_FILL -> 920L
+                    AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 720L
+                    AppSettings.REPLY_ANIM_MINIMAL_PRO -> 360L
+                    else -> 760L
+                }
+                val inputDelay = when (replyAnimMode) {
+                    AppSettings.REPLY_ANIM_LIQUID_FILL -> 330L
+                    AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 240L
+                    AppSettings.REPLY_ANIM_MINIMAL_PRO -> 90L
+                    else -> 210L
+                }
+                val inputDuration = when (replyAnimMode) {
+                    AppSettings.REPLY_ANIM_LIQUID_FILL -> 520L
+                    AppSettings.REPLY_ANIM_MINIMAL_PRO -> 210L
+                    else -> 420L
+                }
+                val sendDelay = when (replyAnimMode) {
+                    AppSettings.REPLY_ANIM_LIQUID_FILL -> 480L
+                    AppSettings.REPLY_ANIM_MINIMAL_PRO -> 150L
+                    else -> 330L
+                }
+                val sendDuration = when (replyAnimMode) {
+                    AppSettings.REPLY_ANIM_MINIMAL_PRO -> 180L
+                    else -> 320L
+                }
+
+                // Magnetic Dock Morph family:
                 // If Reply is second/right-side action, expanding from its own left would go outside island.
-                // So the SAME tile expands while sliding left into the action row's safe textbox lane.
+                // Docking modes slide the SAME tile left into the safe textbox lane while expanding.
                 val safeLeft = dp(6)
                 val tileLeftInActionRow = tile.left
-                replyMorphTargetTranslationX = (safeLeft - tileLeftInActionRow).toFloat()
+                replyMorphTargetTranslationX = if (useDocking) (safeLeft - tileLeftInActionRow).toFloat() else 0f
 
                 val startR = tileBg?.cornerRadius ?: dp(16).toFloat()
                 val endR = dp(12).toFloat()
                 lastReplySourceRadius = startR
+                if (replyAnimMode == AppSettings.REPLY_ANIM_LIQUID_FILL) {
+                    tileBg?.setStroke(dp(1), Color.rgb(0, 150, 255))
+                }
 
                 label.visibility = View.VISIBLE
                 label.alpha = 1f
@@ -511,6 +623,53 @@ class HyperAccessibilityService : AccessibilityService() {
                     editView.layoutParams = lp
                 }
 
+                if (replyAnimMode == AppSettings.REPLY_ANIM_CLASSIC_LAYOUT) {
+                    // Mode 1: Classic Layout Morph — old experimental style.
+                    // This intentionally changes internal layout size every frame for A/B testing.
+                    label.alpha = 0f
+                    label.visibility = View.GONE
+                    tile.pivotX = 0f
+                    tile.pivotY = startH / 2f
+                    tile.scaleX = 1f
+                    tile.scaleY = 1f
+                    tile.translationX = 0f
+
+                    replyTileAnimator?.cancel()
+                    val classicAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                        duration = morphDuration
+                        interpolator = morphInterpolator
+                        addUpdateListener { va ->
+                            if (isReplyMode && sessionId == replyModeSessionId) {
+                                val t = (va.animatedValue as Float).coerceIn(0f, 1f)
+                                (tile.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                                    lp.width = lerpEven(startW, targetW, t)
+                                    lp.height = lerpEven(startH, targetH, t)
+                                    tile.layoutParams = lp
+                                }
+                                tile.translationX = lerp(0f, replyMorphTargetTranslationX, t)
+                                tileBg?.cornerRadius = lerp(startR, endR, t)
+                            }
+                        }
+                        addListener(object : AnimatorListenerAdapter() {
+                            override fun onAnimationEnd(animation: Animator) {
+                                if (!isReplyMode || sessionId != replyModeSessionId) return
+                                tile.translationX = replyMorphTargetTranslationX
+                                editView.alpha = 1f
+                                sendView.alpha = 1f
+                                tileBg?.cornerRadius = endR
+                                editView.requestFocus()
+                                editView.isCursorVisible = true
+                                forceRegionUpdate()
+                            }
+                        })
+                    }
+                    replyTileAnimator = classicAnimator
+                    classicAnimator.start()
+                    editView.animate()?.alpha(1f)?.setStartDelay(inputDelay)?.setDuration(inputDuration)?.setInterpolator(morphInterpolator)?.start()
+                    sendView.animate()?.alpha(1f)?.setStartDelay(sendDelay)?.setDuration(sendDuration)?.setInterpolator(morphInterpolator)?.start()
+                    return@post
+                }
+
                 // SMOOTH FIX:
                 // Do NOT update layoutParams.width on every frame — that causes re-measure jank.
                 // Set final layout once, then GPU-scale the same Reply tile from button size to textbox size.
@@ -527,7 +686,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 replyTileAnimator?.cancel()
                 val radiusAnimator = ValueAnimator.ofFloat(startR, endR).apply {
-                    duration = 760L
+                    duration = morphDuration
                     interpolator = morphInterpolator
                     addUpdateListener { va ->
                         tileBg?.cornerRadius = va.animatedValue as Float
@@ -551,15 +710,15 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 editView.animate()
                     ?.alpha(1f)
-                    ?.setStartDelay(210L)
-                    ?.setDuration(420L)
+                    ?.setStartDelay(inputDelay)
+                    ?.setDuration(inputDuration)
                     ?.setInterpolator(morphInterpolator)
                     ?.start()
 
                 sendView.animate()
                     ?.alpha(1f)
-                    ?.setStartDelay(330L)
-                    ?.setDuration(320L)
+                    ?.setStartDelay(sendDelay)
+                    ?.setDuration(sendDuration)
                     ?.setInterpolator(morphInterpolator)
                     ?.start()
 
@@ -571,7 +730,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     ?.translationX(replyMorphTargetTranslationX)
                     ?.scaleX(1f)
                     ?.scaleY(1f)
-                    ?.setDuration(760L)
+                    ?.setDuration(morphDuration)
                     ?.setInterpolator(morphInterpolator)
                     ?.setListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
@@ -585,6 +744,18 @@ class HyperAccessibilityService : AccessibilityService() {
                             tileBg?.cornerRadius = endR
                             editView.requestFocus()
                             editView.isCursorVisible = true
+                            if (replyAnimMode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE) {
+                                tile.animate()?.setListener(null)?.cancel()
+                                tile.animate()
+                                    ?.withLayer()
+                                    ?.scaleY(1.025f)
+                                    ?.setDuration(90L)
+                                    ?.setInterpolator(morphInterpolator)
+                                    ?.withEndAction {
+                                        tile.animate()?.withLayer()?.scaleY(1f)?.setDuration(120L)?.setInterpolator(collapseInterpolator)?.start()
+                                    }
+                                    ?.start()
+                            }
                             forceRegionUpdate()
                         }
                     })
@@ -763,6 +934,7 @@ class HyperAccessibilityService : AccessibilityService() {
                             label.layoutParams = lp
                         }
                         tileBg?.cornerRadius = endR
+                        tileBg?.setStroke(dp(1), Color.parseColor("#444444"))
                         replyMorphOriginalWidth = 0
                         replyMorphOriginalHeight = 0
                         forceRegionUpdate()
