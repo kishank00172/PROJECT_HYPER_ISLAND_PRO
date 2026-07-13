@@ -249,6 +249,7 @@ class HyperAccessibilityService : AccessibilityService() {
         replyMorphBg = null
         replyMorphOriginalWidth = 0
         replyMorphOriginalHeight = 0
+        replyMorphTargetTranslationX = 0f
         this@HyperAccessibilityService.replyBar?.visibility = View.GONE
 
         if (actions.isEmpty()) {
@@ -396,6 +397,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var replyMorphBg: GradientDrawable? = null
     private var replyMorphOriginalWidth: Int = 0
     private var replyMorphOriginalHeight: Int = 0
+    private var replyMorphTargetTranslationX: Float = 0f
 
     private fun enterReplyMode(sourceView: View? = null) {
         if (isReplyMode) return
@@ -477,6 +479,14 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 val targetW = (actionView.width - dp(12)).coerceAtLeast(dp(220))
                 val targetH = dp(40)
+
+                // Magnetic Dock Morph:
+                // If Reply is second/right-side action, expanding from its own left would go outside island.
+                // So the SAME tile expands while sliding left into the action row's safe textbox lane.
+                val safeLeft = dp(6)
+                val tileLeftInActionRow = tile.left
+                replyMorphTargetTranslationX = (safeLeft - tileLeftInActionRow).toFloat()
+
                 val startR = tileBg?.cornerRadius ?: dp(16).toFloat()
                 val endR = dp(12).toFloat()
                 lastReplySourceRadius = startR
@@ -511,6 +521,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
                 tile.pivotX = 0f
                 tile.pivotY = targetH / 2f
+                tile.translationX = 0f
                 tile.scaleX = (startW.toFloat() / targetW.coerceAtLeast(1)).coerceIn(0.15f, 1f)
                 tile.scaleY = (startH.toFloat() / targetH.coerceAtLeast(1)).coerceIn(0.15f, 1f)
 
@@ -557,6 +568,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     ?.cancel()
                 tile.animate()
                     ?.withLayer()
+                    ?.translationX(replyMorphTargetTranslationX)
                     ?.scaleX(1f)
                     ?.scaleY(1f)
                     ?.setDuration(760L)
@@ -564,6 +576,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     ?.setListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
                             if (!isReplyMode || sessionId != replyModeSessionId) return
+                            tile.translationX = replyMorphTargetTranslationX
                             tile.scaleX = 1f
                             tile.scaleY = 1f
                             label.visibility = View.GONE
@@ -670,6 +683,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             tile.pivotX = 0f
             tile.pivotY = startH / 2f
+            tile.translationX = replyMorphTargetTranslationX
             tile.scaleX = 1f
             tile.scaleY = 1f
 
@@ -720,6 +734,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 ?.cancel()
             tile.animate()
                 ?.withLayer()
+                ?.translationX(0f)
                 ?.scaleX((endW.toFloat() / startW.coerceAtLeast(1)).coerceIn(0.15f, 1f))
                 ?.scaleY((endH.toFloat() / startH.coerceAtLeast(1)).coerceIn(0.15f, 1f))
                 ?.setDuration(560L)
@@ -732,6 +747,7 @@ class HyperAccessibilityService : AccessibilityService() {
                             lp.height = endH
                             tile.layoutParams = lp
                         }
+                        tile.translationX = 0f
                         tile.scaleX = 1f
                         tile.scaleY = 1f
                         label.alpha = 1f
@@ -949,7 +965,18 @@ class HyperAccessibilityService : AccessibilityService() {
                     this@HyperAccessibilityService.headerLine = this@HyperAccessibilityService.appNameText
                     this@HyperAccessibilityService.titleText = TextView(context).apply { setTextColor(Color.WHITE); textSize = 15.5f; typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
                     this@HyperAccessibilityService.messageText = TextView(context).apply { setTextColor(Color.rgb(200, 200, 200)); textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-                    this@HyperAccessibilityService.actionScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; this@HyperAccessibilityService.footerActions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }; addView(this@HyperAccessibilityService.footerActions) }
+                    this@HyperAccessibilityService.actionScroll = HorizontalScrollView(context).apply {
+                        isHorizontalScrollBarEnabled = false
+                        overScrollMode = View.OVER_SCROLL_NEVER
+                        setClipChildren(false)
+                        setClipToPadding(false)
+                        this@HyperAccessibilityService.footerActions = LinearLayout(context).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            setClipChildren(false)
+                            setClipToPadding(false)
+                        }
+                        addView(this@HyperAccessibilityService.footerActions)
+                    }
                     
                     // Reply Bar UI
                     this@HyperAccessibilityService.replyBar = LinearLayout(context).apply { 
