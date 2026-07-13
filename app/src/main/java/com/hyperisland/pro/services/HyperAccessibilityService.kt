@@ -532,16 +532,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 editView.animate()?.cancel()
                 sendView.animate()?.cancel()
 
-                label.animate()
-                    ?.alpha(0f)
-                    ?.setDuration(240L)
-                    ?.setInterpolator(collapseInterpolator)
-                    ?.withEndAction {
-                        if (isReplyMode && sessionId == replyModeSessionId) {
-                            label.visibility = View.GONE
-                        }
-                    }
-                    ?.start()
+                // IMPORTANT: parent tile is GPU-scaled during morph.
+                // If "Reply" text stays visible inside a scaled parent, it becomes squeezed/weird.
+                // Hide text immediately; only the tile shape morphs into textbox.
+                label.alpha = 0f
+                label.visibility = View.GONE
 
                 editView.animate()
                     ?.alpha(1f)
@@ -659,7 +654,9 @@ class HyperAccessibilityService : AccessibilityService() {
             val endR = lastReplySourceRadius.takeIf { it > 0f } ?: dp(16).toFloat()
             val labelEndWidth = (startW - tile.paddingLeft - tile.paddingRight).coerceAtLeast(dp(40))
 
-            label.visibility = View.VISIBLE
+            // Keep Reply label hidden while parent tile is scaling back.
+            // It will be shown only after real small button layout is committed.
+            label.visibility = View.GONE
             editView.visibility = View.VISIBLE
             sendView.visibility = View.VISIBLE
 
@@ -715,12 +712,8 @@ class HyperAccessibilityService : AccessibilityService() {
                 ?.setInterpolator(collapseInterpolator)
                 ?.start()
 
-            label.animate()
-                ?.alpha(1f)
-                ?.setStartDelay(170L)
-                ?.setDuration(280L)
-                ?.setInterpolator(morphInterpolator)
-                ?.start()
+            // Do not fade Reply label during scale-shrink; parent scale would distort it.
+            // Label comes back normal in onAnimationEnd after layout is committed to button size.
 
             tile.animate()
                 ?.setListener(null)
