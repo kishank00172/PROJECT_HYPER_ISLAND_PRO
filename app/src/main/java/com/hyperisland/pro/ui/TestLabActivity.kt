@@ -87,9 +87,9 @@ class TestLabActivity : Activity() {
         val description = when (mode) {
             AppSettings.REPLY_ANIM_CLASSIC_LAYOUT -> "Old layout-width morph. Good for true resize feel, but can be choppy."
             AppSettings.REPLY_ANIM_GPU_SMOOTH -> "Smooth GPU scale. Fast and stable, but right-side Reply may expand from its own lane."
-            AppSettings.REPLY_ANIM_MAGNETIC_DOCK -> "Clean direct ghost morph. No sheen, no bounce — baseline for origin continuity."
-            AppSettings.REPLY_ANIM_LIQUID_FILL -> "Slower liquid timing + straight glass sweep + cooler editor surface."
-            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> "Fast magnetic snap + visible capsule settle pulse. Xiaomi-ish candidate."
+            AppSettings.REPLY_ANIM_MAGNETIC_DOCK -> "Capsule Chrome baseline: anchored edge, geometry-derived sibling wipe, no decoration."
+            AppSettings.REPLY_ANIM_LIQUID_FILL -> "Liquid Parallax: slower edge travel, soft under-layer, subtle straight sheen."
+            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> "HyperOS Snap: fast anchored edge, lower capsule line, visible settle pulse."
             AppSettings.REPLY_ANIM_MINIMAL_PRO -> "Fast clean transition. Less flashy, more utility-focused."
             else -> "Clean direct ghost morph. No sheen, no bounce — baseline for origin continuity."
         }
