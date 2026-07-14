@@ -708,22 +708,38 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun styleGhostEditorForMode(mode: Int) {
         val layer = replyEditorLayer ?: return
-        val fill = when (mode) {
-            AppSettings.REPLY_ANIM_LIQUID_FILL -> Color.parseColor("#12171B")
-            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> Color.parseColor("#171717")
-            else -> Color.parseColor("#111214")
+        val bg = if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) {
+            // Permanent Liquid Parallax finish:
+            // The real editor keeps the glossy/glass surface after the ghost hands off; no flat fade-out.
+            GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(
+                    Color.parseColor("#1B252E"),
+                    Color.parseColor("#111820"),
+                    Color.parseColor("#0B0F14")
+                )
+            ).apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(23).toFloat()
+                setStroke(dp(1), Color.argb(118, 205, 232, 255))
+            }
+        } else {
+            val fill = when (mode) {
+                AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> Color.parseColor("#171717")
+                else -> Color.parseColor("#111214")
+            }
+            val stroke = when (mode) {
+                AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> Color.argb(70, 255, 255, 255)
+                else -> Color.argb(55, 255, 255, 255)
+            }
+            GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(fill)
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), stroke)
+            }
         }
-        val stroke = when (mode) {
-            AppSettings.REPLY_ANIM_LIQUID_FILL -> Color.argb(80, 190, 225, 255)
-            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> Color.argb(70, 255, 255, 255)
-            else -> Color.argb(55, 255, 255, 255)
-        }
-        layer.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(fill)
-            cornerRadius = dp(16).toFloat()
-            setStroke(dp(1), stroke)
-        }
+        layer.background = bg
     }
 
     private fun interpolateAnchoredRect(from: RectF, to: RectF, raw: Float, mode: Int): RectF {
@@ -818,17 +834,29 @@ class HyperAccessibilityService : AccessibilityService() {
 
         ghostSourceRect = rectInLayer(tile, layer)
         val actionRect = rectInLayer(actionView, layer)
-        val editorH = dp(44).toFloat()
-        val safeLeft = (actionRect.left + dp(6)).coerceAtLeast(dp(1).toFloat())
-        val safeRight = (actionRect.right - dp(6)).coerceAtMost((layer.width - dp(1)).toFloat())
-        val centerY = actionRect.centerY().coerceIn(editorH / 2f + dp(1), layer.height - editorH / 2f - dp(1))
-        ghostTargetRect = RectF(safeLeft, centerY - editorH / 2f, safeRight, centerY + editorH / 2f)
+        val isLiquidMode = mode == AppSettings.REPLY_ANIM_LIQUID_FILL
+        val editorH = dp(if (isLiquidMode) 46 else 44).toFloat()
+        val edgeGap = dp(if (isLiquidMode) 14 else 6).toFloat()
+        val safeLeft = (actionRect.left + edgeGap).coerceAtLeast(dp(1).toFloat())
+        val safeRight = if (isLiquidMode) {
+            // Liquid default: make right gap and bottom gap equal for a balanced docked editor.
+            (layer.width - edgeGap).coerceAtMost((layer.width - dp(1)).toFloat())
+        } else {
+            (actionRect.right - edgeGap).coerceAtMost((layer.width - dp(1)).toFloat())
+        }
+        ghostTargetRect = if (isLiquidMode) {
+            val bottom = (layer.height - edgeGap).coerceAtLeast(editorH + dp(1))
+            RectF(safeLeft, bottom - editorH, safeRight, bottom)
+        } else {
+            val centerY = actionRect.centerY().coerceIn(editorH / 2f + dp(1), layer.height - editorH / 2f - dp(1))
+            RectF(safeLeft, centerY - editorH / 2f, safeRight, centerY + editorH / 2f)
+        }
         styleGhostEditorForMode(mode)
         prepareGhostEditor(ghostTargetRect)
 
         val startRect = scaledRect(ghostSourceRect, 0.965f)
         val startR = ghostSourceRect.height() / 2f
-        val endR = dp(16).toFloat()
+        val endR = if (isLiquidMode) dp(23).toFloat() else dp(16).toFloat()
         val duration = when (mode) {
             AppSettings.REPLY_ANIM_LIQUID_FILL -> 560L
             AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 390L
