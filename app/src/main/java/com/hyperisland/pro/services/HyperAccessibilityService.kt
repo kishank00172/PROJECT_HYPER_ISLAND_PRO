@@ -836,7 +836,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val actionRect = rectInLayer(actionView, layer)
         val isLiquidMode = mode == AppSettings.REPLY_ANIM_LIQUID_FILL
         val editorH = dp(if (isLiquidMode) 46 else 44).toFloat()
-        val edgeGap = dp(if (isLiquidMode) 14 else 6).toFloat()
+        val edgeGap = dp(if (isLiquidMode) 8 else 6).toFloat()
         val safeLeft = (actionRect.left + edgeGap).coerceAtLeast(dp(1).toFloat())
         val safeRight = if (isLiquidMode) {
             // Liquid default: make right gap and bottom gap equal for a balanced docked editor.
