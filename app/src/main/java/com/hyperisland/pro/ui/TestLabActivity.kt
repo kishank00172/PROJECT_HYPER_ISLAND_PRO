@@ -87,11 +87,11 @@ class TestLabActivity : Activity() {
         val description = when (mode) {
             AppSettings.REPLY_ANIM_CLASSIC_LAYOUT -> "Old layout-width morph. Good for true resize feel, but can be choppy."
             AppSettings.REPLY_ANIM_GPU_SMOOTH -> "Smooth GPU scale. Fast and stable, but right-side Reply may expand from its own lane."
-            AppSettings.REPLY_ANIM_MAGNETIC_DOCK -> "Ghost renderer baseline. Pixel-matched Reply tab becomes editor without scaling text."
-            AppSettings.REPLY_ANIM_LIQUID_FILL -> "Ghost renderer + restrained glass highlight. Main premium candidate."
-            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> "Ghost renderer + subtle HyperOS capsule settle. No edge overshoot."
+            AppSettings.REPLY_ANIM_MAGNETIC_DOCK -> "Clean direct ghost morph. No sheen, no bounce — baseline for origin continuity."
+            AppSettings.REPLY_ANIM_LIQUID_FILL -> "Slower liquid timing + straight glass sweep + cooler editor surface."
+            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> "Fast magnetic snap + visible capsule settle pulse. Xiaomi-ish candidate."
             AppSettings.REPLY_ANIM_MINIMAL_PRO -> "Fast clean transition. Less flashy, more utility-focused."
-            else -> "Ghost renderer baseline. Pixel-matched Reply tab becomes editor without scaling text."
+            else -> "Clean direct ghost morph. No sheen, no bounce — baseline for origin continuity."
         }
         findViewById<TextView>(R.id.txtTests).text =
             "Selected Reply Morph:\n$modeName\n\n$description\n\nUse preview buttons below:\n• Reply first = WhatsApp style\n• Reply second/right = Google Messages style"
