@@ -112,6 +112,7 @@ class HyperAccessibilityService : AccessibilityService() {
         private var sendAlpha = 0f
         private var surfaceProgress = 0f
         private var highlightProgress = 0f
+        private var visualStyle = 0
         private var labelText = "Reply"
         private var hintText = "Type a reply..."
         private var drawEnabled = false
@@ -124,6 +125,7 @@ class HyperAccessibilityService : AccessibilityService() {
             sendButtonAlpha: Float,
             surface: Float,
             highlight: Float,
+            visualStyle: Int = 0,
             label: String = "Reply",
             hint: String = "Type a reply..."
         ) {
@@ -134,6 +136,7 @@ class HyperAccessibilityService : AccessibilityService() {
             sendAlpha = sendButtonAlpha.coerceIn(0f, 1f)
             surfaceProgress = surface.coerceIn(0f, 1f)
             highlightProgress = highlight.coerceIn(0f, 1f)
+            this.visualStyle = visualStyle
             labelText = label
             hintText = hint
             drawEnabled = true
@@ -160,9 +163,25 @@ class HyperAccessibilityService : AccessibilityService() {
             strokePaint.color = Color.argb((35 + 28 * surfaceProgress).toInt(), 255, 255, 255)
             canvas.drawRoundRect(rect, radius, radius, strokePaint)
 
-            // No curved highlight line.
-            // Earlier we drew a top arc here, but on-device it looked like an unwanted curve/scratch
-            // inside the textbox. Premium polish should be subtle, not visible as a weird line.
+            // Style-specific polish. No curved arc: it looked like a scratch on-device.
+            if (visualStyle == 1 && highlightProgress > 0.01f) {
+                // Liquid Glass: a very subtle straight diagonal sheen, clipped to capsule bounds.
+                canvas.save()
+                canvas.clipRect(rect)
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = dpLocal(18f)
+                paint.color = Color.argb((24 * kotlin.math.sin(highlightProgress * Math.PI).toFloat()).toInt().coerceIn(0, 24), 255, 255, 255)
+                val x = rect.left + rect.width() * highlightProgress
+                canvas.drawLine(x - dpLocal(34f), rect.top + dpLocal(5f), x + dpLocal(34f), rect.bottom - dpLocal(5f), paint)
+                canvas.restore()
+            } else if (visualStyle == 2) {
+                // HyperOS Capsule: restrained lower inner glow, visible as a capsule surface, not a neon line.
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = dpLocal(1.2f)
+                paint.color = Color.argb((18 + 14 * surfaceProgress).toInt(), 255, 255, 255)
+                canvas.drawLine(rect.left + dpLocal(16f), rect.bottom - dpLocal(3f), rect.right - dpLocal(16f), rect.bottom - dpLocal(3f), paint)
+            }
+
             val centerY = rect.centerY()
             textPaint.textSize = dpLocal(11.5f)
             hintPaint.textSize = dpLocal(13f)
@@ -661,6 +680,26 @@ class HyperAccessibilityService : AccessibilityService() {
         return out
     }
 
+    private fun styleGhostEditorForMode(mode: Int) {
+        val layer = replyEditorLayer ?: return
+        val fill = when (mode) {
+            AppSettings.REPLY_ANIM_LIQUID_FILL -> Color.parseColor("#12171B")
+            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> Color.parseColor("#171717")
+            else -> Color.parseColor("#111214")
+        }
+        val stroke = when (mode) {
+            AppSettings.REPLY_ANIM_LIQUID_FILL -> Color.argb(80, 190, 225, 255)
+            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> Color.argb(70, 255, 255, 255)
+            else -> Color.argb(55, 255, 255, 255)
+        }
+        layer.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius = dp(16).toFloat()
+            setStroke(dp(1), stroke)
+        }
+    }
+
     private fun prepareGhostEditor(target: RectF) {
         val layer = replyEditorLayer ?: return
         val lp = (layer.layoutParams as? FrameLayout.LayoutParams) ?: FrameLayout.LayoutParams(target.width().roundToInt(), target.height().roundToInt())
@@ -701,20 +740,26 @@ class HyperAccessibilityService : AccessibilityService() {
         val safeRight = (actionRect.right - dp(6)).coerceAtMost((layer.width - dp(1)).toFloat())
         val centerY = actionRect.centerY().coerceIn(editorH / 2f + dp(1), layer.height - editorH / 2f - dp(1))
         ghostTargetRect = RectF(safeLeft, centerY - editorH / 2f, safeRight, centerY + editorH / 2f)
+        styleGhostEditorForMode(mode)
         prepareGhostEditor(ghostTargetRect)
 
         val startRect = scaledRect(ghostSourceRect, 0.965f)
         val startR = ghostSourceRect.height() / 2f
         val endR = dp(16).toFloat()
         val duration = when (mode) {
-            AppSettings.REPLY_ANIM_LIQUID_FILL -> 460L
-            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 430L
+            AppSettings.REPLY_ANIM_LIQUID_FILL -> 560L
+            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 390L
             else -> 420L
+        }
+        val ghostVisualStyle = when (mode) {
+            AppSettings.REPLY_ANIM_LIQUID_FILL -> 1
+            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 2
+            else -> 0
         }
 
         // Ghost first, then source invisible: no one-frame blank/double source.
         ghost.alpha = 1f
-        ghost.setGhostState(startRect, startR, 1f, 0f, 0f, 0f, 0f, labelText)
+        ghost.setGhostState(startRect, startR, 1f, 0f, 0f, 0f, 0f, ghostVisualStyle, labelText)
         tile.visibility = View.INVISIBLE
         tile.alpha = 0f
         tile.scaleX = 1f
@@ -742,12 +787,24 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener { va ->
                 if (!isReplyMode || !isGhostReplyMode || sessionId != replyModeSessionId) return@addUpdateListener
                 val raw = va.animatedFraction
-                val h = ghostMagneticInterpolator.getInterpolation(segment(raw, 0.0f, 0.92f))
-                val v = ghostMaterialInterpolator.getInterpolation(segment(raw, 0.08f, 0.94f))
-                val surface = ghostMaterialInterpolator.getInterpolation(segment(raw, 0.12f, 0.88f))
-                val labelA = 1f - ghostMaterialInterpolator.getInterpolation(segment(raw, 0.06f, 0.34f))
-                val hintA = ghostMaterialInterpolator.getInterpolation(segment(raw, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.56f else 0.48f, 0.90f))
-                val sendA = ghostMagneticInterpolator.getInterpolation(segment(raw, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.68f else 0.62f, 1.0f))
+                val h = when (mode) {
+                    AppSettings.REPLY_ANIM_LIQUID_FILL -> ghostMaterialInterpolator.getInterpolation(segment(raw, 0.0f, 0.98f))
+                    AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> ghostMagneticInterpolator.getInterpolation(segment(raw, 0.0f, 0.74f))
+                    else -> ghostMagneticInterpolator.getInterpolation(segment(raw, 0.0f, 0.92f))
+                }
+                val v = when (mode) {
+                    AppSettings.REPLY_ANIM_LIQUID_FILL -> ghostMaterialInterpolator.getInterpolation(segment(raw, 0.18f, 1.0f))
+                    AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> ghostMaterialInterpolator.getInterpolation(segment(raw, 0.10f, 0.82f))
+                    else -> ghostMaterialInterpolator.getInterpolation(segment(raw, 0.08f, 0.94f))
+                }
+                val surface = when (mode) {
+                    AppSettings.REPLY_ANIM_LIQUID_FILL -> ghostMaterialInterpolator.getInterpolation(segment(raw, 0.06f, 0.96f))
+                    AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> ghostMagneticInterpolator.getInterpolation(segment(raw, 0.12f, 0.78f))
+                    else -> ghostMaterialInterpolator.getInterpolation(segment(raw, 0.12f, 0.88f))
+                }
+                val labelA = 1f - ghostMaterialInterpolator.getInterpolation(segment(raw, 0.04f, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.26f else 0.34f))
+                val hintA = ghostMaterialInterpolator.getInterpolation(segment(raw, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.62f else if (mode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE) 0.40f else 0.48f, 0.90f))
+                val sendA = ghostMagneticInterpolator.getInterpolation(segment(raw, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.74f else if (mode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE) 0.52f else 0.62f, 1.0f))
                 val rect = interpolateRectEdges(startRect, ghostTargetRect, h, v)
                 ghost.setGhostState(
                     bounds = rect,
@@ -756,7 +813,8 @@ class HyperAccessibilityService : AccessibilityService() {
                     placeholderAlpha = hintA,
                     sendButtonAlpha = sendA,
                     surface = surface,
-                    highlight = segment(raw, 0.18f, 0.82f),
+                    highlight = segment(raw, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.12f else 0.18f, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.92f else 0.82f),
+                    visualStyle = ghostVisualStyle,
                     label = labelText
                 )
                 if (raw >= 0.82f && editor.visibility != View.VISIBLE) {
@@ -791,9 +849,23 @@ class HyperAccessibilityService : AccessibilityService() {
                         }
                     })?.start()
                     if (mode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE) {
-                        editor.animate()?.withLayer()?.scaleY(1.018f)?.setDuration(80L)?.withEndAction {
-                            editor.animate()?.withLayer()?.scaleY(1f)?.setDuration(110L)?.setInterpolator(ghostReverseInterpolator)?.start()
-                        }?.start()
+                        editor.animate()?.setListener(null)?.cancel()
+                        editor.animate()
+                            ?.withLayer()
+                            ?.scaleX(1.012f)
+                            ?.scaleY(1.028f)
+                            ?.setDuration(95L)
+                            ?.setInterpolator(ghostMagneticInterpolator)
+                            ?.withEndAction {
+                                editor.animate()
+                                    ?.withLayer()
+                                    ?.scaleX(1f)
+                                    ?.scaleY(1f)
+                                    ?.setDuration(145L)
+                                    ?.setInterpolator(ghostReverseInterpolator)
+                                    ?.start()
+                            }
+                            ?.start()
                     }
                     forceRegionUpdate()
                 }
@@ -830,7 +902,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val endR = currentSourceRect.height() / 2f
 
         ghost.alpha = 1f
-        ghost.setGhostState(targetStart, startR, 0f, 1f, 1f, 1f, 0f, "Reply")
+        ghost.setGhostState(targetStart, startR, 0f, 1f, 1f, 1f, 0f, 0, "Reply")
         ghost.bringToFront()
         editor.animate()?.setListener(null)
         editor.animate()?.cancel()
@@ -854,7 +926,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 val hintA = 1f - ghostMaterialInterpolator.getInterpolation(segment(raw, 0.0f, 0.42f))
                 val sendA = 1f - ghostMaterialInterpolator.getInterpolation(segment(raw, 0.0f, 0.34f))
                 val rect = interpolateRectEdges(targetStart, targetEnd, h, v)
-                ghost.setGhostState(rect, lerp(startR, endR, raw), labelA, hintA, sendA, 1f - raw, 0f, "Reply")
+                ghost.setGhostState(rect, lerp(startR, endR, raw), labelA, hintA, sendA, 1f - raw, 0f, 0, "Reply")
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
