@@ -42,7 +42,8 @@
             android:text="Reply Morph Animation Lab — V3"
             android:textColor="@color/text_primary"
             android:textStyle="bold"
-            android:textSize="18sp" />
+            android:textSize="18sp"
+            android:visibility="gone" />
 
         <RadioGroup
             android:id="@+id/radioReplyAnimationMode"
@@ -51,7 +52,8 @@
             android:layout_marginTop="10dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="14dp"
+            android:visibility="gone">
 
             <RadioButton
                 android:id="@+id/radioReplyClassicLayout"
