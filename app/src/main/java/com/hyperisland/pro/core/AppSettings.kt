@@ -25,6 +25,7 @@ object AppSettings {
     const val ENGINE_ACCESSIBILITY = "accessibility"
     const val ENGINE_APPLICATION = "application"
 
+    // Reply Morph Lab modes: 0/1 are legacy baselines, 2/3/4 use Ghost V2 renderer.
     const val REPLY_ANIM_CLASSIC_LAYOUT = 0
     const val REPLY_ANIM_GPU_SMOOTH = 1
     const val REPLY_ANIM_MAGNETIC_DOCK = 2
@@ -102,9 +103,9 @@ object AppSettings {
     fun getReplyAnimationModeName(mode: Int): String = when (mode.coerceIn(REPLY_ANIM_CLASSIC_LAYOUT, REPLY_ANIM_MINIMAL_PRO)) {
         REPLY_ANIM_CLASSIC_LAYOUT -> "Classic Layout Morph"
         REPLY_ANIM_GPU_SMOOTH -> "GPU Smooth Scale"
-        REPLY_ANIM_MAGNETIC_DOCK -> "Magnetic Dock Morph"
-        REPLY_ANIM_LIQUID_FILL -> "Liquid Fill Reveal"
-        REPLY_ANIM_ELASTIC_BUBBLE -> "Elastic Bubble"
+        REPLY_ANIM_MAGNETIC_DOCK -> "Ghost V2: Shared Material"
+        REPLY_ANIM_LIQUID_FILL -> "Ghost V2: Liquid Glass"
+        REPLY_ANIM_ELASTIC_BUBBLE -> "Ghost V2: HyperOS Capsule"
         REPLY_ANIM_MINIMAL_PRO -> "Minimal Pro Fade"
         else -> "Magnetic Dock Morph"
     }
