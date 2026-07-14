@@ -706,6 +706,15 @@ class HyperAccessibilityService : AccessibilityService() {
         return out
     }
 
+    private fun getLiquidEditorGapPx(): Float = dp(10).toFloat()
+
+    private fun getLiquidEditorRadiusPx(): Float {
+        val islandR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
+        val gap = getLiquidEditorGapPx()
+        // For equal-distance rounded corners, inner radius should be outer radius minus inset.
+        return (islandR - gap).coerceIn(dp(26).toFloat(), dp(34).toFloat())
+    }
+
     private fun styleGhostEditorForMode(mode: Int) {
         val layer = replyEditorLayer ?: return
         val bg = if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) {
@@ -720,7 +729,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 )
             ).apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(23).toFloat()
+                cornerRadius = getLiquidEditorRadiusPx()
                 setStroke(dp(1), Color.argb(118, 205, 232, 255))
             }
         } else {
@@ -812,6 +821,19 @@ class HyperAccessibilityService : AccessibilityService() {
         replyEditorEditText?.setText("")
     }
 
+    private fun lockGhostEditorVisible(sessionId: Int) {
+        val editor = replyEditorLayer ?: return
+        if (!isReplyMode || !isGhostReplyMode || sessionId != replyModeSessionId) return
+        morphLayer?.bringToFront()
+        editor.visibility = View.VISIBLE
+        editor.alpha = 1f
+        editor.scaleX = 1f
+        editor.scaleY = 1f
+        editor.bringToFront()
+        replyEditorEditText?.isCursorVisible = true
+        forceRegionUpdate()
+    }
+
     private fun startGhostReplyMorph(
         sessionId: Int,
         tile: LinearLayout,
@@ -835,8 +857,9 @@ class HyperAccessibilityService : AccessibilityService() {
         ghostSourceRect = rectInLayer(tile, layer)
         val actionRect = rectInLayer(actionView, layer)
         val isLiquidMode = mode == AppSettings.REPLY_ANIM_LIQUID_FILL
-        val editorH = dp(if (isLiquidMode) 46 else 44).toFloat()
-        val edgeGap = dp(if (isLiquidMode) 8 else 6).toFloat()
+        val liquidRadius = getLiquidEditorRadiusPx()
+        val editorH = if (isLiquidMode) (liquidRadius * 2f).coerceIn(dp(56).toFloat(), dp(68).toFloat()) else dp(44).toFloat()
+        val edgeGap = if (isLiquidMode) getLiquidEditorGapPx() else dp(6).toFloat()
         val safeLeft = (actionRect.left + edgeGap).coerceAtLeast(dp(1).toFloat())
         val safeRight = if (isLiquidMode) {
             // Liquid default: make right gap and bottom gap equal for a balanced docked editor.
@@ -856,7 +879,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val startRect = scaledRect(ghostSourceRect, 0.965f)
         val startR = ghostSourceRect.height() / 2f
-        val endR = if (isLiquidMode) dp(23).toFloat() else dp(16).toFloat()
+        val endR = if (isLiquidMode) liquidRadius else dp(16).toFloat()
         val duration = when (mode) {
             AppSettings.REPLY_ANIM_LIQUID_FILL -> 560L
             AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 390L
@@ -952,27 +975,21 @@ class HyperAccessibilityService : AccessibilityService() {
                     if (!isReplyMode || !isGhostReplyMode || sessionId != replyModeSessionId) return
                     // Hard handoff: real editor must stay on top after ghost finishes.
                     // Fixes bug where ghost disappeared but textbox/editor also appeared gone.
-                    morphLayer?.bringToFront()
-                    editor.visibility = View.VISIBLE
-                    editor.alpha = 1f
-                    editor.scaleX = 1f
-                    editor.scaleY = 1f
-                    editor.bringToFront()
+                    lockGhostEditorVisible(sessionId)
                     ghost.bringToFront()
-                    editorInput.isCursorVisible = true
                     ghost.animate()?.alpha(0f)?.setDuration(70L)?.setInterpolator(morphInterpolator)?.setListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
                             if (isGhostReplyMode) {
                                 ghost.clearGhost()
                                 ghost.alpha = 1f
                                 ghost.setLayerType(View.LAYER_TYPE_NONE, null)
-                                morphLayer?.bringToFront()
-                                editor.visibility = View.VISIBLE
-                                editor.alpha = 1f
-                                editor.bringToFront()
+                                lockGhostEditorVisible(sessionId)
                             }
                         }
                     })?.start()
+                    mainHandler.postDelayed({ lockGhostEditorVisible(sessionId) }, 90)
+                    mainHandler.postDelayed({ lockGhostEditorVisible(sessionId) }, 220)
+                    mainHandler.postDelayed({ lockGhostEditorVisible(sessionId) }, 520)
                     if (mode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE) {
                         editor.animate()?.setListener(null)?.cancel()
                         editor.animate()
