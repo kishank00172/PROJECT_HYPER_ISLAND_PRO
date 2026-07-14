@@ -9,10 +9,13 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Region
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -74,10 +77,142 @@ class HyperAccessibilityService : AccessibilityService() {
         val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>
     )
 
+    private class ReplyMorphView(context: Context) : View(context) {
+        private val rect = RectF()
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textAlign = Paint.Align.LEFT
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(145, 255, 255, 255)
+            textAlign = Paint.Align.LEFT
+            typeface = Typeface.DEFAULT
+        }
+        private val sendPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(0, 150, 255)
+            textAlign = Paint.Align.RIGHT
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = dpLocal(1f)
+            color = Color.argb(45, 255, 255, 255)
+        }
+        private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = dpLocal(1f)
+            color = Color.argb(22, 255, 255, 255)
+        }
+
+        private var radius = dpLocal(16f)
+        private var labelAlpha = 1f
+        private var hintAlpha = 0f
+        private var sendAlpha = 0f
+        private var surfaceProgress = 0f
+        private var highlightProgress = 0f
+        private var labelText = "Reply"
+        private var hintText = "Type a reply..."
+        private var drawEnabled = false
+
+        fun setGhostState(
+            bounds: RectF,
+            cornerRadius: Float,
+            replyLabelAlpha: Float,
+            placeholderAlpha: Float,
+            sendButtonAlpha: Float,
+            surface: Float,
+            highlight: Float,
+            label: String = "Reply",
+            hint: String = "Type a reply..."
+        ) {
+            rect.set(bounds)
+            radius = cornerRadius
+            labelAlpha = replyLabelAlpha.coerceIn(0f, 1f)
+            hintAlpha = placeholderAlpha.coerceIn(0f, 1f)
+            sendAlpha = sendButtonAlpha.coerceIn(0f, 1f)
+            surfaceProgress = surface.coerceIn(0f, 1f)
+            highlightProgress = highlight.coerceIn(0f, 1f)
+            labelText = label
+            hintText = hint
+            drawEnabled = true
+            visibility = VISIBLE
+            invalidate()
+        }
+
+        fun clearGhost() {
+            drawEnabled = false
+            visibility = INVISIBLE
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (!drawEnabled || rect.isEmpty) return
+
+            val fillBase = lerpColor(Color.parseColor("#242424"), Color.parseColor("#111214"), surfaceProgress)
+            paint.style = Paint.Style.FILL
+            paint.color = fillBase
+            canvas.drawRoundRect(rect, radius, radius, paint)
+
+            // Restrained material edge: premium, not neon.
+            strokePaint.color = Color.argb((35 + 28 * surfaceProgress).toInt(), 255, 255, 255)
+            canvas.drawRoundRect(rect, radius, radius, strokePaint)
+
+            // Inner top highlight, clipped visually to capsule bounds.
+            val inset = dpLocal(2f)
+            val topLine = RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset)
+            highlightPaint.color = Color.argb((18 + 18 * highlightProgress).toInt(), 255, 255, 255)
+            canvas.drawArc(topLine, 205f, 130f, false, highlightPaint)
+
+            val centerY = rect.centerY()
+            textPaint.textSize = dpLocal(11.5f)
+            hintPaint.textSize = dpLocal(13f)
+            sendPaint.textSize = dpLocal(11.5f)
+
+            if (labelAlpha > 0.01f) {
+                textPaint.alpha = (255 * labelAlpha).toInt().coerceIn(0, 255)
+                val labelWidth = textPaint.measureText(labelText)
+                val x = rect.centerX() - labelWidth / 2f
+                val y = centerY - (textPaint.descent() + textPaint.ascent()) / 2f
+                canvas.drawText(labelText, x, y, textPaint)
+            }
+
+            if (hintAlpha > 0.01f) {
+                hintPaint.alpha = (255 * hintAlpha).toInt().coerceIn(0, 255)
+                val x = rect.left + dpLocal(14f) + dpLocal(4f) * (1f - hintAlpha)
+                val y = centerY - (hintPaint.descent() + hintPaint.ascent()) / 2f
+                canvas.drawText(hintText, x, y, hintPaint)
+            }
+
+            if (sendAlpha > 0.01f) {
+                sendPaint.alpha = (255 * sendAlpha).toInt().coerceIn(0, 255)
+                val x = rect.right - dpLocal(12f) + dpLocal(5f) * (1f - sendAlpha)
+                val y = centerY - (sendPaint.descent() + sendPaint.ascent()) / 2f
+                canvas.drawText("SEND", x, y, sendPaint)
+            }
+        }
+
+        private fun dpLocal(value: Float): Float = value * resources.displayMetrics.density
+
+        private fun lerpColor(start: Int, end: Int, t: Float): Int {
+            val p = t.coerceIn(0f, 1f)
+            val a = Color.alpha(start) + ((Color.alpha(end) - Color.alpha(start)) * p).toInt()
+            val r = Color.red(start) + ((Color.red(end) - Color.red(start)) * p).toInt()
+            val g = Color.green(start) + ((Color.green(end) - Color.green(start)) * p).toInt()
+            val b = Color.blue(start) + ((Color.blue(end) - Color.blue(start)) * p).toInt()
+            return Color.argb(a, r, g, b)
+        }
+    }
+
     // ULTRA-SMOOTH CURVES
     private val expandInterpolator = PathInterpolator(0.34f, 1.56f, 0.64f, 1.0f) 
     private val morphInterpolator = PathInterpolator(0.25f, 0.46f, 0.45f, 0.94f) 
     private val collapseInterpolator = PathInterpolator(0.55f, 0.0f, 0.1f, 1.0f)
+    private val ghostMagneticInterpolator = PathInterpolator(0.16f, 1.0f, 0.30f, 1.0f)
+    private val ghostMaterialInterpolator = PathInterpolator(0.20f, 0.0f, 0.0f, 1.0f)
+    private val ghostReverseInterpolator = PathInterpolator(0.40f, 0.0f, 0.20f, 1.0f)
 
     companion object {
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
@@ -124,6 +259,18 @@ class HyperAccessibilityService : AccessibilityService() {
     private var replyBar: LinearLayout? = null
     private var replyEditText: EditText? = null
     private var sendButton: TextView? = null
+
+    // Reply Morph V2 — custom ghost material layer (premium candidate)
+    private var morphLayer: FrameLayout? = null
+    private var replyGhostView: ReplyMorphView? = null
+    private var replyEditorLayer: LinearLayout? = null
+    private var replyEditorEditText: EditText? = null
+    private var replyEditorSendButton: TextView? = null
+    private var isGhostReplyMode = false
+    private var ghostSourceView: View? = null
+    private var ghostSourceRect = RectF()
+    private var ghostTargetRect = RectF()
+    private var ghostAnimator: Animator? = null
 
     private var outsideWatcherView: FrameLayout? = null
     private var morphAnimator: Animator? = null
@@ -473,6 +620,286 @@ class HyperAccessibilityService : AccessibilityService() {
     private var replyMorphOriginalHeight: Int = 0
     private var replyMorphTargetTranslationX: Float = 0f
 
+    private fun shouldUseGhostReplyMorph(mode: Int): Boolean {
+        return mode == AppSettings.REPLY_ANIM_MAGNETIC_DOCK ||
+            mode == AppSettings.REPLY_ANIM_LIQUID_FILL ||
+            mode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE
+    }
+
+    private fun rectInLayer(view: View, layer: View): RectF {
+        val viewLocation = IntArray(2)
+        val layerLocation = IntArray(2)
+        view.getLocationOnScreen(viewLocation)
+        layer.getLocationOnScreen(layerLocation)
+        val left = (viewLocation[0] - layerLocation[0]).toFloat()
+        val top = (viewLocation[1] - layerLocation[1]).toFloat()
+        return RectF(left, top, left + view.width, top + view.height)
+    }
+
+    private fun scaledRect(source: RectF, scale: Float): RectF {
+        val dx = source.width() * (1f - scale) * 0.5f
+        val dy = source.height() * (1f - scale) * 0.5f
+        return RectF(source.left + dx, source.top + dy, source.right - dx, source.bottom - dy)
+    }
+
+    private fun segment(value: Float, start: Float, end: Float): Float {
+        if (end <= start) return if (value >= end) 1f else 0f
+        return ((value - start) / (end - start)).coerceIn(0f, 1f)
+    }
+
+    private fun interpolateRectEdges(from: RectF, to: RectF, h: Float, v: Float): RectF {
+        val bounds = RectF(0f, 0f, (morphLayer?.width ?: islandView?.width ?: 0).toFloat(), (morphLayer?.height ?: islandView?.height ?: 0).toFloat())
+        val out = RectF(
+            lerp(from.left, to.left, h),
+            lerp(from.top, to.top, v),
+            lerp(from.right, to.right, h),
+            lerp(from.bottom, to.bottom, v)
+        )
+        if (!bounds.isEmpty) {
+            out.left = out.left.coerceAtLeast(bounds.left + dp(1))
+            out.top = out.top.coerceAtLeast(bounds.top + dp(1))
+            out.right = out.right.coerceAtMost(bounds.right - dp(1))
+            out.bottom = out.bottom.coerceAtMost(bounds.bottom - dp(1))
+        }
+        return out
+    }
+
+    private fun prepareGhostEditor(target: RectF) {
+        val layer = replyEditorLayer ?: return
+        val lp = (layer.layoutParams as? FrameLayout.LayoutParams) ?: FrameLayout.LayoutParams(target.width().roundToInt(), target.height().roundToInt())
+        lp.width = target.width().roundToInt().coerceAtLeast(dp(180))
+        lp.height = target.height().roundToInt().coerceAtLeast(dp(40))
+        lp.leftMargin = target.left.roundToInt()
+        lp.topMargin = target.top.roundToInt()
+        layer.layoutParams = lp
+        layer.alpha = 0f
+        layer.visibility = View.INVISIBLE
+        replyEditorEditText?.isCursorVisible = false
+        replyEditorEditText?.setText("")
+    }
+
+    private fun startGhostReplyMorph(
+        sessionId: Int,
+        tile: LinearLayout,
+        footer: LinearLayout,
+        actionView: HorizontalScrollView,
+        labelText: String,
+        mode: Int
+    ) {
+        val layer = morphLayer ?: return
+        val ghost = replyGhostView ?: return
+        val editor = replyEditorLayer ?: return
+        val editorInput = replyEditorEditText ?: return
+        val editorSend = replyEditorSendButton ?: return
+
+        isGhostReplyMode = true
+        ghostSourceView = tile
+        this@HyperAccessibilityService.replyEditText = editorInput
+        this@HyperAccessibilityService.sendButton = editorSend
+
+        ghostSourceRect = rectInLayer(tile, layer)
+        val actionRect = rectInLayer(actionView, layer)
+        val editorH = dp(44).toFloat()
+        val safeLeft = (actionRect.left + dp(6)).coerceAtLeast(dp(1).toFloat())
+        val safeRight = (actionRect.right - dp(6)).coerceAtMost((layer.width - dp(1)).toFloat())
+        val centerY = actionRect.centerY().coerceIn(editorH / 2f + dp(1), layer.height - editorH / 2f - dp(1))
+        ghostTargetRect = RectF(safeLeft, centerY - editorH / 2f, safeRight, centerY + editorH / 2f)
+        prepareGhostEditor(ghostTargetRect)
+
+        val startRect = scaledRect(ghostSourceRect, 0.965f)
+        val startR = ghostSourceRect.height() / 2f
+        val endR = dp(16).toFloat()
+        val duration = when (mode) {
+            AppSettings.REPLY_ANIM_LIQUID_FILL -> 460L
+            AppSettings.REPLY_ANIM_ELASTIC_BUBBLE -> 430L
+            else -> 420L
+        }
+
+        // Ghost first, then source invisible: no one-frame blank/double source.
+        ghost.alpha = 1f
+        ghost.setGhostState(startRect, startR, 1f, 0f, 0f, 0f, 0f, labelText)
+        tile.visibility = View.INVISIBLE
+        tile.alpha = 0f
+        tile.scaleX = 1f
+        tile.scaleY = 1f
+
+        for (i in 0 until footer.childCount) {
+            val child = footer.getChildAt(i)
+            if (child !== tile) {
+                child.isEnabled = false
+                child.animate()?.setListener(null)
+                child.animate()?.cancel()
+                child.animate()
+                    ?.alpha(0f)
+                    ?.translationY(dp(5).toFloat())
+                    ?.setDuration(170L)
+                    ?.setInterpolator(morphInterpolator)
+                    ?.start()
+            }
+        }
+
+        ghostAnimator?.cancel()
+        ghostAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration
+            interpolator = ghostMaterialInterpolator
+            addUpdateListener { va ->
+                if (!isReplyMode || !isGhostReplyMode || sessionId != replyModeSessionId) return@addUpdateListener
+                val raw = va.animatedFraction
+                val h = ghostMagneticInterpolator.getInterpolation(segment(raw, 0.0f, 0.92f))
+                val v = ghostMaterialInterpolator.getInterpolation(segment(raw, 0.08f, 0.94f))
+                val surface = ghostMaterialInterpolator.getInterpolation(segment(raw, 0.12f, 0.88f))
+                val labelA = 1f - ghostMaterialInterpolator.getInterpolation(segment(raw, 0.06f, 0.34f))
+                val hintA = ghostMaterialInterpolator.getInterpolation(segment(raw, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.56f else 0.48f, 0.90f))
+                val sendA = ghostMagneticInterpolator.getInterpolation(segment(raw, if (mode == AppSettings.REPLY_ANIM_LIQUID_FILL) 0.68f else 0.62f, 1.0f))
+                val rect = interpolateRectEdges(startRect, ghostTargetRect, h, v)
+                ghost.setGhostState(
+                    bounds = rect,
+                    cornerRadius = lerp(startR, endR, surface),
+                    replyLabelAlpha = labelA,
+                    placeholderAlpha = hintA,
+                    sendButtonAlpha = sendA,
+                    surface = surface,
+                    highlight = segment(raw, 0.18f, 0.82f),
+                    label = labelText
+                )
+                if (raw >= 0.82f && editor.visibility != View.VISIBLE) {
+                    editor.visibility = View.VISIBLE
+                    editor.alpha = 0f
+                    editor.animate()?.alpha(1f)?.setDuration(90L)?.setInterpolator(morphInterpolator)?.start()
+                }
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!isReplyMode || !isGhostReplyMode || sessionId != replyModeSessionId) return
+                    editor.visibility = View.VISIBLE
+                    editor.alpha = 1f
+                    editorInput.isCursorVisible = true
+                    ghost.animate()?.alpha(0f)?.setDuration(70L)?.setInterpolator(morphInterpolator)?.setListener(object : AnimatorListenerAdapter() {
+                        override fun onAnimationEnd(animation: Animator) {
+                            if (isGhostReplyMode) {
+                                ghost.clearGhost()
+                                ghost.alpha = 1f
+                            }
+                        }
+                    })?.start()
+                    if (mode == AppSettings.REPLY_ANIM_ELASTIC_BUBBLE) {
+                        editor.animate()?.withLayer()?.scaleY(1.018f)?.setDuration(80L)?.withEndAction {
+                            editor.animate()?.withLayer()?.scaleY(1f)?.setDuration(110L)?.setInterpolator(ghostReverseInterpolator)?.start()
+                        }?.start()
+                    }
+                    forceRegionUpdate()
+                }
+            })
+            start()
+        }
+    }
+
+    private fun reverseGhostReplyMode() {
+        if (!isGhostReplyMode) return
+        val oldSession = ++replyModeSessionId
+        isReplyMode = false
+        val layer = morphLayer
+        val ghost = replyGhostView
+        val editor = replyEditorLayer
+        val input = replyEditorEditText
+        val source = ghostSourceView
+        val footer = footerActions
+        if (layer == null || ghost == null || editor == null || input == null || source == null) {
+            isGhostReplyMode = false
+            restoreAfterGhostReverse()
+            return
+        }
+
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        input.isCursorVisible = false
+        try { imm.hideSoftInputFromWindow(input.windowToken, 0) } catch (_: Exception) {}
+        input.clearFocus()
+
+        val currentSourceRect = rectInLayer(source, layer)
+        val targetStart = RectF(ghostTargetRect)
+        val targetEnd = scaledRect(currentSourceRect, 0.965f)
+        val startR = dp(16).toFloat()
+        val endR = currentSourceRect.height() / 2f
+
+        ghost.alpha = 1f
+        ghost.setGhostState(targetStart, startR, 0f, 1f, 1f, 1f, 0f, "Reply")
+        editor.animate()?.setListener(null)
+        editor.animate()?.cancel()
+        editor.animate()?.alpha(0f)?.setDuration(70L)?.setInterpolator(morphInterpolator)?.setListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                editor.visibility = View.INVISIBLE
+                editor.alpha = 1f
+            }
+        })?.start()
+
+        ghostAnimator?.cancel()
+        ghostAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 330L
+            interpolator = ghostReverseInterpolator
+            addUpdateListener { va ->
+                if (oldSession != replyModeSessionId) return@addUpdateListener
+                val raw = va.animatedFraction
+                val h = ghostReverseInterpolator.getInterpolation(segment(raw, 0.0f, 0.94f))
+                val v = ghostReverseInterpolator.getInterpolation(segment(raw, 0.04f, 1.0f))
+                val labelA = ghostMaterialInterpolator.getInterpolation(segment(raw, 0.62f, 1.0f))
+                val hintA = 1f - ghostMaterialInterpolator.getInterpolation(segment(raw, 0.0f, 0.42f))
+                val sendA = 1f - ghostMaterialInterpolator.getInterpolation(segment(raw, 0.0f, 0.34f))
+                val rect = interpolateRectEdges(targetStart, targetEnd, h, v)
+                ghost.setGhostState(rect, lerp(startR, endR, raw), labelA, hintA, sendA, 1f - raw, 0f, "Reply")
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (oldSession != replyModeSessionId) return
+                    source.visibility = View.VISIBLE
+                    source.alpha = 1f
+                    source.scaleX = 1f
+                    source.scaleY = 1f
+                    source.translationX = 0f
+                    source.translationY = 0f
+                    source.isEnabled = true
+                    source.isClickable = true
+                    ghost.clearGhost()
+                    isGhostReplyMode = false
+                    restoreAfterGhostReverse()
+                }
+            })
+            start()
+        }
+
+        footer?.let { row ->
+            mainHandler.postDelayed({
+                if (oldSession != replyModeSessionId) return@postDelayed
+                for (i in 0 until row.childCount) {
+                    val child = row.getChildAt(i)
+                    child.isEnabled = true
+                    child.visibility = View.VISIBLE
+                    child.animate()?.setListener(null)
+                    child.animate()?.cancel()
+                    child.animate()?.alpha(1f)?.translationY(0f)?.setDuration(240L)?.setInterpolator(morphInterpolator)?.start()
+                }
+            }, 110)
+        }
+    }
+
+    private fun restoreAfterGhostReverse() {
+        replyEditorLayer?.visibility = View.INVISIBLE
+        replyEditorLayer?.alpha = 1f
+        replyEditorEditText?.setText("")
+        val p = visualParams
+        if (p != null) {
+            p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+            visualRoot?.postDelayed({
+                try { windowManager?.updateViewLayout(visualRoot, p) } catch (_: Exception) {}
+                forceRegionUpdate()
+            }, 80)
+        }
+        mainHandler.postDelayed({
+            forceRegionUpdate()
+            if (notificationQueue.isNotEmpty()) processNextInQueue()
+        }, 420)
+    }
+
     private fun enterReplyMode(sourceView: View? = null) {
         if (isReplyMode) return
         isReplyMode = true
@@ -601,6 +1028,18 @@ class HyperAccessibilityService : AccessibilityService() {
                 lastReplySourceRadius = startR
                 if (replyAnimMode == AppSettings.REPLY_ANIM_LIQUID_FILL) {
                     tileBg?.setStroke(dp(1), Color.rgb(0, 150, 255))
+                }
+
+                if (shouldUseGhostReplyMorph(replyAnimMode)) {
+                    startGhostReplyMorph(
+                        sessionId = sessionId,
+                        tile = tile,
+                        footer = footer,
+                        actionView = actionView,
+                        labelText = label.text?.toString().orEmpty().ifBlank { "Reply" },
+                        mode = replyAnimMode
+                    )
+                    return@post
                 }
 
                 label.visibility = View.VISIBLE
@@ -772,10 +1211,10 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.postDelayed({ forceRegionUpdate() }, 80)
         mainHandler.postDelayed({ forceRegionUpdate() }, 350)
 
-        // Keyboard — delayed so the tile morph is visible first.
+        // Keyboard — delayed so the premium morph is visually established first.
         mainHandler.postDelayed({
             if (!isReplyMode || sessionId != replyModeSessionId) return@postDelayed
-            val activeEdit = replyMorphEditText ?: this@HyperAccessibilityService.replyEditText ?: return@postDelayed
+            val activeEdit = replyEditText ?: replyMorphEditText ?: this@HyperAccessibilityService.replyEditText ?: return@postDelayed
             activeEdit.requestFocus()
             activeEdit.isCursorVisible = true
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
@@ -786,11 +1225,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (!isReplyMode || sessionId != replyModeSessionId) return@postDelayed
                 try { imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0) } catch (_: Exception) {}
             }, 120)
-        }, 420)
+        }, 540)
     }
 
     private fun exitReplyMode() {
-        if (!isReplyMode) return
+        if (!isReplyMode && !isGhostReplyMode) return
+        if (isGhostReplyMode) {
+            reverseGhostReplyMode()
+            return
+        }
 
         isReplyMode = false
         replyModeSessionId++
@@ -1164,6 +1607,62 @@ class HyperAccessibilityService : AccessibilityService() {
                 addView(iconSec, LinearLayout.LayoutParams(0, -2, 0.2f)); addView(contentSec, LinearLayout.LayoutParams(0, -2, 0.8f))
             }
             addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(-1, -1))
+
+            // Reply Morph V2 layer: full island coordinate space, above normal content, outside action scroll clipping.
+            this@HyperAccessibilityService.morphLayer = FrameLayout(this@HyperAccessibilityService).apply {
+                visibility = View.VISIBLE
+                setClipChildren(false)
+                setClipToPadding(false)
+                isClickable = false
+
+                this@HyperAccessibilityService.replyEditorLayer = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    visibility = View.INVISIBLE
+                    alpha = 0f
+                    setPadding(dp(14), 0, dp(10), 0)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        setColor(Color.parseColor("#111214"))
+                        cornerRadius = dp(12).toFloat()
+                        setStroke(dp(1), Color.argb(55, 255, 255, 255))
+                    }
+                    this@HyperAccessibilityService.replyEditorEditText = EditText(context).apply {
+                        hint = "Type a reply..."
+                        setHintTextColor(Color.argb(145, 255, 255, 255))
+                        setTextColor(Color.WHITE)
+                        textSize = 13f
+                        setSingleLine(true)
+                        maxLines = 1
+                        background = null
+                        setPadding(0, 0, dp(8), 0)
+                        setIncludeFontPadding(false)
+                    }
+                    this@HyperAccessibilityService.replyEditorSendButton = TextView(context).apply {
+                        text = "SEND"
+                        setTextColor(Color.rgb(0, 150, 255))
+                        textSize = 11.5f
+                        typeface = Typeface.DEFAULT_BOLD
+                        gravity = Gravity.CENTER
+                        setIncludeFontPadding(false)
+                        setPadding(dp(8), 0, 0, 0)
+                        setOnClickListener { exitReplyMode() }
+                    }
+                    addView(this@HyperAccessibilityService.replyEditorEditText, LinearLayout.LayoutParams(0, -1, 1f))
+                    addView(this@HyperAccessibilityService.replyEditorSendButton, LinearLayout.LayoutParams(-2, -1))
+                }
+
+                this@HyperAccessibilityService.replyGhostView = ReplyMorphView(context).apply {
+                    visibility = View.INVISIBLE
+                    isClickable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+
+                addView(this@HyperAccessibilityService.replyEditorLayer, FrameLayout.LayoutParams(1, 1))
+                addView(this@HyperAccessibilityService.replyGhostView, FrameLayout.LayoutParams(-1, -1))
+            }
+            addView(this@HyperAccessibilityService.morphLayer, FrameLayout.LayoutParams(-1, -1))
+
             setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_UP) { if (e.rawY - touchStartY < -dp(24)) postCollapseIsland() else if (abs(e.rawY - touchStartY) < dp(10)) postToggleExpanded() } else if (e.action == MotionEvent.ACTION_DOWN) { touchStartY = e.rawY }; true }
         }
         this@HyperAccessibilityService.islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
@@ -1176,7 +1675,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun removeOutsideWatcher() { try { windowManager?.removeViewImmediate(outsideWatcherView!!) } catch (_: Exception) {}; outsideWatcherView = null }
     private fun forceRegionUpdate() { visualRoot?.post { visualRoot?.requestLayout(); visualRoot?.parent?.requestLayout() } }
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
-    private fun hideIslandInternal() { morphAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false }
+    private fun hideIslandInternal() { morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
     private fun formatNotificationTime(t: Long) = if (t <= 0L || System.currentTimeMillis() - t < 60000L) "now" else SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(t))
