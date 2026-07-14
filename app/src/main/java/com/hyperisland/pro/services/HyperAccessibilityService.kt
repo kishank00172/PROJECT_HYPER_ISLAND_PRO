@@ -160,12 +160,9 @@ class HyperAccessibilityService : AccessibilityService() {
             strokePaint.color = Color.argb((35 + 28 * surfaceProgress).toInt(), 255, 255, 255)
             canvas.drawRoundRect(rect, radius, radius, strokePaint)
 
-            // Inner top highlight, clipped visually to capsule bounds.
-            val inset = dpLocal(2f)
-            val topLine = RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset)
-            highlightPaint.color = Color.argb((18 + 18 * highlightProgress).toInt(), 255, 255, 255)
-            canvas.drawArc(topLine, 205f, 130f, false, highlightPaint)
-
+            // No curved highlight line.
+            // Earlier we drew a top arc here, but on-device it looked like an unwanted curve/scratch
+            // inside the textbox. Premium polish should be subtle, not visible as a weird line.
             val centerY = rect.centerY()
             textPaint.textSize = dpLocal(11.5f)
             hintPaint.textSize = dpLocal(13f)
@@ -771,14 +768,25 @@ class HyperAccessibilityService : AccessibilityService() {
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     if (!isReplyMode || !isGhostReplyMode || sessionId != replyModeSessionId) return
+                    // Hard handoff: real editor must stay on top after ghost finishes.
+                    // Fixes bug where ghost disappeared but textbox/editor also appeared gone.
+                    morphLayer?.bringToFront()
                     editor.visibility = View.VISIBLE
                     editor.alpha = 1f
+                    editor.scaleX = 1f
+                    editor.scaleY = 1f
+                    editor.bringToFront()
+                    ghost.bringToFront()
                     editorInput.isCursorVisible = true
                     ghost.animate()?.alpha(0f)?.setDuration(70L)?.setInterpolator(morphInterpolator)?.setListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
                             if (isGhostReplyMode) {
                                 ghost.clearGhost()
                                 ghost.alpha = 1f
+                                morphLayer?.bringToFront()
+                                editor.visibility = View.VISIBLE
+                                editor.alpha = 1f
+                                editor.bringToFront()
                             }
                         }
                     })?.start()
@@ -823,6 +831,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         ghost.alpha = 1f
         ghost.setGhostState(targetStart, startR, 0f, 1f, 1f, 1f, 0f, "Reply")
+        ghost.bringToFront()
         editor.animate()?.setListener(null)
         editor.animate()?.cancel()
         editor.animate()?.alpha(0f)?.setDuration(70L)?.setInterpolator(morphInterpolator)?.setListener(object : AnimatorListenerAdapter() {
