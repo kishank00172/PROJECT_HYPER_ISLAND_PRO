@@ -39,7 +39,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
-            android:text="Reply Morph Animation Lab"
+            android:text="Reply Morph Animation Lab — Ghost V2"
             android:textColor="@color/text_primary"
             android:textStyle="bold"
             android:textSize="18sp" />
@@ -73,7 +73,7 @@
                 android:id="@+id/radioReplyMagneticDock"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="3. Magnetic Dock Morph — right-side Reply docks left"
+                android:text="3. Ghost V2 Shared Material — pixel matched morph"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
@@ -81,7 +81,7 @@
                 android:id="@+id/radioReplyLiquidFill"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="4. Liquid Fill Reveal — slow premium cyan fill"
+                android:text="4. Ghost V2 Liquid Glass — premium highlight"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
@@ -89,7 +89,7 @@
                 android:id="@+id/radioReplyElasticBubble"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="5. Elastic Bubble — soft final bounce"
+                android:text="5. Ghost V2 HyperOS Capsule — subtle settle"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
