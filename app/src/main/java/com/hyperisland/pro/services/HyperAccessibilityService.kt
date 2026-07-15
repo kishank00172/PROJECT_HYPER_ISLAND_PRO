@@ -709,10 +709,9 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun getLiquidEditorGapPx(): Float = dp(10).toFloat()
 
     private fun getLiquidEditorRadiusPx(): Float {
-        val islandR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
-        val gap = getLiquidEditorGapPx()
-        // For equal-distance rounded corners, inner radius should be outer radius minus inset.
-        return (islandR - gap).coerceIn(dp(26).toFloat(), dp(34).toFloat())
+        // Visual compromise: exact island-corner concentric math made the editor too thick
+        // and it started cutting the message line. Keep a slim premium pill instead.
+        return dp(21).toFloat()
     }
 
     private fun styleGhostEditorForMode(mode: Int) {
@@ -858,7 +857,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val actionRect = rectInLayer(actionView, layer)
         val isLiquidMode = mode == AppSettings.REPLY_ANIM_LIQUID_FILL
         val liquidRadius = getLiquidEditorRadiusPx()
-        val editorH = if (isLiquidMode) (liquidRadius * 2f).coerceIn(dp(56).toFloat(), dp(68).toFloat()) else dp(44).toFloat()
+        val editorH = if (isLiquidMode) dp(42).toFloat() else dp(44).toFloat()
         val edgeGap = if (isLiquidMode) getLiquidEditorGapPx() else dp(6).toFloat()
         val safeLeft = (actionRect.left + edgeGap).coerceAtLeast(dp(1).toFloat())
         val safeRight = if (isLiquidMode) {
