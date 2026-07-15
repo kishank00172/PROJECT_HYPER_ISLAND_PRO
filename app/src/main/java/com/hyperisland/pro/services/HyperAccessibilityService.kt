@@ -391,6 +391,10 @@ class HyperAccessibilityService : AccessibilityService() {
             if (source == "AccessibilityFallback" && now - lastPrimaryEventTime < 1500L) return@post
             if (source == "NotificationListener") lastPrimaryEventTime = now
             val display = buildDisplayText(appName, title, message)
+            if (ReplyEchoSuppressor.shouldSuppress(packageName, display.title, display.message)) {
+                Log.d("HyperIslandPro", "Suppressing reply echo from $packageName")
+                return@post
+            }
             val fingerprint = "$packageName|${display.title}|${display.message}"
             if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) { scheduleAutoCollapse(); return@post }
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
@@ -503,13 +507,17 @@ class HyperAccessibilityService : AccessibilityService() {
         return (replyEditorEditText?.text ?: replyMorphEditText?.text ?: replyEditText?.text)?.toString()?.trim().orEmpty()
     }
 
+    private fun setReplySendIdle() {
+        sendButton?.text = "SEND"
+        replyEditorSendButton?.text = "SEND"
+        replyMorphSendButton?.text = "SEND"
+    }
+
     private fun setReplySendError(message: String) {
         replyEditorEditText?.hint = message
         replyMorphEditText?.hint = message
         replyEditText?.hint = message
-        sendButton?.text = "SEND"
-        replyEditorSendButton?.text = "SEND"
-        replyMorphSendButton?.text = "SEND"
+        setReplySendIdle()
     }
 
     private fun sendCurrentReply() {
@@ -526,10 +534,19 @@ class HyperAccessibilityService : AccessibilityService() {
             return
         }
 
+        var echoId = -1L
         try {
             sendButton?.text = "SENDING"
             replyEditorSendButton?.text = "SENDING"
             replyMorphSendButton?.text = "SENDING"
+
+            // Specific temporary echo memory: if the app immediately posts "You: <reply>",
+            // the notification pipeline will suppress only that exact echo and then delete it.
+            echoId = ReplyEchoSuppressor.recordSent(
+                packageName = currentPackageName,
+                conversationTitle = titleText?.text?.toString(),
+                replyText = replyText
+            )
 
             val replyIntent = Intent()
             val results = Bundle()
@@ -547,6 +564,7 @@ class HyperAccessibilityService : AccessibilityService() {
             exitReplyMode()
             mainHandler.postDelayed({ postCollapseIsland() }, 420)
         } catch (e: Exception) {
+            ReplyEchoSuppressor.clear(echoId)
             Log.e("HyperIslandPro", "Reply send failed", e)
             setReplySendError("Send failed")
         }
@@ -1187,6 +1205,10 @@ class HyperAccessibilityService : AccessibilityService() {
         isReplyMode = true
         replyModeSessionId++
         val sessionId = replyModeSessionId
+        setReplySendIdle()
+        replyEditorEditText?.hint = "Type a reply..."
+        replyMorphEditText?.hint = "Type a reply..."
+        replyEditText?.hint = "Type a reply..."
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
 
         val p = visualParams
