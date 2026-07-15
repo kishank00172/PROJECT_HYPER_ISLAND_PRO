@@ -706,12 +706,11 @@ class HyperAccessibilityService : AccessibilityService() {
         return out
     }
 
-    private fun getLiquidEditorGapPx(): Float = dp(10).toFloat()
+    private fun getLiquidEditorGapPx(): Float = dp(AppSettings.getReplyLiquidEdgeGapDp(this)).toFloat()
 
     private fun getLiquidEditorRadiusPx(): Float {
-        // Visual compromise: exact island-corner concentric math made the editor too thick
-        // and it started cutting the message line. Keep a slim premium pill instead.
-        return dp(21).toFloat()
+        // Temporary calibration value from TestLab. Final value will be hardcoded after device tuning.
+        return dp(AppSettings.getReplyLiquidRadiusDp(this)).toFloat()
     }
 
     private fun styleGhostEditorForMode(mode: Int) {
@@ -857,9 +856,10 @@ class HyperAccessibilityService : AccessibilityService() {
         val actionRect = rectInLayer(actionView, layer)
         val isLiquidMode = mode == AppSettings.REPLY_ANIM_LIQUID_FILL
         val liquidRadius = getLiquidEditorRadiusPx()
-        val editorH = if (isLiquidMode) dp(42).toFloat() else dp(44).toFloat()
+        val editorH = if (isLiquidMode) dp(AppSettings.getReplyLiquidHeightDp(this)).toFloat() else dp(44).toFloat()
         val edgeGap = if (isLiquidMode) getLiquidEditorGapPx() else dp(6).toFloat()
-        val safeLeft = (actionRect.left + edgeGap).coerceAtLeast(dp(1).toFloat())
+        val leftGap = if (isLiquidMode) dp(AppSettings.getReplyLiquidLeftGapDp(this)).toFloat() else edgeGap
+        val safeLeft = (actionRect.left + leftGap).coerceAtLeast(dp(1).toFloat())
         val safeRight = if (isLiquidMode) {
             // Liquid default: make right gap and bottom gap equal for a balanced docked editor.
             (layer.width - edgeGap).coerceAtMost((layer.width - dp(1)).toFloat())
