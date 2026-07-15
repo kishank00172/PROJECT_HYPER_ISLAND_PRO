@@ -706,11 +706,11 @@ class HyperAccessibilityService : AccessibilityService() {
         return out
     }
 
-    private fun getLiquidEditorGapPx(): Float = dp(AppSettings.getReplyLiquidEdgeGapDp(this)).toFloat()
+    private fun getLiquidEditorGapPx(): Float = dp(13).toFloat()
 
     private fun getLiquidEditorRadiusPx(): Float {
-        // Temporary calibration value from TestLab. Final value will be hardcoded after device tuning.
-        return dp(AppSettings.getReplyLiquidRadiusDp(this)).toFloat()
+        // Final calibrated Liquid Parallax radius from device tuning.
+        return dp(26).toFloat()
     }
 
     private fun styleGhostEditorForMode(mode: Int) {
@@ -856,9 +856,9 @@ class HyperAccessibilityService : AccessibilityService() {
         val actionRect = rectInLayer(actionView, layer)
         val isLiquidMode = mode == AppSettings.REPLY_ANIM_LIQUID_FILL
         val liquidRadius = getLiquidEditorRadiusPx()
-        val editorH = if (isLiquidMode) dp(AppSettings.getReplyLiquidHeightDp(this)).toFloat() else dp(44).toFloat()
+        val editorH = if (isLiquidMode) dp(44).toFloat() else dp(44).toFloat()
         val edgeGap = if (isLiquidMode) getLiquidEditorGapPx() else dp(6).toFloat()
-        val leftGap = if (isLiquidMode) dp(AppSettings.getReplyLiquidLeftGapDp(this)).toFloat() else edgeGap
+        val leftGap = if (isLiquidMode) dp(0).toFloat() else edgeGap
         val safeLeft = (actionRect.left + leftGap).coerceAtLeast(dp(1).toFloat())
         val safeRight = if (isLiquidMode) {
             // Liquid default: make right gap and bottom gap equal for a balanced docked editor.
