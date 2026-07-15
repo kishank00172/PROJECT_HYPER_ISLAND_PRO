@@ -37,10 +37,10 @@ object AppSettings {
     const val REPLY_ANIM_ELASTIC_BUBBLE = 4
     const val REPLY_ANIM_MINIMAL_PRO = 5
     const val DEFAULT_REPLY_ANIMATION_MODE = REPLY_ANIM_LIQUID_FILL
-    const val DEFAULT_REPLY_LIQUID_HEIGHT_DP = 42
-    const val DEFAULT_REPLY_LIQUID_RADIUS_DP = 21
-    const val DEFAULT_REPLY_LIQUID_LEFT_GAP_DP = 10
-    const val DEFAULT_REPLY_LIQUID_EDGE_GAP_DP = 10 // temporary calibration default
+    const val DEFAULT_REPLY_LIQUID_HEIGHT_DP = 44
+    const val DEFAULT_REPLY_LIQUID_RADIUS_DP = 26
+    const val DEFAULT_REPLY_LIQUID_LEFT_GAP_DP = 0
+    const val DEFAULT_REPLY_LIQUID_EDGE_GAP_DP = 13
 
     private const val CURRENT_DEFAULTS_VERSION = 5
 
