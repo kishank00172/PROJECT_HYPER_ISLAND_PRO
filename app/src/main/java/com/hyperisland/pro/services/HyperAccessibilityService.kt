@@ -7,6 +7,7 @@ import android.animation.AnimatorSet
 import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
@@ -21,6 +22,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -321,6 +323,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var notificationMode = false
     private var currentPendingIntent: PendingIntent? = null
     private var currentPackageName: String? = null
+    private var currentReplyAction: Notification.Action? = null
     private var autoCollapseRunnable: Runnable? = null
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
@@ -485,7 +488,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateNotificationContent(model: NotificationModel) {
-        currentPendingIntent = model.contentIntent; currentPackageName = model.packageName
+        currentPendingIntent = model.contentIntent; currentPackageName = model.packageName; currentReplyAction = null
         this@HyperAccessibilityService.appIconView?.setImageDrawable(loadAppIcon(model.packageName))
         this@HyperAccessibilityService.appNameText?.text = model.appName
         this@HyperAccessibilityService.timeStampText?.text = formatNotificationTime(model.postTime)
@@ -494,6 +497,59 @@ class HyperAccessibilityService : AccessibilityService() {
         this@HyperAccessibilityService.titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
         this@HyperAccessibilityService.messageText?.visibility = if (model.message.isBlank()) View.GONE else View.VISIBLE
         setupActionTiles(model.actions); forceRegionUpdate()
+    }
+
+    private fun getActiveReplyText(): String {
+        return (replyEditorEditText?.text ?: replyMorphEditText?.text ?: replyEditText?.text)?.toString()?.trim().orEmpty()
+    }
+
+    private fun setReplySendError(message: String) {
+        replyEditorEditText?.hint = message
+        replyMorphEditText?.hint = message
+        replyEditText?.hint = message
+        sendButton?.text = "SEND"
+        replyEditorSendButton?.text = "SEND"
+        replyMorphSendButton?.text = "SEND"
+    }
+
+    private fun sendCurrentReply() {
+        val replyText = getActiveReplyText()
+        if (replyText.isBlank()) {
+            setReplySendError("Type something...")
+            return
+        }
+
+        val action = currentReplyAction
+        val remoteInputs = action?.remoteInputs
+        if (action == null || remoteInputs == null || remoteInputs.isEmpty()) {
+            setReplySendError("Reply not supported")
+            return
+        }
+
+        try {
+            sendButton?.text = "SENDING"
+            replyEditorSendButton?.text = "SENDING"
+            replyMorphSendButton?.text = "SENDING"
+
+            val replyIntent = Intent()
+            val results = Bundle()
+            remoteInputs.forEach { input ->
+                results.putCharSequence(input.resultKey, replyText)
+            }
+            RemoteInput.addResultsToIntent(remoteInputs, replyIntent, results)
+            action.actionIntent.send(this@HyperAccessibilityService, 0, replyIntent)
+
+            replyEditorEditText?.setText("")
+            replyMorphEditText?.setText("")
+            replyEditText?.setText("")
+            titleText?.text = "Reply sent"
+            messageText?.text = replyText
+            exitReplyMode()
+            mainHandler.postDelayed({ postCollapseIsland() }, 420)
+        } catch (e: Exception) {
+            Log.e("HyperIslandPro", "Reply send failed", e)
+            setReplySendError("Send failed")
+        }
     }
 
     // Perfect Morph — remember last reply source for reverse animation
@@ -534,7 +590,9 @@ class HyperAccessibilityService : AccessibilityService() {
         actions.forEach { action ->
             val actionTitle = action.title?.toString().orEmpty().ifBlank { "Action" }
 
-            if (actionTitle.contains("Reply", true)) {
+            val isReplyAction = actionTitle.contains("Reply", true) || !action.remoteInputs.isNullOrEmpty()
+            if (isReplyAction) {
+                currentReplyAction = action
                 // TRUE MORPH SOURCE: the Reply action tile itself contains the hidden textbox.
                 // Click karne par yehi tile expand hoga — separate replyBar side/bottom se nahi aayega.
                 val tileBg = createIslandBackground(dp(16).toFloat()).apply {
@@ -588,7 +646,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     gravity = Gravity.CENTER
                     setIncludeFontPadding(false)
                     setPadding(dp(8), 0, 0, 0)
-                    setOnClickListener { exitReplyMode() }
+                    setOnClickListener { sendCurrentReply() }
                 }
 
                 tile.addView(label, LinearLayout.LayoutParams(-1, -1))
@@ -1822,7 +1880,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         orientation = LinearLayout.HORIZONTAL; visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0)
                         val inputBg = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.parseColor("#1A1A1A")); cornerRadius = dp(12).toFloat(); setStroke(dp(1), Color.parseColor("#333333")) }
                         this@HyperAccessibilityService.replyEditText = EditText(context).apply { hint = "Type a reply..."; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f; background = inputBg; setPadding(dp(12), dp(8), dp(12), dp(8)); layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f) }
-                        this@HyperAccessibilityService.sendButton = TextView(context).apply { text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(12), 0, 0, 0); setOnClickListener { exitReplyMode() } }
+                        this@HyperAccessibilityService.sendButton = TextView(context).apply { text = "SEND"; setTextColor(Color.rgb(0, 150, 255)); typeface = Typeface.DEFAULT_BOLD; setPadding(dp(12), 0, 0, 0); setOnClickListener { sendCurrentReply() } }
                         addView(this@HyperAccessibilityService.replyEditText); addView(this@HyperAccessibilityService.sendButton)
                     }
 
@@ -1870,7 +1928,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         gravity = Gravity.CENTER
                         setIncludeFontPadding(false)
                         setPadding(dp(8), 0, 0, 0)
-                        setOnClickListener { exitReplyMode() }
+                        setOnClickListener { sendCurrentReply() }
                     }
                     addView(this@HyperAccessibilityService.replyEditorEditText, LinearLayout.LayoutParams(0, -1, 1f))
                     addView(this@HyperAccessibilityService.replyEditorSendButton, LinearLayout.LayoutParams(-2, -1))
