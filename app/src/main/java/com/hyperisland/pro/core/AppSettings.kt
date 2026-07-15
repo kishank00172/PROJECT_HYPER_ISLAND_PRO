@@ -20,6 +20,10 @@ object AppSettings {
     private const val KEY_ISLAND_EXPANDED_HEIGHT_DP = "island_expanded_height_dp"
     private const val KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP = "island_expanded_corner_radius_dp"
     private const val KEY_REPLY_ANIMATION_MODE = "reply_animation_mode"
+    private const val KEY_REPLY_LIQUID_HEIGHT_DP = "reply_liquid_height_dp"
+    private const val KEY_REPLY_LIQUID_RADIUS_DP = "reply_liquid_radius_dp"
+    private const val KEY_REPLY_LIQUID_LEFT_GAP_DP = "reply_liquid_left_gap_dp"
+    private const val KEY_REPLY_LIQUID_EDGE_GAP_DP = "reply_liquid_edge_gap_dp"
 
     const val ENGINE_NONE = "none"
     const val ENGINE_ACCESSIBILITY = "accessibility"
@@ -33,6 +37,10 @@ object AppSettings {
     const val REPLY_ANIM_ELASTIC_BUBBLE = 4
     const val REPLY_ANIM_MINIMAL_PRO = 5
     const val DEFAULT_REPLY_ANIMATION_MODE = REPLY_ANIM_LIQUID_FILL
+    const val DEFAULT_REPLY_LIQUID_HEIGHT_DP = 42
+    const val DEFAULT_REPLY_LIQUID_RADIUS_DP = 21
+    const val DEFAULT_REPLY_LIQUID_LEFT_GAP_DP = 10
+    const val DEFAULT_REPLY_LIQUID_EDGE_GAP_DP = 10 // temporary calibration default
 
     private const val CURRENT_DEFAULTS_VERSION = 5
 
@@ -61,6 +69,10 @@ object AppSettings {
                 .putInt(KEY_ISLAND_EXPANDED_HEIGHT_DP, DEFAULT_ISLAND_EXPANDED_HEIGHT_DP)
                 .putInt(KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP, DEFAULT_ISLAND_EXPANDED_CORNER_RADIUS_DP)
                 .putInt(KEY_REPLY_ANIMATION_MODE, DEFAULT_REPLY_ANIMATION_MODE)
+                .putInt(KEY_REPLY_LIQUID_HEIGHT_DP, DEFAULT_REPLY_LIQUID_HEIGHT_DP)
+                .putInt(KEY_REPLY_LIQUID_RADIUS_DP, DEFAULT_REPLY_LIQUID_RADIUS_DP)
+                .putInt(KEY_REPLY_LIQUID_LEFT_GAP_DP, DEFAULT_REPLY_LIQUID_LEFT_GAP_DP)
+                .putInt(KEY_REPLY_LIQUID_EDGE_GAP_DP, DEFAULT_REPLY_LIQUID_EDGE_GAP_DP)
             editor.putInt(KEY_DEFAULTS_VERSION, CURRENT_DEFAULTS_VERSION).apply()
         }
     }
@@ -110,6 +122,15 @@ object AppSettings {
         REPLY_ANIM_MINIMAL_PRO -> "Minimal Pro Fade"
         else -> "Magnetic Dock Morph"
     }
+
+    fun getReplyLiquidHeightDp(context: Context) = prefs(context).getInt(KEY_REPLY_LIQUID_HEIGHT_DP, DEFAULT_REPLY_LIQUID_HEIGHT_DP)
+    fun setReplyLiquidHeightDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_REPLY_LIQUID_HEIGHT_DP, v.coerceIn(32, 64)).apply()
+    fun getReplyLiquidRadiusDp(context: Context) = prefs(context).getInt(KEY_REPLY_LIQUID_RADIUS_DP, DEFAULT_REPLY_LIQUID_RADIUS_DP)
+    fun setReplyLiquidRadiusDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_REPLY_LIQUID_RADIUS_DP, v.coerceIn(8, 34)).apply()
+    fun getReplyLiquidLeftGapDp(context: Context) = prefs(context).getInt(KEY_REPLY_LIQUID_LEFT_GAP_DP, DEFAULT_REPLY_LIQUID_LEFT_GAP_DP)
+    fun setReplyLiquidLeftGapDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_REPLY_LIQUID_LEFT_GAP_DP, v.coerceIn(0, 48)).apply()
+    fun getReplyLiquidEdgeGapDp(context: Context) = prefs(context).getInt(KEY_REPLY_LIQUID_EDGE_GAP_DP, DEFAULT_REPLY_LIQUID_EDGE_GAP_DP)
+    fun setReplyLiquidEdgeGapDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_REPLY_LIQUID_EDGE_GAP_DP, v.coerceIn(0, 40)).apply()
 
     fun resetIslandDefaults(context: Context) {
         prefs(context).edit().clear().putInt(KEY_DEFAULTS_VERSION, CURRENT_DEFAULTS_VERSION).apply()
