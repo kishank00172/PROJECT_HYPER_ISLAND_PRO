@@ -42,7 +42,8 @@
             android:text="Liquid Textbox Calibration (temporary)"
             android:textColor="@color/text_primary"
             android:textStyle="bold"
-            android:textSize="18sp" />
+            android:textSize="18sp"
+            android:visibility="gone" />
 
         <LinearLayout
             android:id="@+id/liquidCalibrationPanel"
@@ -51,7 +52,8 @@
             android:layout_marginTop="10dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="14dp"
+            android:visibility="gone">
 
             <TextView
                 android:id="@+id/txtLiquidHeightValue"
