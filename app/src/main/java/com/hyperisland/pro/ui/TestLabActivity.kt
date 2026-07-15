@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.widget.Button
 import android.widget.RadioGroup
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import com.hyperisland.pro.R
@@ -18,6 +19,7 @@ class TestLabActivity : Activity() {
         setContentView(R.layout.activity_test_lab)
 
         bindReplyAnimationLab()
+        bindLiquidCalibration()
 
         findViewById<Button>(R.id.btnExpandIsland).setOnClickListener { HyperAccessibilityService.expandIslandFromApp(this) }
         findViewById<Button>(R.id.btnCollapseIsland).setOnClickListener { HyperAccessibilityService.collapseIslandFromApp(this) }
@@ -65,6 +67,81 @@ class TestLabActivity : Activity() {
         findViewById<Button>(R.id.btnPreviewReplySecond).setOnClickListener {
             previewReplyAnimation(replySecond = true)
         }
+    }
+
+    private fun bindLiquidCalibration() {
+        // Temporary Liquid textbox calibration; final values will be hardcoded after device testing.
+        bindSeekBar(
+            seekId = R.id.seekLiquidHeight,
+            labelId = R.id.txtLiquidHeightValue,
+            label = "Height / Motai",
+            min = 32,
+            max = 64,
+            get = { AppSettings.getReplyLiquidHeightDp(this) },
+            set = { AppSettings.setReplyLiquidHeightDp(this, it) }
+        )
+        bindSeekBar(
+            seekId = R.id.seekLiquidRadius,
+            labelId = R.id.txtLiquidRadiusValue,
+            label = "Corner Radius",
+            min = 8,
+            max = 34,
+            get = { AppSettings.getReplyLiquidRadiusDp(this) },
+            set = { AppSettings.setReplyLiquidRadiusDp(this, it) }
+        )
+        bindSeekBar(
+            seekId = R.id.seekLiquidLeftGap,
+            labelId = R.id.txtLiquidLeftGapValue,
+            label = "Left Gap / Length Start",
+            min = 0,
+            max = 48,
+            get = { AppSettings.getReplyLiquidLeftGapDp(this) },
+            set = { AppSettings.setReplyLiquidLeftGapDp(this, it) }
+        )
+        bindSeekBar(
+            seekId = R.id.seekLiquidEdgeGap,
+            labelId = R.id.txtLiquidEdgeGapValue,
+            label = "Right + Bottom Gap / Placing",
+            min = 0,
+            max = 40,
+            get = { AppSettings.getReplyLiquidEdgeGapDp(this) },
+            set = { AppSettings.setReplyLiquidEdgeGapDp(this, it) }
+        )
+
+        findViewById<Button>(R.id.btnPreviewLiquidCalibration).setOnClickListener {
+            AppSettings.setReplyAnimationMode(this, AppSettings.REPLY_ANIM_LIQUID_FILL)
+            updateTestInfo()
+            previewReplyAnimation(replySecond = false)
+        }
+    }
+
+    private fun bindSeekBar(
+        seekId: Int,
+        labelId: Int,
+        label: String,
+        min: Int,
+        max: Int,
+        get: () -> Int,
+        set: (Int) -> Unit
+    ) {
+        val seekBar = findViewById<SeekBar>(seekId)
+        val labelView = findViewById<TextView>(labelId)
+        seekBar.max = max - min
+        fun update(value: Int) {
+            labelView.text = "$label: ${value}dp"
+        }
+        val initial = get().coerceIn(min, max)
+        seekBar.progress = initial - min
+        update(initial)
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val value = min + progress
+                set(value)
+                update(value)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
     }
 
     private fun previewReplyAnimation(replySecond: Boolean) {
