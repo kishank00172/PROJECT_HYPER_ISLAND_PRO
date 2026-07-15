@@ -28,8 +28,9 @@ object ReplyEchoSuppressor {
         val text = normalize(replyText)
         if (pkg.isBlank() || text.isBlank()) return -1L
 
-        synchronized(lock) {
-            cleanupLocked(System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        return synchronized(lock) {
+            cleanupLocked(now)
             val id = nextId++
             pending.add(
                 PendingReplyEcho(
@@ -37,10 +38,10 @@ object ReplyEchoSuppressor {
                     packageName = pkg,
                     conversationTitle = normalize(conversationTitle.orEmpty()),
                     replyText = text,
-                    createdAt = System.currentTimeMillis()
+                    createdAt = now
                 )
             )
-            return id
+            id
         }
     }
 
@@ -59,37 +60,56 @@ object ReplyEchoSuppressor {
         val combined = normalize("$title $message")
         if (pkg.isBlank() || combined.isBlank()) return false
 
-        synchronized(lock) {
+        return synchronized(lock) {
             cleanupLocked(now)
-            val match = pending.firstOrNull { entry ->
-                if (entry.packageName != pkg) return@firstOrNull false
-                val age = now - entry.createdAt
-                if (age !in 0L..MATCH_WINDOW_MS) return@firstOrNull false
-
-                val text = entry.replyText
-                val textMatches = cleanMessage == text || cleanMessage.contains(text) || combined.contains(text)
-                if (!textMatches) return@firstOrNull false
-
-                val sameConversation = entry.conversationTitle.isNotBlank() && cleanTitle == entry.conversationTitle
-                val titleIsSelf = cleanTitle == "you" || cleanTitle == "me"
-                val messageLooksSelf = cleanMessage.startsWith("you ") ||
-                    cleanMessage.startsWith("you:") ||
-                    cleanMessage.startsWith("me ") ||
-                    cleanMessage.startsWith("me:") ||
-                    cleanMessage.contains("you replied") ||
-                    cleanMessage.contains("you sent") ||
-                    cleanMessage.contains("sent")
-
-                // Very tight window allows same-conversation exact text echo even if the app formats it simply.
-                sameConversation || titleIsSelf || messageLooksSelf || age <= 900L
+            val matchIndex = pending.indexOfFirst { entry ->
+                isMatch(
+                    entry = entry,
+                    pkg = pkg,
+                    cleanTitle = cleanTitle,
+                    cleanMessage = cleanMessage,
+                    combined = combined,
+                    now = now
+                )
             }
 
-            if (match != null) {
-                pending.removeAll { it.id == match.id }
-                return true
+            if (matchIndex >= 0) {
+                pending.removeAt(matchIndex)
+                true
+            } else {
+                false
             }
-            return false
-        
+        }
+    }
+
+    private fun isMatch(
+        entry: PendingReplyEcho,
+        pkg: String,
+        cleanTitle: String,
+        cleanMessage: String,
+        combined: String,
+        now: Long
+    ): Boolean {
+        if (entry.packageName != pkg) return false
+        val age = now - entry.createdAt
+        if (age !in 0L..MATCH_WINDOW_MS) return false
+
+        val text = entry.replyText
+        val textMatches = cleanMessage == text || cleanMessage.contains(text) || combined.contains(text)
+        if (!textMatches) return false
+
+        val sameConversation = entry.conversationTitle.isNotBlank() && cleanTitle == entry.conversationTitle
+        val titleIsSelf = cleanTitle == "you" || cleanTitle == "me"
+        val messageLooksSelf = cleanMessage.startsWith("you ") ||
+            cleanMessage.startsWith("you:") ||
+            cleanMessage.startsWith("me ") ||
+            cleanMessage.startsWith("me:") ||
+            cleanMessage.contains("you replied") ||
+            cleanMessage.contains("you sent") ||
+            cleanMessage.contains("sent")
+
+        // Very tight window allows same-conversation exact text echo even if the app formats it simply.
+        return sameConversation || titleIsSelf || messageLooksSelf || age <= 900L
     }
 
     private fun cleanupLocked(now: Long) {
