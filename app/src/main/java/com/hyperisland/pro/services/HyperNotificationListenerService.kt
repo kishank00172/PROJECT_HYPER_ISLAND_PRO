@@ -52,6 +52,14 @@ class HyperNotificationListenerService : NotificationListenerService() {
         
         // Robust Spam/Permanent Filtering
         if (isPermanentNonRemovable(notification)) return
+
+        // Inline reply echo suppression:
+        // after we send "okay", apps often post "You: okay" immediately.
+        // Suppress only that specific temporary echo before it reaches the island queue.
+        if (ReplyEchoSuppressor.shouldSuppress(pkg, title, message)) {
+            lastDebugMessage = "SUPPRESSED REPLY ECHO: $appName | $title"
+            return
+        }
         
         val fingerprint = "$pkg|${sbn.id}|${sbn.tag ?: ""}|$title|$message"
         val now = System.currentTimeMillis()
@@ -102,3 +110,4 @@ class HyperNotificationListenerService : NotificationListenerService() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
     } catch (_: Exception) { pkg }
 }
+
