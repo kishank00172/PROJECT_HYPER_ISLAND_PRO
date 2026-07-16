@@ -1,4 +1,3 @@
-
 package com.hyperisland.pro.services
 
 import android.accessibilityservice.AccessibilityService
@@ -393,7 +392,8 @@ class HyperAccessibilityService : AccessibilityService() {
             if (source == "AccessibilityFallback" && now - lastPrimaryEventTime < 1500L) return@post
             if (source == "NotificationListener") lastPrimaryEventTime = now
             val display = buildDisplayText(appName, title, message)
-            if (ReplyEchoSuppressor.shouldSuppress(packageName, display.title, display.message)) {
+            // Safety net: NotificationListener should suppress echoes first, but Accessibility fallback can still duplicate.
+            if (ReplyEchoSuppressor.shouldSuppress(packageName, display.title, display.message, null, notificationKey)) {
                 Log.d("HyperIslandPro", "Suppressing reply echo from $packageName")
                 return@post
             }
