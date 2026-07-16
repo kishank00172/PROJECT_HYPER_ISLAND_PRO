@@ -1,15 +1,24 @@
 package com.hyperisland.pro.services
 
+import android.app.Notification
+import android.os.Bundle
 import java.util.Locale
 
 /**
- * Suppresses the immediate notification echo that many chat apps post after an inline reply.
+ * Suppresses the immediate notification echo that chat apps post after an inline reply.
  * Example: user sends "okay" from Hyper Island, WhatsApp updates notification as "You: okay".
- * That update should not re-expand the island.
+ * Instagram may update using the conversation name instead of "You".
+ *
+ * Architecture:
+ * 1) Try semantic MessagingStyle latest-message detection first.
+ * 2) Fall back to personal-build title/text matching.
+ * 3) Fall back to You/Me marker matching.
  */
 object ReplyEchoSuppressor {
-    private const val MATCH_WINDOW_MS = 2_000L
-    private const val RETAIN_WINDOW_MS = 5_000L
+    private const val SAME_CONVERSATION_WINDOW_MS = 3_000L
+    private const val SELF_MARKER_WINDOW_MS = 5_000L
+    private const val IMMEDIATE_ECHO_WINDOW_MS = 800L
+    private const val RETAIN_WINDOW_MS = 6_000L
 
     private data class PendingReplyEcho(
         val id: Long,
@@ -19,13 +28,19 @@ object ReplyEchoSuppressor {
         val createdAt: Long
     )
 
+    private data class LatestMessagingMessage(
+        val text: String,
+        val senderName: String,
+        val senderWasNull: Boolean
+    )
+
     private val lock = Any()
     private val pending = ArrayList<PendingReplyEcho>()
     private var nextId = 1L
 
     fun recordSent(packageName: String?, conversationTitle: String?, replyText: String): Long {
         val pkg = packageName?.trim().orEmpty()
-        val text = normalize(replyText)
+        val text = normalizeMessageText(replyText)
         if (pkg.isBlank() || text.isBlank()) return -1L
 
         val now = System.currentTimeMillis()
@@ -36,7 +51,7 @@ object ReplyEchoSuppressor {
                 PendingReplyEcho(
                     id = id,
                     packageName = pkg,
-                    conversationTitle = normalize(conversationTitle.orEmpty()),
+                    conversationTitle = normalizeBase(conversationTitle.orEmpty()),
                     replyText = text,
                     createdAt = now
                 )
@@ -53,12 +68,39 @@ object ReplyEchoSuppressor {
     }
 
     fun shouldSuppress(packageName: String, title: String, message: String): Boolean {
+        return shouldSuppressInternal(
+            packageName = packageName,
+            title = title,
+            message = message,
+            notification = null
+        )
+    }
+
+    fun shouldSuppress(packageName: String, title: String, message: String, notification: Notification?): Boolean {
+        return shouldSuppressInternal(
+            packageName = packageName,
+            title = title,
+            message = message,
+            notification = notification
+        )
+    }
+
+    private fun shouldSuppressInternal(
+        packageName: String,
+        title: String,
+        message: String,
+        notification: Notification?
+    ): Boolean {
         val now = System.currentTimeMillis()
         val pkg = packageName.trim()
-        val cleanTitle = normalize(title)
-        val cleanMessage = normalize(message)
-        val combined = normalize("$title $message")
-        if (pkg.isBlank() || combined.isBlank()) return false
+        val baseTitle = normalizeBase(title)
+        val baseMessage = normalizeBase(message)
+        val cleanTitle = stripSelfPrefixes(baseTitle)
+        val cleanMessage = stripSelfPrefixes(baseMessage)
+        val combinedClean = stripSelfPrefixes(normalizeBase("$title $message"))
+        val latestMessagingMessage = extractLatestMessagingMessage(notification)
+
+        if (pkg.isBlank() || (combinedClean.isBlank() && latestMessagingMessage?.text.isNullOrBlank())) return false
 
         return synchronized(lock) {
             cleanupLocked(now)
@@ -66,9 +108,12 @@ object ReplyEchoSuppressor {
                 isMatch(
                     entry = entry,
                     pkg = pkg,
+                    baseTitle = baseTitle,
+                    baseMessage = baseMessage,
                     cleanTitle = cleanTitle,
                     cleanMessage = cleanMessage,
-                    combined = combined,
+                    combinedClean = combinedClean,
+                    latestMessagingMessage = latestMessagingMessage,
                     now = now
                 )
             }
@@ -85,51 +130,110 @@ object ReplyEchoSuppressor {
     private fun isMatch(
         entry: PendingReplyEcho,
         pkg: String,
+        baseTitle: String,
+        baseMessage: String,
         cleanTitle: String,
         cleanMessage: String,
-        combined: String,
+        combinedClean: String,
+        latestMessagingMessage: LatestMessagingMessage?,
         now: Long
     ): Boolean {
         if (entry.packageName != pkg) return false
         val age = now - entry.createdAt
-        if (age !in 0L..MATCH_WINDOW_MS) return false
+        if (age !in 0L..RETAIN_WINDOW_MS) return false
 
-        val text = entry.replyText
-        val textMatches = cleanMessage == text || cleanMessage.contains(text) || combined.contains(text)
-        if (!textMatches) return false
+        val sentText = entry.replyText
+        val latestTextMatches = latestMessagingMessage?.text?.let { latestText ->
+            latestText == sentText || latestText.contains(sentText)
+        } == true
+        val normalTextMatches = cleanMessage == sentText ||
+            cleanMessage.contains(sentText) ||
+            cleanTitle == sentText ||
+            combinedClean.contains(sentText)
 
-        val sameConversation = entry.conversationTitle.isNotBlank() && cleanTitle == entry.conversationTitle
-        val titleIsSelf = cleanTitle == "you" || cleanTitle == "me"
-        val messageLooksSelf = cleanMessage.startsWith("you ") ||
-            cleanMessage.startsWith("you:") ||
-            cleanMessage.startsWith("me ") ||
-            cleanMessage.startsWith("me:") ||
-            cleanMessage.contains("you replied") ||
-            cleanMessage.contains("you sent") ||
-            cleanMessage.contains("sent")
+        if (!latestTextMatches && !normalTextMatches) return false
 
-        // Very tight window allows same-conversation exact text echo even if the app formats it simply.
-        return sameConversation || titleIsSelf || messageLooksSelf || age <= 900L
+        // Tier 1: semantic MessagingStyle signal.
+        // Many inline reply echoes are represented as latest message with null/self sender.
+        if (latestTextMatches && latestMessagingMessage != null) {
+            val senderName = latestMessagingMessage.senderName
+            val senderIsSelfLike = latestMessagingMessage.senderWasNull || senderName == "you" || senderName == "me"
+            if (senderIsSelfLike && age <= SELF_MARKER_WINDOW_MS) return true
+        }
+
+        // Tier 2: personal-build Instagram-style echo.
+        // Instagram may keep title as conversation name instead of using "You".
+        val sameConversation = entry.conversationTitle.isNotBlank() && baseTitle == entry.conversationTitle
+        if (sameConversation && age <= SAME_CONVERSATION_WINDOW_MS) return true
+
+        // Tier 3: WhatsApp/Telegram-style explicit self markers.
+        val titleIsSelf = baseTitle == "you" || baseTitle == "me"
+        val messageLooksSelf = baseMessage.startsWith("you ") ||
+            baseMessage.startsWith("you:") ||
+            baseMessage.startsWith("me ") ||
+            baseMessage.startsWith("me:") ||
+            baseMessage.contains("you replied") ||
+            baseMessage.contains("you sent") ||
+            baseMessage.contains("sent")
+        if ((titleIsSelf || messageLooksSelf) && age <= SELF_MARKER_WINDOW_MS) return true
+
+        // Tier 4: ultra-fast exact echo fallback.
+        return age <= IMMEDIATE_ECHO_WINDOW_MS
+    }
+
+    private fun extractLatestMessagingMessage(notification: Notification?): LatestMessagingMessage? {
+        val extras = notification?.extras ?: return null
+        @Suppress("DEPRECATION")
+        val rawMessages = extras.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return null
+        val latestBundle = rawMessages.asSequence().mapNotNull { it as? Bundle }.lastOrNull() ?: return null
+        val latestMessage = try {
+            Notification.MessagingStyle.Message.getMessageFromBundle(latestBundle)
+        } catch (_: Exception) {
+            null
+        } ?: return null
+
+        val text = normalizeMessageText(latestMessage.text?.toString().orEmpty())
+        if (text.isBlank()) return null
+
+        @Suppress("DEPRECATION")
+        val legacySender = try { latestMessage.sender?.toString() } catch (_: Exception) { null }
+        val senderPerson = try { latestMessage.senderPerson } catch (_: Exception) { null }
+        val senderName = normalizeBase(senderPerson?.name?.toString() ?: legacySender.orEmpty())
+        val senderWasNull = senderPerson == null && legacySender.isNullOrBlank()
+
+        return LatestMessagingMessage(
+            text = text,
+            senderName = senderName,
+            senderWasNull = senderWasNull
+        )
     }
 
     private fun cleanupLocked(now: Long) {
         pending.removeAll { now - it.createdAt > RETAIN_WINDOW_MS }
     }
 
-    private fun normalize(value: String): String {
+    private fun normalizeMessageText(value: String): String {
+        return stripSelfPrefixes(normalizeBase(value))
+    }
+
+    private fun stripSelfPrefixes(value: String): String {
         return value
-            .lowercase(Locale.getDefault())
-            .replace("\u200B", "")
-            .replace("\u200C", "")
-            .replace("\u200D", "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
             .removePrefix("you replied:")
             .removePrefix("you replied")
             .removePrefix("you sent:")
             .removePrefix("you sent")
             .removePrefix("you:")
             .removePrefix("me:")
+            .trim()
+    }
+
+    private fun normalizeBase(value: String): String {
+        return value
+            .lowercase(Locale.getDefault())
+            .replace("\u200B", "")
+            .replace("\u200C", "")
+            .replace("\u200D", "")
+            .replace(Regex("\\s+"), " ")
             .trim()
     }
 }
