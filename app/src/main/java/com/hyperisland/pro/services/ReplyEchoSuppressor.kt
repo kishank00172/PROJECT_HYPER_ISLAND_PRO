@@ -2,6 +2,7 @@ package com.hyperisland.pro.services
 
 import android.app.Notification
 import android.os.Bundle
+import android.util.Log
 import java.util.Locale
 
 /**
@@ -9,17 +10,18 @@ import java.util.Locale
  * Example: user sends "okay" from Hyper Island, WhatsApp updates notification as "You: okay".
  * Instagram may update using the conversation name instead of "You".
  *
- * Architecture:
- * 1) Try semantic MessagingStyle latest-message bundle detection first.
- * 2) Fall back to personal-build title/text matching.
- * 3) Fall back to You/Me marker matching.
- *
- * Note: We intentionally parse MessagingStyle message bundles manually instead of calling
- * Notification.MessagingStyle.Message.getMessageFromBundle(), because that helper is not
- * available in all compile SDK stubs used by CI.
+ * Matching priority:
+ * 1) Same notification key + same text.
+ * 2) MessagingStyle latest-message bundle signal.
+ * 3) Same package + same exact text within a tight personal-build window.
+ * 4) You/Me marker fallback.
  */
 object ReplyEchoSuppressor {
-    private const val SAME_CONVERSATION_WINDOW_MS = 3_000L
+    private const val TAG = "HyperEchoSuppressor"
+    private const val DEBUG_ECHO_DUMP = false
+
+    private const val KEY_MATCH_WINDOW_MS = 4_500L
+    private const val SAME_CONVERSATION_WINDOW_MS = 4_500L
     private const val SELF_MARKER_WINDOW_MS = 5_000L
     private const val IMMEDIATE_ECHO_WINDOW_MS = 800L
     private const val RETAIN_WINDOW_MS = 6_000L
@@ -31,6 +33,7 @@ object ReplyEchoSuppressor {
     private data class PendingReplyEcho(
         val id: Long,
         val packageName: String,
+        val notificationKey: String,
         val conversationTitle: String,
         val replyText: String,
         val createdAt: Long
@@ -46,7 +49,12 @@ object ReplyEchoSuppressor {
     private val pending = ArrayList<PendingReplyEcho>()
     private var nextId = 1L
 
-    fun recordSent(packageName: String?, conversationTitle: String?, replyText: String): Long {
+    fun recordSent(
+        packageName: String?,
+        conversationTitle: String?,
+        replyText: String,
+        notificationKey: String? = null
+    ): Long {
         val pkg = packageName?.trim().orEmpty()
         val text = normalizeMessageText(replyText)
         if (pkg.isBlank() || text.isBlank()) return -1L
@@ -59,6 +67,7 @@ object ReplyEchoSuppressor {
                 PendingReplyEcho(
                     id = id,
                     packageName = pkg,
+                    notificationKey = notificationKey?.trim().orEmpty(),
                     conversationTitle = normalizeBase(conversationTitle.orEmpty()),
                     replyText = text,
                     createdAt = now
@@ -80,16 +89,24 @@ object ReplyEchoSuppressor {
             packageName = packageName,
             title = title,
             message = message,
-            notification = null
+            notification = null,
+            notificationKey = null
         )
     }
 
-    fun shouldSuppress(packageName: String, title: String, message: String, notification: Notification?): Boolean {
+    fun shouldSuppress(
+        packageName: String,
+        title: String,
+        message: String,
+        notification: Notification?,
+        notificationKey: String? = null
+    ): Boolean {
         return shouldSuppressInternal(
             packageName = packageName,
             title = title,
             message = message,
-            notification = notification
+            notification = notification,
+            notificationKey = notificationKey
         )
     }
 
@@ -97,16 +114,22 @@ object ReplyEchoSuppressor {
         packageName: String,
         title: String,
         message: String,
-        notification: Notification?
+        notification: Notification?,
+        notificationKey: String?
     ): Boolean {
         val now = System.currentTimeMillis()
         val pkg = packageName.trim()
+        val incomingKey = notificationKey?.trim().orEmpty()
         val baseTitle = normalizeBase(title)
         val baseMessage = normalizeBase(message)
         val cleanTitle = stripSelfPrefixes(baseTitle)
         val cleanMessage = stripSelfPrefixes(baseMessage)
         val combinedClean = stripSelfPrefixes(normalizeBase("$title $message"))
         val latestMessagingMessage = extractLatestMessagingMessage(notification)
+
+        if (DEBUG_ECHO_DUMP) {
+            dumpNotificationDebugInfo(pkg, title, message, notification, incomingKey)
+        }
 
         if (pkg.isBlank() || (combinedClean.isBlank() && latestMessagingMessage?.text.isNullOrBlank())) return false
 
@@ -116,6 +139,7 @@ object ReplyEchoSuppressor {
                 isMatch(
                     entry = entry,
                     pkg = pkg,
+                    incomingKey = incomingKey,
                     baseTitle = baseTitle,
                     baseMessage = baseMessage,
                     cleanTitle = cleanTitle,
@@ -138,6 +162,7 @@ object ReplyEchoSuppressor {
     private fun isMatch(
         entry: PendingReplyEcho,
         pkg: String,
+        incomingKey: String,
         baseTitle: String,
         baseMessage: String,
         cleanTitle: String,
@@ -161,20 +186,22 @@ object ReplyEchoSuppressor {
 
         if (!latestTextMatches && !normalTextMatches) return false
 
-        // Tier 1: semantic MessagingStyle signal.
-        // Many inline reply echoes are represented as latest message with null/self sender.
+        // Tier 1: exact notification thread key. This is the strongest signal.
+        val keyMatches = entry.notificationKey.isNotBlank() && incomingKey.isNotBlank() && entry.notificationKey == incomingKey
+        if (keyMatches && age <= KEY_MATCH_WINDOW_MS) return true
+
+        // Tier 2: semantic MessagingStyle signal.
         if (latestTextMatches && latestMessagingMessage != null) {
             val senderName = latestMessagingMessage.senderName
             val senderIsSelfLike = latestMessagingMessage.senderWasNull || senderName == "you" || senderName == "me"
             if (senderIsSelfLike && age <= SELF_MARKER_WINDOW_MS) return true
         }
 
-        // Tier 2: personal-build Instagram-style echo.
-        // Instagram may keep title as conversation name instead of using "You".
-        val sameConversation = entry.conversationTitle.isNotBlank() && baseTitle == entry.conversationTitle
-        if (sameConversation && age <= SAME_CONVERSATION_WINDOW_MS) return true
+        // Tier 3: personal-build Instagram fallback.
+        // Same app + same sent text within 4.5s. This intentionally does not require title match.
+        if (normalTextMatches && age <= SAME_CONVERSATION_WINDOW_MS) return true
 
-        // Tier 3: WhatsApp/Telegram-style explicit self markers.
+        // Tier 4: explicit WhatsApp/Telegram self markers.
         val titleIsSelf = baseTitle == "you" || baseTitle == "me"
         val messageLooksSelf = baseMessage.startsWith("you ") ||
             baseMessage.startsWith("you:") ||
@@ -185,48 +212,54 @@ object ReplyEchoSuppressor {
             baseMessage.contains("sent")
         if ((titleIsSelf || messageLooksSelf) && age <= SELF_MARKER_WINDOW_MS) return true
 
-        // Tier 4: ultra-fast exact echo fallback.
         return age <= IMMEDIATE_ECHO_WINDOW_MS
     }
 
     private fun extractLatestMessagingMessage(notification: Notification?): LatestMessagingMessage? {
-        val extras = notification?.extras ?: return null
-        @Suppress("DEPRECATION")
-        val rawMessages = try {
-            extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        return try {
+            val extras = notification?.extras ?: return null
+            @Suppress("DEPRECATION")
+            val rawMessages = extras.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return null
+            val latestBundle = rawMessages.asSequence().mapNotNull { it as? Bundle }.lastOrNull() ?: return null
+            val text = normalizeMessageText(readBundleText(latestBundle))
+            if (text.isBlank()) return null
+
+            val legacySender = normalizeBase(readBundleSender(latestBundle))
+            val personSender = normalizeBase(readPersonNameFromBundle(latestBundle))
+            val senderName = personSender.ifBlank { legacySender }
+            val senderWasNull = senderName.isBlank()
+
+            LatestMessagingMessage(
+                text = text,
+                senderName = senderName,
+                senderWasNull = senderWasNull
+            )
         } catch (_: Exception) {
             null
-        } ?: return null
-
-        val latestBundle = rawMessages.asSequence().mapNotNull { it as? Bundle }.lastOrNull() ?: return null
-        val text = normalizeMessageText(readBundleText(latestBundle))
-        if (text.isBlank()) return null
-
-        val legacySender = normalizeBase(readBundleSender(latestBundle))
-        val personSender = normalizeBase(readPersonNameFromBundle(latestBundle))
-        val senderName = personSender.ifBlank { legacySender }
-        val senderWasNull = senderName.isBlank()
-
-        return LatestMessagingMessage(
-            text = text,
-            senderName = senderName,
-            senderWasNull = senderWasNull
-        )
+        }
     }
 
     private fun readBundleText(bundle: Bundle): String {
-        return (bundle.getCharSequence(KEY_TEXT)
-            ?: bundle.getCharSequence("android.text")
-            ?: bundle.getCharSequence("message")
-            ?: bundle.getCharSequence("message_text")
-            ?: "").toString()
+        return try {
+            (bundle.getCharSequence(KEY_TEXT)
+                ?: bundle.getCharSequence("android.text")
+                ?: bundle.getCharSequence("message")
+                ?: bundle.getCharSequence("message_text")
+                ?: "").toString()
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun readBundleSender(bundle: Bundle): String {
-        return (bundle.getCharSequence(KEY_SENDER)
-            ?: bundle.getCharSequence("android.sender")
-            ?: bundle.getCharSequence("sender_name")
-            ?: "").toString()
+        return try {
+            (bundle.getCharSequence(KEY_SENDER)
+                ?: bundle.getCharSequence("android.sender")
+                ?: bundle.getCharSequence("sender_name")
+                ?: "").toString()
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun readPersonNameFromBundle(bundle: Bundle): String {
@@ -242,6 +275,45 @@ object ReplyEchoSuppressor {
             method?.invoke(personObject)?.toString().orEmpty()
         } catch (_: Exception) {
             ""
+        }
+    }
+
+    private fun dumpNotificationDebugInfo(
+        pkg: String,
+        title: String,
+        message: String,
+        notification: Notification?,
+        notificationKey: String
+    ) {
+        try {
+            Log.e(TAG, "=== ECHO DUMP START: $pkg ===")
+            Log.e(TAG, "Title=$title | Message=$message | Key=$notificationKey")
+            val extras = notification?.extras
+            if (extras == null) {
+                Log.e(TAG, "Extras=NULL")
+                return
+            }
+            extras.keySet().forEach { key ->
+                val value = try { extras.get(key) } catch (_: Exception) { null }
+                Log.e(TAG, "EXTRA $key = $value (${value?.javaClass?.simpleName})")
+            }
+            @Suppress("DEPRECATION")
+            val messages = try { extras.getParcelableArray(Notification.EXTRA_MESSAGES) } catch (_: Exception) { null }
+            messages?.forEachIndexed { index, item ->
+                val bundle = item as? Bundle
+                if (bundle == null) {
+                    Log.e(TAG, "MSG[$index] non-bundle = ${item?.javaClass?.simpleName}")
+                } else {
+                    Log.e(TAG, "MSG[$index] keys:")
+                    bundle.keySet().forEach { key ->
+                        val value = try { bundle.get(key) } catch (_: Exception) { null }
+                        Log.e(TAG, "  $key = $value (${value?.javaClass?.simpleName})")
+                    }
+                }
+            }
+            Log.e(TAG, "=== ECHO DUMP END ===")
+        } catch (_: Exception) {
+            // Debug logger must never crash notification listener.
         }
     }
 
