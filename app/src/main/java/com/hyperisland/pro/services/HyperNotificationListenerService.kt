@@ -56,7 +56,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         // Inline reply echo suppression:
         // after we send "okay", apps often post "You: okay" immediately.
         // Suppress only that specific temporary echo before it reaches the island queue.
-        if (ReplyEchoSuppressor.shouldSuppress(pkg, title, message, notification)) {
+        if (ReplyEchoSuppressor.shouldSuppress(pkg, title, message, notification, sbn.key)) {
             lastDebugMessage = "SUPPRESSED REPLY ECHO: $appName | $title"
             return
         }
@@ -73,6 +73,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         HyperAccessibilityService.showNotificationFromApp(
             context = this,
             packageName = pkg,
+            notificationKey = sbn.key,
             appName = appName,
             title = title,
             message = message,
