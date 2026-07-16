@@ -13,8 +13,9 @@ import java.util.Locale
  * Matching priority:
  * 1) Same notification key + same text.
  * 2) MessagingStyle latest-message bundle signal.
- * 3) Same package + same exact text within a tight personal-build window.
+ * 3) Instagram/personal exact-text fallback is intentionally aggressive for this personal build.
  * 4) You/Me marker fallback.
+ * Keep this object shared: NotificationListener and Accessibility fallback both use it.
  */
 object ReplyEchoSuppressor {
     private const val TAG = "HyperEchoSuppressor"
