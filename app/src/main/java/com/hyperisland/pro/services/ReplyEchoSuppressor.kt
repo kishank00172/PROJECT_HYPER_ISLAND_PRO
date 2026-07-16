@@ -10,15 +10,23 @@ import java.util.Locale
  * Instagram may update using the conversation name instead of "You".
  *
  * Architecture:
- * 1) Try semantic MessagingStyle latest-message detection first.
+ * 1) Try semantic MessagingStyle latest-message bundle detection first.
  * 2) Fall back to personal-build title/text matching.
  * 3) Fall back to You/Me marker matching.
+ *
+ * Note: We intentionally parse MessagingStyle message bundles manually instead of calling
+ * Notification.MessagingStyle.Message.getMessageFromBundle(), because that helper is not
+ * available in all compile SDK stubs used by CI.
  */
 object ReplyEchoSuppressor {
     private const val SAME_CONVERSATION_WINDOW_MS = 3_000L
     private const val SELF_MARKER_WINDOW_MS = 5_000L
     private const val IMMEDIATE_ECHO_WINDOW_MS = 800L
     private const val RETAIN_WINDOW_MS = 6_000L
+
+    private const val KEY_TEXT = "text"
+    private const val KEY_SENDER = "sender"
+    private const val KEY_SENDER_PERSON = "sender_person"
 
     private data class PendingReplyEcho(
         val id: Long,
@@ -184,28 +192,57 @@ object ReplyEchoSuppressor {
     private fun extractLatestMessagingMessage(notification: Notification?): LatestMessagingMessage? {
         val extras = notification?.extras ?: return null
         @Suppress("DEPRECATION")
-        val rawMessages = extras.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return null
-        val latestBundle = rawMessages.asSequence().mapNotNull { it as? Bundle }.lastOrNull() ?: return null
-        val latestMessage = try {
-            Notification.MessagingStyle.Message.getMessageFromBundle(latestBundle)
+        val rawMessages = try {
+            extras.getParcelableArray(Notification.EXTRA_MESSAGES)
         } catch (_: Exception) {
             null
         } ?: return null
 
-        val text = normalizeMessageText(latestMessage.text?.toString().orEmpty())
+        val latestBundle = rawMessages.asSequence().mapNotNull { it as? Bundle }.lastOrNull() ?: return null
+        val text = normalizeMessageText(readBundleText(latestBundle))
         if (text.isBlank()) return null
 
-        @Suppress("DEPRECATION")
-        val legacySender = try { latestMessage.sender?.toString() } catch (_: Exception) { null }
-        val senderPerson = try { latestMessage.senderPerson } catch (_: Exception) { null }
-        val senderName = normalizeBase(senderPerson?.name?.toString() ?: legacySender.orEmpty())
-        val senderWasNull = senderPerson == null && legacySender.isNullOrBlank()
+        val legacySender = normalizeBase(readBundleSender(latestBundle))
+        val personSender = normalizeBase(readPersonNameFromBundle(latestBundle))
+        val senderName = personSender.ifBlank { legacySender }
+        val senderWasNull = senderName.isBlank()
 
         return LatestMessagingMessage(
             text = text,
             senderName = senderName,
             senderWasNull = senderWasNull
         )
+    }
+
+    private fun readBundleText(bundle: Bundle): String {
+        return (bundle.getCharSequence(KEY_TEXT)
+            ?: bundle.getCharSequence("android.text")
+            ?: bundle.getCharSequence("message")
+            ?: bundle.getCharSequence("message_text")
+            ?: "").toString()
+    }
+
+    private fun readBundleSender(bundle: Bundle): String {
+        return (bundle.getCharSequence(KEY_SENDER)
+            ?: bundle.getCharSequence("android.sender")
+            ?: bundle.getCharSequence("sender_name")
+            ?: "").toString()
+    }
+
+    private fun readPersonNameFromBundle(bundle: Bundle): String {
+        val personObject = try {
+            @Suppress("DEPRECATION")
+            bundle.get(KEY_SENDER_PERSON)
+        } catch (_: Exception) {
+            null
+        } ?: return ""
+
+        return try {
+            val method = personObject.javaClass.methods.firstOrNull { it.name == "getName" && it.parameterTypes.isEmpty() }
+            method?.invoke(personObject)?.toString().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun cleanupLocked(now: Long) {
