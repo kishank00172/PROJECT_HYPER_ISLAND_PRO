@@ -53,8 +53,8 @@ class HyperNotificationListenerService : NotificationListenerService() {
         // Robust Spam/Permanent Filtering
         if (isPermanentNonRemovable(notification)) return
 
-        // Inline reply echo suppression:
-        // after we send "okay", apps often post "You: okay" immediately.
+        // Inline reply echo suppression lives here first, before the island queue sees the update.
+        // We pass sbn.key so the suppressor can match the exact notification thread.
         // Suppress only that specific temporary echo before it reaches the island queue.
         if (ReplyEchoSuppressor.shouldSuppress(pkg, title, message, notification, sbn.key)) {
             lastDebugMessage = "SUPPRESSED REPLY ECHO: $appName | $title"
