@@ -56,7 +56,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         // Inline reply echo suppression:
         // after we send "okay", apps often post "You: okay" immediately.
         // Suppress only that specific temporary echo before it reaches the island queue.
-        if (ReplyEchoSuppressor.shouldSuppress(pkg, title, message)) {
+        if (ReplyEchoSuppressor.shouldSuppress(pkg, title, message, notification)) {
             lastDebugMessage = "SUPPRESSED REPLY ECHO: $appName | $title"
             return
         }
@@ -110,4 +110,3 @@ class HyperNotificationListenerService : NotificationListenerService() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
     } catch (_: Exception) { pkg }
 }
-
