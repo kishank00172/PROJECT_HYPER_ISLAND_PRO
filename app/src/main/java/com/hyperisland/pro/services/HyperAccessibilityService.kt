@@ -1,3 +1,4 @@
+
 package com.hyperisland.pro.services
 
 import android.accessibilityservice.AccessibilityService
@@ -75,7 +76,7 @@ class HyperAccessibilityService : AccessibilityService() {
     
     private data class DisplayText(val appName: String, val title: String, val message: String)
     private data class NotificationModel(
-        val packageName: String, val appName: String, val title: String, val message: String,
+        val packageName: String, val notificationKey: String?, val appName: String, val title: String, val message: String,
         val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>
     )
 
@@ -269,8 +270,8 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) =
-            instance?.run { postNotificationEvent("NotificationListener", packageName, appName, title, message, postTime, contentIntent, actions); true } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) =
+            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, postTime, contentIntent, actions); true } ?: false
         fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
     }
@@ -323,6 +324,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var notificationMode = false
     private var currentPendingIntent: PendingIntent? = null
     private var currentPackageName: String? = null
+    private var currentNotificationKey: String? = null
     private var currentReplyAction: Notification.Action? = null
     private var autoCollapseRunnable: Runnable? = null
     private var lastIslandFingerprint = ""
@@ -356,7 +358,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (textItems.isEmpty()) return
             val appName = getAppName(pkg)
             val (t, m) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
-            postNotificationEvent("AccessibilityFallback", pkg, appName, t, m, System.currentTimeMillis(), null, emptyList())
+            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, System.currentTimeMillis(), null, emptyList())
         }
     }
 
@@ -384,7 +386,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postCollapseIsland() = mainHandler.post { if (isReplyMode) exitReplyMode() else setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) }
     private fun postToggleExpanded() = mainHandler.post { if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else setStageAnimated(if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
 
-    private fun postNotificationEvent(source: String, packageName: String, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) {
+    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             val now = System.currentTimeMillis()
@@ -398,7 +400,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val fingerprint = "$packageName|${display.title}|${display.message}"
             if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) { scheduleAutoCollapse(); return@post }
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
-            notificationQueue.add(NotificationModel(packageName, appName, title, message, postTime, contentIntent, actions))
+            notificationQueue.add(NotificationModel(packageName, notificationKey, appName, title, message, postTime, contentIntent, actions))
             if (!isProcessingQueue) processNextInQueue() else scheduleAutoCollapse()
         }
     }
@@ -438,6 +440,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val modeName = AppSettings.getReplyAnimationModeName(AppSettings.getReplyAnimationMode(this))
         val model = NotificationModel(
             packageName = this@HyperAccessibilityService.packageName,
+            notificationKey = null,
             appName = "Test Lab",
             title = if (replySecond) "Reply is second action" else "Reply is first action",
             message = modeName,
@@ -492,7 +495,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateNotificationContent(model: NotificationModel) {
-        currentPendingIntent = model.contentIntent; currentPackageName = model.packageName; currentReplyAction = null
+        currentPendingIntent = model.contentIntent; currentPackageName = model.packageName; currentNotificationKey = model.notificationKey; currentReplyAction = null
         this@HyperAccessibilityService.appIconView?.setImageDrawable(loadAppIcon(model.packageName))
         this@HyperAccessibilityService.appNameText?.text = model.appName
         this@HyperAccessibilityService.timeStampText?.text = formatNotificationTime(model.postTime)
@@ -545,7 +548,8 @@ class HyperAccessibilityService : AccessibilityService() {
             echoId = ReplyEchoSuppressor.recordSent(
                 packageName = currentPackageName,
                 conversationTitle = titleText?.text?.toString(),
-                replyText = replyText
+                replyText = replyText,
+                notificationKey = currentNotificationKey
             )
 
             val replyIntent = Intent()
