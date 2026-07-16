@@ -25,7 +25,14 @@ object ReplyEchoSuppressor {
     private const val SAME_CONVERSATION_WINDOW_MS = 4_500L
     private const val SELF_MARKER_WINDOW_MS = 5_000L
     private const val IMMEDIATE_ECHO_WINDOW_MS = 800L
-    private const val RETAIN_WINDOW_MS = 6_000L
+
+    // Personal-build Instagram rule:
+    // Instagram often echoes my own notification reply without "You:" marker.
+    // If the same sent text appears again from Instagram within 10s, suppress it.
+    private const val PERSONAL_INSTAGRAM_ECHO_WINDOW_MS = 10_000L
+    private const val PERSONAL_INSTAGRAM_TITLE_HINT = "kishan kumar"
+
+    private const val RETAIN_WINDOW_MS = 12_000L
 
     private const val KEY_TEXT = "text"
     private const val KEY_SENDER = "sender"
@@ -186,6 +193,18 @@ object ReplyEchoSuppressor {
             combinedClean.contains(sentText)
 
         if (!latestTextMatches && !normalTextMatches) return false
+
+        // Personal-build Instagram override:
+        // If I replied from Instagram notification and the exact same text comes back within 10 seconds,
+        // suppress it even if Instagram does not use "You:" and even if title formatting changes.
+        val isInstagram = entry.packageName.contains("instagram", ignoreCase = true) || pkg.contains("instagram", ignoreCase = true)
+        val instagramTextMatches = normalTextMatches || latestTextMatches
+        if (isInstagram && instagramTextMatches && age <= PERSONAL_INSTAGRAM_ECHO_WINDOW_MS) {
+            return true
+        }
+        if (isInstagram && baseTitle.contains(PERSONAL_INSTAGRAM_TITLE_HINT) && instagramTextMatches && age <= PERSONAL_INSTAGRAM_ECHO_WINDOW_MS) {
+            return true
+        }
 
         // Tier 1: exact notification thread key. This is the strongest signal.
         val keyMatches = entry.notificationKey.isNotBlank() && incomingKey.isNotBlank() && entry.notificationKey == incomingKey
