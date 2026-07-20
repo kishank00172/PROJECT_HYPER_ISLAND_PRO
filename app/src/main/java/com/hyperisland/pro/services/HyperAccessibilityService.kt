@@ -298,6 +298,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private var footerActions: LinearLayout? = null
     private var actionScroll: HorizontalScrollView? = null
 
+    // Pill badge notification preview — compact, non-intrusive default surface
+    private var pillPreviewRoot: LinearLayout? = null
+    private var pillPreviewIcon: ImageView? = null
+    private var pillPreviewCount: TextView? = null
+    private var pillUnreadCount: Int = 0
+
     // Reply UI
     private var replyBar: LinearLayout? = null
     private var replyEditText: EditText? = null
@@ -384,6 +390,28 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
     private fun postCollapseIsland() = mainHandler.post { if (isReplyMode) exitReplyMode() else setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) }
     private fun postToggleExpanded() = mainHandler.post { if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else setStageAnimated(if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
+    private fun postSwipeUpIsland() = mainHandler.post {
+        if (isReplyMode) {
+            exitReplyMode()
+            return@post
+        }
+        autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
+        autoCollapseRunnable = null
+        if (currentStage == IslandStage.STAGE3_FULL && notificationMode && pillUnreadCount > 0) {
+            if (notificationQueue.isNotEmpty()) {
+                processNextInQueue()
+            } else {
+                pillPreviewRoot?.visibility = View.VISIBLE
+                pillPreviewRoot?.alpha = 1f
+                setStageAnimated(IslandStage.STAGE2_PING, ExpandReason.MANUAL_USER)
+            }
+        } else {
+            pillUnreadCount = 0
+            pillPreviewCount?.visibility = View.GONE
+            notificationQueue.clear()
+            setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
+        }
+    }
 
     private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) {
         mainHandler.post {
@@ -398,10 +426,16 @@ class HyperAccessibilityService : AccessibilityService() {
                 return@post
             }
             val fingerprint = "$packageName|${display.title}|${display.message}"
-            if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) { scheduleAutoCollapse(); return@post }
+            if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) { return@post }
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
+            if (isReplyMode) return@post // while typing/replying, don't build an annoying backlog
+            pillUnreadCount = (pillUnreadCount + 1).coerceAtMost(99)
             notificationQueue.add(NotificationModel(packageName, notificationKey, appName, title, message, postTime, contentIntent, actions))
-            if (!isProcessingQueue) processNextInQueue() else scheduleAutoCollapse()
+            if (currentStage == IslandStage.STAGE3_FULL) {
+                // User is actively reading expanded island; don't auto-shrink/replace it.
+                return@post
+            }
+            processNextInQueue()
         }
     }
 
@@ -479,10 +513,68 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun processNextInQueue() {
         if (isReplyMode) return // GOAL: Pause queue during reply process
-        val next = notificationQueue.poll() ?: run { isProcessingQueue = false; return }
-        isProcessingQueue = true; notificationMode = true
-        if (currentStage == IslandStage.STAGE1_IDLE) { updateNotificationContent(next); triggerFluidExpansion(); scheduleAutoCollapse() }
-        else playFluidTransitionAnimation(next)
+
+        // New premium default: notifications do NOT auto-expand.
+        // They update a compact pill badge; user taps the pill to expand.
+        val latest = notificationQueue.pollLast() ?: run { isProcessingQueue = false; return }
+        notificationQueue.clear()
+        isProcessingQueue = true
+        notificationMode = true
+        updateNotificationContent(latest)
+        updatePillBadge(latest)
+        triggerPillPreview()
+    }
+
+    private fun updatePillBadge(model: NotificationModel) {
+        pillPreviewIcon?.setImageDrawable(loadAppIcon(model.packageName))
+        pillPreviewCount?.text = if (pillUnreadCount <= 1) "" else pillUnreadCount.coerceAtMost(99).toString()
+        pillPreviewCount?.visibility = if (pillUnreadCount <= 1) View.GONE else View.VISIBLE
+    }
+
+    private fun triggerPillPreview() {
+        morphAnimator?.cancel()
+        autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
+        currentStage = IslandStage.STAGE2_PING
+        expandReason = ExpandReason.AUTO_NOTIFICATION
+        notificationMode = true
+
+        gridRoot?.animate()?.cancel()
+        gridRoot?.visibility = View.GONE
+        gridRoot?.alpha = 0f
+        pillPreviewRoot?.visibility = View.VISIBLE
+        pillPreviewRoot?.alpha = 0f
+        pillPreviewRoot?.scaleX = 0.92f
+        pillPreviewRoot?.scaleY = 0.92f
+
+        val curW = islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this))
+        val curH = islandLayoutParams?.height ?: dp(AppSettings.getIslandHeightDp(this))
+        val curR = islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
+        val targetW = dp(getTargetWidth(IslandStage.STAGE2_PING))
+        val targetH = dp(getTargetHeight(IslandStage.STAGE2_PING))
+        val targetR = dp(getTargetRadius(IslandStage.STAGE2_PING)).toFloat()
+
+        val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 360L
+            interpolator = morphInterpolator
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                pillPreviewRoot?.alpha = t
+                pillPreviewRoot?.scaleX = 0.92f + 0.08f * t
+                pillPreviewRoot?.scaleY = 0.92f + 0.08f * t
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    pillPreviewRoot?.alpha = 1f
+                    pillPreviewRoot?.scaleX = 1f
+                    pillPreviewRoot?.scaleY = 1f
+                    isProcessingQueue = false
+                    forceRegionUpdate()
+                }
+            })
+        }
+        morphAnimator = anim
+        anim.start()
     }
 
     private fun playFluidTransitionAnimation(next: NotificationModel) {
@@ -1765,16 +1857,59 @@ class HyperAccessibilityService : AccessibilityService() {
         if (currentStage == target && morphAnimator?.isRunning == true) return
         if (target == IslandStage.STAGE3_FULL && reason == ExpandReason.AUTO_NOTIFICATION) { triggerFluidExpansion(); return }
         morphAnimator?.cancel()
-        val curW = this@HyperAccessibilityService.islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this)); val curH = this@HyperAccessibilityService.islandLayoutParams?.height ?: dp(AppSettings.getIslandHeightDp(this)); val curR = this@HyperAccessibilityService.islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
-        currentStage = target; expandReason = reason
-        val targetW = dp(getTargetWidth(target)); val targetH = dp(getTargetHeight(target)); val targetR = dp(getTargetRadius(target)).toFloat()
+        val curW = this@HyperAccessibilityService.islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this))
+        val curH = this@HyperAccessibilityService.islandLayoutParams?.height ?: dp(AppSettings.getIslandHeightDp(this))
+        val curR = this@HyperAccessibilityService.islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
+        currentStage = target
+        expandReason = reason
+
+        if (target == IslandStage.STAGE3_FULL) {
+            pillPreviewRoot?.animate()?.cancel()
+            pillPreviewRoot?.animate()?.alpha(0f)?.setDuration(140L)?.setInterpolator(collapseInterpolator)?.withEndAction {
+                pillPreviewRoot?.visibility = View.GONE
+            }?.start()
+            gridRoot?.visibility = View.VISIBLE
+            gridRoot?.alpha = 0f
+        } else if (target == IslandStage.STAGE1_IDLE) {
+            pillPreviewRoot?.animate()?.cancel()
+            pillPreviewRoot?.animate()?.alpha(0f)?.setDuration(160L)?.withEndAction {
+                pillPreviewRoot?.visibility = View.GONE
+            }?.start()
+        }
+
+        val targetW = dp(getTargetWidth(target))
+        val targetH = dp(getTargetHeight(target))
+        val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = if (target == IslandStage.STAGE1_IDLE) 400L else 600L
             interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
-            addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t)); if (notificationMode && target == IslandStage.STAGE1_IDLE) this@HyperAccessibilityService.gridRoot?.alpha = 1f - t; this@HyperAccessibilityService.islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) }
-            addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { if (target == IslandStage.STAGE1_IDLE) { this@HyperAccessibilityService.gridRoot?.visibility = View.GONE; notificationMode = false }; updateOutsideWatcherForState(); isProcessingQueue = false } })
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                if (target == IslandStage.STAGE3_FULL && notificationMode) {
+                    gridRoot?.alpha = t
+                } else if (target == IslandStage.STAGE1_IDLE && notificationMode) {
+                    gridRoot?.alpha = 1f - t
+                }
+                islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat())
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: Animator) {
+                    if (target == IslandStage.STAGE1_IDLE) {
+                        gridRoot?.visibility = View.GONE
+                        notificationMode = false
+                    }
+                    if (target == IslandStage.STAGE3_FULL) {
+                        gridRoot?.alpha = 1f
+                        gridRoot?.visibility = View.VISIBLE
+                    }
+                    updateOutsideWatcherForState()
+                    isProcessingQueue = false
+                }
+            })
         }
-        morphAnimator = anim; anim.start()
+        morphAnimator = anim
+        anim.start()
     }
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
@@ -1782,8 +1917,14 @@ class HyperAccessibilityService : AccessibilityService() {
         this@HyperAccessibilityService.outlineRadius = r; this@HyperAccessibilityService.islandView?.layoutParams = this@HyperAccessibilityService.islandLayoutParams; visualRoot?.invalidateOutline(); forceRegionUpdate()
     }
 
-    private fun getTargetWidth(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandWidthDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this); IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedWidthDp(this) }
-    private fun getTargetHeight(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandHeightDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandStage2WidthDp(this) + 4; IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedHeightDp(this) }
+    private fun getPillBadgeWidthDp(): Int = when {
+        pillUnreadCount >= 10 -> 104
+        pillUnreadCount >= 2 -> 92
+        else -> 72
+    }
+
+    private fun getTargetWidth(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandWidthDp(this); IslandStage.STAGE2_PING -> getPillBadgeWidthDp(); IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedWidthDp(this) }
+    private fun getTargetHeight(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandHeightDp(this); IslandStage.STAGE2_PING -> AppSettings.getIslandHeightDp(this); IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedHeightDp(this) }
     private fun getTargetRadius(s: IslandStage) = if (s == IslandStage.STAGE3_FULL) AppSettings.getIslandExpandedCornerRadiusDp(this) else AppSettings.getIslandCornerRadiusDp(this)
 
     private fun scheduleAutoCollapse() {
@@ -1916,6 +2057,42 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(-1, -1))
 
+            // Compact pill badge preview: latest app icon + unread count only.
+            this@HyperAccessibilityService.pillPreviewRoot = LinearLayout(this@HyperAccessibilityService).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                visibility = View.GONE
+                alpha = 0f
+                setPadding(dp(8), 0, dp(8), 0)
+                setClipChildren(false)
+                setClipToPadding(false)
+
+                this@HyperAccessibilityService.pillPreviewIcon = ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                }
+
+                this@HyperAccessibilityService.pillPreviewCount = TextView(context).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 11f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    minWidth = dp(18)
+                    minHeight = dp(18)
+                    setPadding(dp(5), 0, dp(5), 0)
+                    visibility = View.GONE
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        setColor(Color.rgb(0, 150, 255))
+                        cornerRadius = dp(9).toFloat()
+                    }
+                    setIncludeFontPadding(false)
+                }
+
+                addView(this@HyperAccessibilityService.pillPreviewIcon, LinearLayout.LayoutParams(dp(22), dp(22)))
+                addView(this@HyperAccessibilityService.pillPreviewCount, LinearLayout.LayoutParams(-2, dp(18)).apply { marginStart = dp(6) })
+            }
+            addView(this@HyperAccessibilityService.pillPreviewRoot, FrameLayout.LayoutParams(-1, -1))
+
             // Reply Morph V2 layer: full island coordinate space, above normal content, outside action scroll clipping.
             this@HyperAccessibilityService.morphLayer = FrameLayout(this@HyperAccessibilityService).apply {
                 visibility = View.VISIBLE
@@ -1971,7 +2148,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addView(this@HyperAccessibilityService.morphLayer, FrameLayout.LayoutParams(-1, -1))
 
-            setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_UP) { if (e.rawY - touchStartY < -dp(24)) postCollapseIsland() else if (abs(e.rawY - touchStartY) < dp(10)) postToggleExpanded() } else if (e.action == MotionEvent.ACTION_DOWN) { touchStartY = e.rawY }; true }
+            setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_UP) { if (e.rawY - touchStartY < -dp(24)) postSwipeUpIsland() else if (abs(e.rawY - touchStartY) < dp(10)) postToggleExpanded() } else if (e.action == MotionEvent.ACTION_DOWN) { touchStartY = e.rawY }; true }
         }
         this@HyperAccessibilityService.islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
         visualRoot?.addView(this@HyperAccessibilityService.islandView, this@HyperAccessibilityService.islandLayoutParams); updateOutlineForIsland(w, h, r)
