@@ -1917,10 +1917,10 @@ class HyperAccessibilityService : AccessibilityService() {
         this@HyperAccessibilityService.outlineRadius = r; this@HyperAccessibilityService.islandView?.layoutParams = this@HyperAccessibilityService.islandLayoutParams; visualRoot?.invalidateOutline(); forceRegionUpdate()
     }
 
-    private fun getPillBadgeWidthDp(): Int = when {
-        pillUnreadCount >= 10 -> 104
-        pillUnreadCount >= 2 -> 92
-        else -> 72
+    private fun getPillBadgeWidthDp(): Int {
+        // Pill size is stable. Notifications only change icon/count inside the pill,
+        // never the pill's outer width.
+        return AppSettings.getIslandWidthDp(this)
     }
 
     private fun getTargetWidth(s: IslandStage) = when(s) { IslandStage.STAGE1_IDLE -> AppSettings.getIslandWidthDp(this); IslandStage.STAGE2_PING -> getPillBadgeWidthDp(); IslandStage.STAGE3_FULL -> AppSettings.getIslandExpandedWidthDp(this) }
