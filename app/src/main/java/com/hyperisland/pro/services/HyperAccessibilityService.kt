@@ -299,7 +299,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var actionScroll: HorizontalScrollView? = null
 
     // Pill badge notification preview — compact, non-intrusive default surface
-    private var pillPreviewRoot: LinearLayout? = null
+    private var pillPreviewRoot: FrameLayout? = null
     private var pillPreviewIcon: ImageView? = null
     private var pillPreviewCount: TextView? = null
     private var pillUnreadCount: Int = 0
@@ -2057,13 +2057,12 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(-1, -1))
 
-            // Compact pill badge preview: latest app icon + unread count only.
-            this@HyperAccessibilityService.pillPreviewRoot = LinearLayout(this@HyperAccessibilityService).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
+            // Compact pill badge preview: stable pill, spread content.
+            // Icon stays left, count badge stays right — no cramped center cluster.
+            this@HyperAccessibilityService.pillPreviewRoot = FrameLayout(this@HyperAccessibilityService).apply {
                 visibility = View.GONE
                 alpha = 0f
-                setPadding(dp(8), 0, dp(8), 0)
+                setPadding(dp(14), 0, dp(14), 0)
                 setClipChildren(false)
                 setClipToPadding(false)
 
@@ -2073,23 +2072,33 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 this@HyperAccessibilityService.pillPreviewCount = TextView(context).apply {
                     setTextColor(Color.WHITE)
-                    textSize = 11f
+                    textSize = 12.5f
                     typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER
-                    minWidth = dp(18)
-                    minHeight = dp(18)
-                    setPadding(dp(5), 0, dp(5), 0)
+                    minWidth = dp(24)
+                    minHeight = dp(22)
+                    setPadding(dp(6), 0, dp(6), 0)
                     visibility = View.GONE
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
                         setColor(Color.rgb(0, 150, 255))
-                        cornerRadius = dp(9).toFloat()
+                        cornerRadius = dp(11).toFloat()
                     }
                     setIncludeFontPadding(false)
                 }
 
-                addView(this@HyperAccessibilityService.pillPreviewIcon, LinearLayout.LayoutParams(dp(22), dp(22)))
-                addView(this@HyperAccessibilityService.pillPreviewCount, LinearLayout.LayoutParams(-2, dp(18)).apply { marginStart = dp(6) })
+                addView(
+                    this@HyperAccessibilityService.pillPreviewIcon,
+                    FrameLayout.LayoutParams(dp(26), dp(26), Gravity.START or Gravity.CENTER_VERTICAL).apply {
+                        leftMargin = dp(2)
+                    }
+                )
+                addView(
+                    this@HyperAccessibilityService.pillPreviewCount,
+                    FrameLayout.LayoutParams(-2, dp(22), Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                        rightMargin = dp(2)
+                    }
+                )
             }
             addView(this@HyperAccessibilityService.pillPreviewRoot, FrameLayout.LayoutParams(-1, -1))
 
