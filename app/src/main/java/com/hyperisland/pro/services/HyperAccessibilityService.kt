@@ -19,6 +19,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.graphics.Typeface
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -526,7 +527,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updatePillBadge(model: NotificationModel) {
-        pillPreviewIcon?.setImageDrawable(loadAppIcon(model.packageName))
+        pillPreviewIcon?.setImageDrawable(loadPillDisplayIcon(model.packageName))
         pillPreviewCount?.text = if (pillUnreadCount <= 1) "" else pillUnreadCount.coerceAtMost(99).toString()
         pillPreviewCount?.visibility = if (pillUnreadCount <= 1) View.GONE else View.VISIBLE
     }
@@ -2072,31 +2073,31 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 this@HyperAccessibilityService.pillPreviewCount = TextView(context).apply {
                     setTextColor(Color.WHITE)
-                    textSize = 12.5f
+                    textSize = 14f
                     typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER
-                    minWidth = dp(24)
-                    minHeight = dp(22)
-                    setPadding(dp(6), 0, dp(6), 0)
+                    minWidth = dp(28)
+                    minHeight = dp(26)
+                    setPadding(dp(7), 0, dp(7), 0)
                     visibility = View.GONE
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
                         setColor(Color.rgb(0, 150, 255))
-                        cornerRadius = dp(11).toFloat()
+                        cornerRadius = dp(13).toFloat()
                     }
                     setIncludeFontPadding(false)
                 }
 
                 addView(
                     this@HyperAccessibilityService.pillPreviewIcon,
-                    FrameLayout.LayoutParams(dp(26), dp(26), Gravity.START or Gravity.CENTER_VERTICAL).apply {
-                        leftMargin = dp(2)
+                    FrameLayout.LayoutParams(dp(32), dp(32), Gravity.START or Gravity.CENTER_VERTICAL).apply {
+                        leftMargin = dp(0)
                     }
                 )
                 addView(
                     this@HyperAccessibilityService.pillPreviewCount,
-                    FrameLayout.LayoutParams(-2, dp(22), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                        rightMargin = dp(2)
+                    FrameLayout.LayoutParams(-2, dp(26), Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                        rightMargin = dp(0)
                     }
                 )
             }
@@ -2171,6 +2172,18 @@ class HyperAccessibilityService : AccessibilityService() {
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
     private fun hideIslandInternal() { morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
+
+    private fun loadPillDisplayIcon(pkg: String) = try {
+        val icon = packageManager.getApplicationIcon(pkg)
+        if (Build.VERSION.SDK_INT >= 26 && icon is AdaptiveIconDrawable) {
+            // For compact pill we prefer the foreground glyph only.
+            // This removes the app-icon squircle/square background when available.
+            icon.foreground
+        } else {
+            icon
+        }
+    } catch (_: Exception) { null }
+
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
     private fun formatNotificationTime(t: Long) = if (t <= 0L || System.currentTimeMillis() - t < 60000L) "now" else SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(t))
     private fun buildDisplayText(appName: String, t: String, m: String): DisplayText { val a = appName.trim().ifBlank { "App" }; var ti = t.trim(); var me = m.trim(); if (ti.equals(a, true)) { ti = me; me = "" }; if (ti.isBlank() && me.isNotBlank()) { ti = me; me = "" }; return DisplayText(a, ti, me) }
