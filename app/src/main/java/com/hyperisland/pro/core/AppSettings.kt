@@ -24,6 +24,7 @@ object AppSettings {
     private const val KEY_REPLY_LIQUID_RADIUS_DP = "reply_liquid_radius_dp"
     private const val KEY_REPLY_LIQUID_LEFT_GAP_DP = "reply_liquid_left_gap_dp"
     private const val KEY_REPLY_LIQUID_EDGE_GAP_DP = "reply_liquid_edge_gap_dp"
+    private const val KEY_PILL_ICON_RENDER_MODE = "pill_icon_render_mode"
 
     const val ENGINE_NONE = "none"
     const val ENGINE_ACCESSIBILITY = "accessibility"
@@ -41,6 +42,13 @@ object AppSettings {
     const val DEFAULT_REPLY_LIQUID_RADIUS_DP = 26
     const val DEFAULT_REPLY_LIQUID_LEFT_GAP_DP = 0
     const val DEFAULT_REPLY_LIQUID_EDGE_GAP_DP = 13
+
+    const val PILL_ICON_AUTO = 0
+    const val PILL_ICON_SMALL_ONLY = 1
+    const val PILL_ICON_ADAPTIVE_FOREGROUND = 2
+    const val PILL_ICON_LAUNCHER = 3
+    const val PILL_ICON_GENERIC = 4
+    const val DEFAULT_PILL_ICON_RENDER_MODE = PILL_ICON_AUTO // TestLab-selectable pill icon renderer
 
     private const val CURRENT_DEFAULTS_VERSION = 5
 
@@ -131,6 +139,24 @@ object AppSettings {
     fun setReplyLiquidLeftGapDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_REPLY_LIQUID_LEFT_GAP_DP, v.coerceIn(0, 48)).apply()
     fun getReplyLiquidEdgeGapDp(context: Context) = prefs(context).getInt(KEY_REPLY_LIQUID_EDGE_GAP_DP, DEFAULT_REPLY_LIQUID_EDGE_GAP_DP)
     fun setReplyLiquidEdgeGapDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_REPLY_LIQUID_EDGE_GAP_DP, v.coerceIn(0, 40)).apply()
+
+    fun getPillIconRenderMode(context: Context): Int {
+        return prefs(context).getInt(KEY_PILL_ICON_RENDER_MODE, DEFAULT_PILL_ICON_RENDER_MODE)
+            .coerceIn(PILL_ICON_AUTO, PILL_ICON_GENERIC)
+    }
+
+    fun setPillIconRenderMode(context: Context, mode: Int) {
+        prefs(context).edit().putInt(KEY_PILL_ICON_RENDER_MODE, mode.coerceIn(PILL_ICON_AUTO, PILL_ICON_GENERIC)).apply()
+    }
+
+    fun getPillIconRenderModeName(mode: Int): String = when (mode.coerceIn(PILL_ICON_AUTO, PILL_ICON_GENERIC)) {
+        PILL_ICON_AUTO -> "Auto"
+        PILL_ICON_SMALL_ONLY -> "SmallIcon only"
+        PILL_ICON_ADAPTIVE_FOREGROUND -> "Adaptive foreground"
+        PILL_ICON_LAUNCHER -> "Launcher icon"
+        PILL_ICON_GENERIC -> "Generic glyph"
+        else -> "Auto"
+    }
 
     fun resetIslandDefaults(context: Context) {
         prefs(context).edit().clear().putInt(KEY_DEFAULTS_VERSION, CURRENT_DEFAULTS_VERSION).apply()
