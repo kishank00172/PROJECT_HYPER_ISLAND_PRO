@@ -20,6 +20,7 @@ class TestLabActivity : Activity() {
 
         bindReplyAnimationLab()
         bindLiquidCalibration()
+        bindPillIconLab()
 
         findViewById<Button>(R.id.btnExpandIsland).setOnClickListener { HyperAccessibilityService.expandIslandFromApp(this) }
         findViewById<Button>(R.id.btnCollapseIsland).setOnClickListener { HyperAccessibilityService.collapseIslandFromApp(this) }
@@ -142,6 +143,53 @@ class TestLabActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
+    }
+
+    private fun bindPillIconLab() {
+        // Temporary lab for comparing automatic pill icon render paths.
+        val modeGroup = findViewById<RadioGroup>(R.id.radioPillIconMode)
+        modeGroup.check(idForPillIconMode(AppSettings.getPillIconRenderMode(this)))
+        modeGroup.setOnCheckedChangeListener { _, checkedId ->
+            val mode = pillIconModeForId(checkedId)
+            AppSettings.setPillIconRenderMode(this, mode)
+            Toast.makeText(this, "Pill icon: ${AppSettings.getPillIconRenderModeName(mode)}", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<RadioGroup>(R.id.radioPillIconApp).check(R.id.radioPillAppTelegram)
+        findViewById<Button>(R.id.btnPreviewPillIcon).setOnClickListener {
+            if (!AppSettings.isIslandEnabled(this)) {
+                Toast.makeText(this, "Turn island ON first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val pkg = selectedPillPreviewPackage()
+            val ok = HyperAccessibilityService.previewPillIconFromApp(this, pkg, 7)
+            if (!ok) Toast.makeText(this, "Accessibility service not connected", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun selectedPillPreviewPackage(): String {
+        return when (findViewById<RadioGroup>(R.id.radioPillIconApp).checkedRadioButtonId) {
+            R.id.radioPillAppWhatsApp -> "com.whatsapp"
+            R.id.radioPillAppInstagram -> "com.instagram.android"
+            R.id.radioPillAppMessages -> "com.google.android.apps.messaging"
+            else -> "org.telegram.messenger"
+        }
+    }
+
+    private fun idForPillIconMode(mode: Int): Int = when (mode) {
+        AppSettings.PILL_ICON_SMALL_ONLY -> R.id.radioPillIconSmallOnly
+        AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND -> R.id.radioPillIconAdaptive
+        AppSettings.PILL_ICON_LAUNCHER -> R.id.radioPillIconLauncher
+        AppSettings.PILL_ICON_GENERIC -> R.id.radioPillIconGeneric
+        else -> R.id.radioPillIconAuto
+    }
+
+    private fun pillIconModeForId(id: Int): Int = when (id) {
+        R.id.radioPillIconSmallOnly -> AppSettings.PILL_ICON_SMALL_ONLY
+        R.id.radioPillIconAdaptive -> AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND
+        R.id.radioPillIconLauncher -> AppSettings.PILL_ICON_LAUNCHER
+        R.id.radioPillIconGeneric -> AppSettings.PILL_ICON_GENERIC
+        else -> AppSettings.PILL_ICON_AUTO
     }
 
     private fun previewReplyAnimation(replySecond: Boolean) {
