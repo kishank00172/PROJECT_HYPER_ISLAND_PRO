@@ -16,6 +16,7 @@ import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
@@ -275,6 +276,8 @@ class HyperAccessibilityService : AccessibilityService() {
             instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, postTime, contentIntent, actions, smallIcon); true } ?: false
         fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
+        fun previewPillIconFromApp(context: Context, packageName: String, count: Int) =
+            instance?.run { postPreviewPillIcon(packageName, count); true } ?: false
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -503,6 +506,29 @@ class HyperAccessibilityService : AccessibilityService() {
                 this@HyperAccessibilityService.replyMorphTile?.performClick()
             }
         }, if (wasFull) 360L else 980L)
+    }
+
+    private fun postPreviewPillIcon(targetPackageName: String, count: Int) {
+        mainHandler.post {
+            if (!AppSettings.isIslandEnabled(this)) return@post
+            if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
+            val app = getAppName(targetPackageName)
+            pillUnreadCount = count.coerceIn(1, 99)
+            val model = NotificationModel(
+                packageName = targetPackageName,
+                notificationKey = null,
+                appName = app,
+                title = app,
+                message = "Pill icon preview",
+                postTime = System.currentTimeMillis(),
+                contentIntent = null,
+                actions = emptyList(),
+                smallIcon = null
+            )
+            updateNotificationContent(model)
+            updatePillBadge(model)
+            triggerPillPreview()
+        }
     }
 
     private fun buildPreviewAction(title: String, requestCode: Int): Notification.Action {
@@ -2182,19 +2208,38 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
-        // Automatic SystemUI-style path: notification.smallIcon + SRC_IN tint.
-        // No per-app SVG/glyph hacks; fallback only if smallIcon is unavailable.
-        val small = smallIcon?.loadDrawable(this)?.mutate()
-        if (small != null) {
-            small.setTint(getPillIconTint(pkg))
-            small.setTintMode(PorterDuff.Mode.SRC_IN)
-            small
-        } else {
-            loadPillDisplayIcon(pkg)
+        // TestLab-selectable pill icon renderer: Auto / SmallIcon / Adaptive / Launcher / Generic.
+        when (AppSettings.getPillIconRenderMode(this)) {
+            AppSettings.PILL_ICON_SMALL_ONLY -> loadSmallNotificationGlyph(pkg, smallIcon) ?: loadGenericPillGlyph()
+            AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND -> loadPillDisplayIcon(pkg) ?: loadGenericPillGlyph()
+            AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg) ?: loadGenericPillGlyph()
+            AppSettings.PILL_ICON_GENERIC -> loadGenericPillGlyph()
+            else -> loadSmallNotificationGlyph(pkg, smallIcon) ?: loadPillDisplayIcon(pkg) ?: loadGenericPillGlyph()
         }
     } catch (_: Exception) {
-        loadPillDisplayIcon(pkg)
+        loadGenericPillGlyph()
     }
+
+    private fun loadSmallNotificationGlyph(pkg: String, smallIcon: Icon?) = try {
+        val iconContext = try { createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY) } catch (_: Exception) { this }
+        val small = smallIcon?.loadDrawable(iconContext)?.mutate() ?: return null
+        val tint = getPillIconTint(pkg)
+        small.setTint(tint)
+        small.setTintMode(PorterDuff.Mode.SRC_IN)
+        small.colorFilter = PorterDuffColorFilter(tint, PorterDuff.Mode.SRC_IN)
+        small
+    } catch (_: Exception) { null }
+
+    private fun loadLauncherPillIcon(pkg: String) = try {
+        packageManager.getApplicationIcon(pkg)
+    } catch (_: Exception) { null }
+
+    private fun loadGenericPillGlyph() = try {
+        val d = getDrawable(android.R.drawable.ic_dialog_info)?.mutate()
+        d?.setTint(Color.WHITE)
+        d?.setTintMode(PorterDuff.Mode.SRC_IN)
+        d
+    } catch (_: Exception) { null }
 
     private fun getPillIconTint(pkg: String): Int = when {
         pkg.contains("telegram", true) -> Color.rgb(42, 171, 238)
