@@ -15,6 +15,7 @@ import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.PorterDuff
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
@@ -528,6 +529,9 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updatePillBadge(model: NotificationModel) {
+        pillPreviewIcon?.background = null
+        pillPreviewIcon?.imageTintList = null
+        pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(loadPillNotificationIcon(model.packageName, model.smallIcon))
         pillPreviewCount?.text = if (pillUnreadCount <= 1) "" else pillUnreadCount.coerceAtMost(99).toString()
         pillPreviewCount?.visibility = if (pillUnreadCount <= 1) View.GONE else View.VISIBLE
@@ -2069,7 +2073,10 @@ class HyperAccessibilityService : AccessibilityService() {
                 setClipToPadding(false)
 
                 this@HyperAccessibilityService.pillPreviewIcon = ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    background = null
+                    imageTintList = null
+                    clearColorFilter()
                 }
 
                 this@HyperAccessibilityService.pillPreviewCount = TextView(context).apply {
@@ -2175,11 +2182,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
-        // Status bar uses notification.smallIcon. For compact island pill this is much cleaner
-        // than launcher icons because it is usually a glyph/mask with no baked square background.
+        // Automatic SystemUI-style path: notification.smallIcon + SRC_IN tint.
+        // No per-app SVG/glyph hacks; fallback only if smallIcon is unavailable.
         val small = smallIcon?.loadDrawable(this)?.mutate()
         if (small != null) {
             small.setTint(getPillIconTint(pkg))
+            small.setTintMode(PorterDuff.Mode.SRC_IN)
             small
         } else {
             loadPillDisplayIcon(pkg)
