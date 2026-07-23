@@ -77,7 +77,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private data class DisplayText(val appName: String, val title: String, val message: String)
     private data class NotificationModel(
         val packageName: String, val notificationKey: String?, val appName: String, val title: String, val message: String,
-        val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>
+        val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?
     )
 
     private class ReplyMorphView(context: Context) : View(context) {
@@ -270,8 +270,8 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) =
-            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, postTime, contentIntent, actions); true } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null) =
+            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, postTime, contentIntent, actions, smallIcon); true } ?: false
         fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
     }
@@ -364,7 +364,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (textItems.isEmpty()) return
             val appName = getAppName(pkg)
             val (t, m) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
-            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, System.currentTimeMillis(), null, emptyList())
+            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, System.currentTimeMillis(), null, emptyList(), null)
         }
     }
 
@@ -414,7 +414,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>) {
+    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             val now = System.currentTimeMillis()
@@ -431,7 +431,7 @@ class HyperAccessibilityService : AccessibilityService() {
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
             if (isReplyMode) return@post // while typing/replying, don't build an annoying backlog
             pillUnreadCount = (pillUnreadCount + 1).coerceAtMost(99)
-            notificationQueue.add(NotificationModel(packageName, notificationKey, appName, title, message, postTime, contentIntent, actions))
+            notificationQueue.add(NotificationModel(packageName, notificationKey, appName, title, message, postTime, contentIntent, actions, smallIcon))
             if (currentStage == IslandStage.STAGE3_FULL) {
                 // User is actively reading expanded island; don't auto-shrink/replace it.
                 return@post
@@ -481,7 +481,8 @@ class HyperAccessibilityService : AccessibilityService() {
             message = modeName,
             postTime = System.currentTimeMillis(),
             contentIntent = null,
-            actions = actions
+            actions = actions,
+            smallIcon = null
         )
 
         val wasFull = currentStage == IslandStage.STAGE3_FULL
@@ -527,7 +528,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updatePillBadge(model: NotificationModel) {
-        pillPreviewIcon?.setImageDrawable(loadPillDisplayIcon(model.packageName))
+        pillPreviewIcon?.setImageDrawable(loadPillNotificationIcon(model.packageName, model.smallIcon))
         pillPreviewCount?.text = if (pillUnreadCount <= 1) "" else pillUnreadCount.coerceAtMost(99).toString()
         pillPreviewCount?.visibility = if (pillUnreadCount <= 1) View.GONE else View.VISIBLE
     }
@@ -2173,11 +2174,31 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun hideIslandInternal() { morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
+    private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
+        // Status bar uses notification.smallIcon. For compact island pill this is much cleaner
+        // than launcher icons because it is usually a glyph/mask with no baked square background.
+        val small = smallIcon?.loadDrawable(this)?.mutate()
+        if (small != null) {
+            small.setTint(getPillIconTint(pkg))
+            small
+        } else {
+            loadPillDisplayIcon(pkg)
+        }
+    } catch (_: Exception) {
+        loadPillDisplayIcon(pkg)
+    }
+
+    private fun getPillIconTint(pkg: String): Int = when {
+        pkg.contains("telegram", true) -> Color.rgb(42, 171, 238)
+        pkg.contains("whatsapp", true) -> Color.rgb(37, 211, 102)
+        pkg.contains("instagram", true) -> Color.rgb(225, 48, 108)
+        pkg.contains("google", true) -> Color.WHITE
+        else -> Color.WHITE
+    }
+
     private fun loadPillDisplayIcon(pkg: String) = try {
         val icon = packageManager.getApplicationIcon(pkg)
         if (Build.VERSION.SDK_INT >= 26 && icon is AdaptiveIconDrawable) {
-            // For compact pill we prefer the foreground glyph only.
-            // This removes the app-icon squircle/square background when available.
             icon.foreground
         } else {
             icon
