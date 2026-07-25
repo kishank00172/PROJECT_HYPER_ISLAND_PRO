@@ -2230,25 +2230,31 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun loadSmallNotificationGlyph(pkg: String, smallIcon: Icon?): Drawable? {
-        if (smallIcon == null) return null
+        val cached = PillIconCache.get(pkg) // lets TestLab reuse the latest real smallIcon/legacy icon
+        val iconToUse = smallIcon ?: cached?.smallIcon
+        val legacyResId = cached?.legacyIconResId ?: 0
         val tint = getPillIconTint(pkg)
-        val manual = loadSmallIconByResource(pkg, smallIcon)
+
+        val manual = loadSmallIconByResource(pkg, iconToUse, legacyResId)
         if (manual != null && looksLikeGlyph(manual)) return tintGlyph(manual, tint)
 
-        val loaded = loadViaIconLoadDrawable(pkg, smallIcon)
+        val loaded = iconToUse?.let { loadViaIconLoadDrawable(pkg, it) }
         if (loaded != null && looksLikeGlyph(loaded)) return tintGlyph(loaded, tint)
 
-        Log.d("HyperIslandPro", "Pill smallIcon rejected for $pkg: manual=${manual?.javaClass?.simpleName}, loaded=${loaded?.javaClass?.simpleName}")
+        Log.d(
+            "HyperIslandPro",
+            "Pill smallIcon rejected for $pkg: cached=${cached != null}, legacy=$legacyResId, manual=${manual?.javaClass?.simpleName}, loaded=${loaded?.javaClass?.simpleName}"
+        )
         return null
     }
 
-    private fun loadSmallIconByResource(pkg: String, icon: Icon): Drawable? {
+    private fun loadSmallIconByResource(pkg: String, icon: Icon?, legacyResId: Int): Drawable? {
         return try {
-            val type = getIconTypeCompat(icon)
-            if (type != 2) return null // Icon.TYPE_RESOURCE = 2
-            val resId = getIconResIdCompat(icon)
-            if (resId == null || resId == 0) return null
-            val resPkg = getIconResPackageCompat(icon).ifBlank { pkg }
+            val type = icon?.let { getIconTypeCompat(it) }
+            val iconResId = if (type == 2) icon?.let { getIconResIdCompat(it) } ?: 0 else 0
+            val resId = if (iconResId != 0) iconResId else legacyResId
+            if (resId == 0) return null
+            val resPkg = if (iconResId != 0) icon?.let { getIconResPackageCompat(it) }.orEmpty().ifBlank { pkg } else pkg
             val res = packageManager.getResourcesForApplication(resPkg)
             @Suppress("DEPRECATION")
             res.getDrawable(resId, null)?.mutate()
