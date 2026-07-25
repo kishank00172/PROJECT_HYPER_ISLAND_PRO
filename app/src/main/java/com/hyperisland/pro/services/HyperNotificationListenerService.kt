@@ -44,6 +44,8 @@ class HyperNotificationListenerService : NotificationListenerService() {
         if (pkg == packageName || !AppSettings.isIslandEnabled(this)) return
         if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
 
+        PillIconCache.record(pkg, notification.smallIcon, notification.icon) // cache real icon data for Pill Icon Lab
+
         val appName = getAppName(pkg)
         val title = (notification.extras.getCharSequence(Notification.EXTRA_TITLE) ?: "").toString().trim()
         val message = (notification.extras.getCharSequence(Notification.EXTRA_TEXT) ?: "").toString().trim()
@@ -79,7 +81,8 @@ class HyperNotificationListenerService : NotificationListenerService() {
             message = message,
             postTime = sbn.postTime,
             contentIntent = notification.contentIntent,
-            actions = actionList
+            actions = actionList,
+            smallIcon = notification.smallIcon
         )
     }
 
