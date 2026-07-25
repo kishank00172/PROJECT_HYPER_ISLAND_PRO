@@ -10,10 +10,12 @@ import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
@@ -22,6 +24,7 @@ import android.graphics.RectF
 import android.graphics.Region
 import android.graphics.Typeface
 import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -2208,38 +2211,171 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
-        // TestLab-selectable pill icon renderer: Auto / SmallIcon / Adaptive / Launcher / Generic.
+        // TestLab-selectable pill icon renderer. Auto now means:
+        // 1) manual TYPE_RESOURCE load from source app resources + glyph validation
+        // 2) Icon.loadDrawable package-context + glyph validation
+        // 3) adaptive foreground only if it validates as a glyph
+        // 4) clean generic chat glyph fallback — never ugly launcher square in Auto.
         when (AppSettings.getPillIconRenderMode(this)) {
-            AppSettings.PILL_ICON_SMALL_ONLY -> loadSmallNotificationGlyph(pkg, smallIcon) ?: loadGenericPillGlyph()
-            AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND -> loadPillDisplayIcon(pkg) ?: loadGenericPillGlyph()
-            AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg) ?: loadGenericPillGlyph()
-            AppSettings.PILL_ICON_GENERIC -> loadGenericPillGlyph()
-            else -> loadSmallNotificationGlyph(pkg, smallIcon) ?: loadPillDisplayIcon(pkg) ?: loadGenericPillGlyph()
+            AppSettings.PILL_ICON_SMALL_ONLY -> loadSmallNotificationGlyph(pkg, smallIcon) ?: loadGenericPillGlyph(pkg)
+            AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND -> loadValidatedAdaptiveForeground(pkg) ?: loadGenericPillGlyph(pkg)
+            AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg) ?: loadGenericPillGlyph(pkg)
+            AppSettings.PILL_ICON_GENERIC -> loadGenericPillGlyph(pkg)
+            else -> loadSmallNotificationGlyph(pkg, smallIcon)
+                ?: loadValidatedAdaptiveForeground(pkg)
+                ?: loadGenericPillGlyph(pkg)
         }
     } catch (_: Exception) {
-        loadGenericPillGlyph()
+        loadGenericPillGlyph(pkg)
     }
 
-    private fun loadSmallNotificationGlyph(pkg: String, smallIcon: Icon?) = try {
-        val iconContext = try { createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY) } catch (_: Exception) { this }
-        val small = smallIcon?.loadDrawable(iconContext)?.mutate() ?: return null
+    private fun loadSmallNotificationGlyph(pkg: String, smallIcon: Icon?): Drawable? {
+        if (smallIcon == null) return null
         val tint = getPillIconTint(pkg)
-        small.setTint(tint)
-        small.setTintMode(PorterDuff.Mode.SRC_IN)
-        small.colorFilter = PorterDuffColorFilter(tint, PorterDuff.Mode.SRC_IN)
-        small
+        val manual = loadSmallIconByResource(pkg, smallIcon)
+        if (manual != null && looksLikeGlyph(manual)) return tintGlyph(manual, tint)
+
+        val loaded = loadViaIconLoadDrawable(pkg, smallIcon)
+        if (loaded != null && looksLikeGlyph(loaded)) return tintGlyph(loaded, tint)
+
+        Log.d("HyperIslandPro", "Pill smallIcon rejected for $pkg: manual=${manual?.javaClass?.simpleName}, loaded=${loaded?.javaClass?.simpleName}")
+        return null
+    }
+
+    private fun loadSmallIconByResource(pkg: String, icon: Icon): Drawable? {
+        return try {
+            val type = getIconTypeCompat(icon)
+            if (type != 2) return null // Icon.TYPE_RESOURCE = 2
+            val resId = getIconResIdCompat(icon)
+            if (resId == null || resId == 0) return null
+            val resPkg = getIconResPackageCompat(icon).ifBlank { pkg }
+            val res = packageManager.getResourcesForApplication(resPkg)
+            @Suppress("DEPRECATION")
+            res.getDrawable(resId, null)?.mutate()
+        } catch (e: Exception) {
+            Log.d("HyperIslandPro", "Pill manual smallIcon load failed for $pkg: ${e.message}")
+            null
+        }
+    }
+
+    private fun loadViaIconLoadDrawable(pkg: String, icon: Icon): Drawable? {
+        return try {
+            val iconContext = try { createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY) } catch (_: Exception) { this }
+            icon.loadDrawable(iconContext)?.mutate()
+        } catch (_: Exception) {
+            try { icon.loadDrawable(this)?.mutate() } catch (_: Exception) { null }
+        }
+    }
+
+    private fun getIconTypeCompat(icon: Icon): Int? = try {
+        icon.javaClass.getMethod("getType").invoke(icon) as? Int
     } catch (_: Exception) { null }
+
+    private fun getIconResIdCompat(icon: Icon): Int? = try {
+        icon.javaClass.getMethod("getResId").invoke(icon) as? Int
+    } catch (_: Exception) { null }
+
+    private fun getIconResPackageCompat(icon: Icon): String = try {
+        icon.javaClass.getMethod("getResPackage").invoke(icon)?.toString().orEmpty()
+    } catch (_: Exception) { "" }
+
+    private fun looksLikeGlyph(drawable: Drawable): Boolean {
+        return try {
+            val size = 64
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            val copy = drawable.constantState?.newDrawable()?.mutate() ?: drawable.mutate()
+            copy.setBounds(0, 0, size, size)
+            copy.draw(canvas)
+
+            fun alphaAt(x: Int, y: Int) = Color.alpha(bmp.getPixel(x, y))
+            val cornerTransparent = listOf(
+                alphaAt(2, 2), alphaAt(size - 3, 2), alphaAt(2, size - 3), alphaAt(size - 3, size - 3)
+            ).all { it < 20 }
+
+            var nonTransparent = 0
+            var total = 0
+            var x = 0
+            while (x < size) {
+                var y = 0
+                while (y < size) {
+                    total++
+                    if (Color.alpha(bmp.getPixel(x, y)) > 24) nonTransparent++
+                    y += 2
+                }
+                x += 2
+            }
+            val fraction = nonTransparent.toFloat() / total.toFloat().coerceAtLeast(1f)
+            bmp.recycle()
+            cornerTransparent && fraction in 0.025f..0.72f
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun tintGlyph(drawable: Drawable, tint: Int): Drawable {
+        val d = drawable.mutate()
+        d.setTint(tint)
+        d.setTintMode(PorterDuff.Mode.SRC_IN)
+        d.colorFilter = PorterDuffColorFilter(tint, PorterDuff.Mode.SRC_IN)
+        return d
+    }
 
     private fun loadLauncherPillIcon(pkg: String) = try {
         packageManager.getApplicationIcon(pkg)
     } catch (_: Exception) { null }
 
-    private fun loadGenericPillGlyph() = try {
-        val d = getDrawable(android.R.drawable.ic_dialog_info)?.mutate()
-        d?.setTint(Color.WHITE)
-        d?.setTintMode(PorterDuff.Mode.SRC_IN)
-        d
+    private fun loadValidatedAdaptiveForeground(pkg: String) = try {
+        val icon = packageManager.getApplicationIcon(pkg)
+        val foreground = if (Build.VERSION.SDK_INT >= 26 && icon is AdaptiveIconDrawable) icon.foreground?.mutate() else null
+        if (foreground != null && looksLikeGlyph(foreground)) tintGlyph(foreground, getPillIconTint(pkg)) else null
     } catch (_: Exception) { null }
+
+    private fun loadGenericPillGlyph(pkg: String) = object : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = getPillIconTint(pkg)
+        }
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            strokeWidth = dp(2).toFloat()
+            color = getPillIconTint(pkg)
+        }
+        private val bubble = RectF()
+        private val tail = Path()
+
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val w = b.width().toFloat()
+            val h = b.height().toFloat()
+            if (w <= 0f || h <= 0f) return
+            val l = b.left.toFloat()
+            val t = b.top.toFloat()
+            bubble.set(l + w * 0.16f, t + h * 0.18f, l + w * 0.84f, t + h * 0.66f)
+            canvas.drawRoundRect(bubble, w * 0.16f, w * 0.16f, strokePaint)
+            tail.reset()
+            tail.moveTo(l + w * 0.34f, t + h * 0.64f)
+            tail.lineTo(l + w * 0.23f, t + h * 0.84f)
+            tail.lineTo(l + w * 0.50f, t + h * 0.66f)
+            canvas.drawPath(tail, strokePaint)
+        }
+
+        override fun getIntrinsicWidth(): Int = dp(32)
+        override fun getIntrinsicHeight(): Int = dp(32)
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+            strokePaint.alpha = alpha
+        }
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+            paint.colorFilter = colorFilter
+            strokePaint.colorFilter = colorFilter
+        }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
 
     private fun getPillIconTint(pkg: String): Int = when {
         pkg.contains("telegram", true) -> Color.rgb(42, 171, 238)
