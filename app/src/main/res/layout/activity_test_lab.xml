@@ -195,7 +195,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
-            android:text="Pill Icon Rendering Lab (temporary)"
+            android:text="Pill Icon Rendering Lab (temporary test)"
             android:textColor="@color/text_primary"
             android:textStyle="bold"
             android:textSize="18sp" />
