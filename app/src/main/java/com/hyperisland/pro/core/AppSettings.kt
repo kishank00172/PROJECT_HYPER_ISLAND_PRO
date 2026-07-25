@@ -48,7 +48,7 @@ object AppSettings {
     const val PILL_ICON_ADAPTIVE_FOREGROUND = 2
     const val PILL_ICON_LAUNCHER = 3
     const val PILL_ICON_GENERIC = 4
-    const val DEFAULT_PILL_ICON_RENDER_MODE = PILL_ICON_AUTO // TestLab-selectable pill icon renderer
+    const val DEFAULT_PILL_ICON_RENDER_MODE = PILL_ICON_AUTO // TestLab-selectable pill icon renderer for compact island
 
     private const val CURRENT_DEFAULTS_VERSION = 5
 
