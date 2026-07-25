@@ -146,7 +146,7 @@ class TestLabActivity : Activity() {
     }
 
     private fun bindPillIconLab() {
-        // Temporary lab for comparing automatic pill icon render paths.
+        // Temporary lab for comparing automatic compact pill icon render paths.
         val modeGroup = findViewById<RadioGroup>(R.id.radioPillIconMode)
         modeGroup.check(idForPillIconMode(AppSettings.getPillIconRenderMode(this)))
         modeGroup.setOnCheckedChangeListener { _, checkedId ->
