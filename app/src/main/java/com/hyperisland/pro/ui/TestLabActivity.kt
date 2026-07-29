@@ -177,17 +177,17 @@ class TestLabActivity : Activity() {
     }
 
     private fun idForPillIconMode(mode: Int): Int = when (mode) {
-        AppSettings.PILL_ICON_SMALL_ONLY -> R.id.radioPillIconSmallOnly
-        AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND -> R.id.radioPillIconAdaptive
-        AppSettings.PILL_ICON_LAUNCHER -> R.id.radioPillIconLauncher
+        AppSettings.PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION -> R.id.radioPillIconSmallOnly
+        AppSettings.PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION -> R.id.radioPillIconAdaptive
+        AppSettings.PILL_ICON_LEGACY_NO_VALIDATION -> R.id.radioPillIconLauncher
         AppSettings.PILL_ICON_GENERIC -> R.id.radioPillIconGeneric
         else -> R.id.radioPillIconAuto
     }
 
     private fun pillIconModeForId(id: Int): Int = when (id) {
-        R.id.radioPillIconSmallOnly -> AppSettings.PILL_ICON_SMALL_ONLY
-        R.id.radioPillIconAdaptive -> AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND
-        R.id.radioPillIconLauncher -> AppSettings.PILL_ICON_LAUNCHER
+        R.id.radioPillIconSmallOnly -> AppSettings.PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION
+        R.id.radioPillIconAdaptive -> AppSettings.PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION
+        R.id.radioPillIconLauncher -> AppSettings.PILL_ICON_LEGACY_NO_VALIDATION
         R.id.radioPillIconGeneric -> AppSettings.PILL_ICON_GENERIC
         else -> AppSettings.PILL_ICON_AUTO
     }
