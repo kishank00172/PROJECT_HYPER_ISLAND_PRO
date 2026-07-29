@@ -213,7 +213,7 @@
                 android:id="@+id/radioPillIconAuto"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Auto: smallIcon → adaptive → generic"
+                android:text="Auto validated: manual → loadDrawable → adaptive → generic"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
@@ -221,7 +221,7 @@
                 android:id="@+id/radioPillIconSmallOnly"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="SmallIcon only (real notifications best)"
+                android:text="Manual resource — NO validation"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
@@ -229,7 +229,7 @@
                 android:id="@+id/radioPillIconAdaptive"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Adaptive foreground"
+                android:text="loadDrawable — NO validation"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
@@ -237,7 +237,7 @@
                 android:id="@+id/radioPillIconLauncher"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Launcher icon"
+                android:text="Legacy notification.icon — NO validation"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
