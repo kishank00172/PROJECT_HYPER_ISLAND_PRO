@@ -2211,56 +2211,82 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
-        // TestLab-selectable pill icon renderer. Auto now means:
-        // 1) manual TYPE_RESOURCE load from source app resources + glyph validation
-        // 2) Icon.loadDrawable package-context + glyph validation
-        // 3) adaptive foreground only if it validates as a glyph
-        // 4) clean generic chat glyph fallback — never ugly launcher square in Auto.
-        when (AppSettings.getPillIconRenderMode(this)) {
-            AppSettings.PILL_ICON_SMALL_ONLY -> loadSmallNotificationGlyph(pkg, smallIcon) ?: loadGenericPillGlyph(pkg)
-            AppSettings.PILL_ICON_ADAPTIVE_FOREGROUND -> loadValidatedAdaptiveForeground(pkg) ?: loadGenericPillGlyph(pkg)
-            AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg) ?: loadGenericPillGlyph(pkg)
-            AppSettings.PILL_ICON_GENERIC -> loadGenericPillGlyph(pkg)
-            else -> loadSmallNotificationGlyph(pkg, smallIcon)
-                ?: loadValidatedAdaptiveForeground(pkg)
-                ?: loadGenericPillGlyph(pkg)
-        }
-    } catch (_: Exception) {
-        loadGenericPillGlyph(pkg)
-    }
-
-    private fun loadSmallNotificationGlyph(pkg: String, smallIcon: Icon?): Drawable? {
         val cached = PillIconCache.get(pkg) // lets TestLab reuse the latest real smallIcon/legacy icon
         val iconToUse = smallIcon ?: cached?.smallIcon
         val legacyResId = cached?.legacyIconResId ?: 0
+        val mode = AppSettings.getPillIconRenderMode(this)
         val tint = getPillIconTint(pkg)
 
-        val manual = loadSmallIconByResource(pkg, iconToUse, legacyResId)
-        if (manual != null && looksLikeGlyph(manual)) return tintGlyph(manual, tint)
+        val manual = { loadManualResourceDrawable(pkg, iconToUse) }
+        val loaded = { iconToUse?.let { loadViaIconLoadDrawable(pkg, it) } }
+        val legacy = { loadLegacyResourceDrawable(pkg, legacyResId) }
+        val adaptive = { loadPillDisplayIcon(pkg) }
+        val generic = { loadGenericPillGlyph(pkg) }
 
-        val loaded = iconToUse?.let { loadViaIconLoadDrawable(pkg, it) }
-        if (loaded != null && looksLikeGlyph(loaded)) return tintGlyph(loaded, tint)
+        val chosen = when (mode) {
+            AppSettings.PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION -> manual()
+            AppSettings.PILL_ICON_MANUAL_RESOURCE_VALIDATED -> manual()?.takeIf { looksLikeGlyph(it) }
+            AppSettings.PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION -> loaded()
+            AppSettings.PILL_ICON_LOAD_DRAWABLE_VALIDATED -> loaded()?.takeIf { looksLikeGlyph(it) }
+            AppSettings.PILL_ICON_LEGACY_NO_VALIDATION -> legacy()
+            AppSettings.PILL_ICON_ADAPTIVE_NO_VALIDATION -> adaptive()
+            AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg)
+            AppSettings.PILL_ICON_GENERIC -> generic()
+            else -> {
+                manual()?.takeIf { looksLikeGlyph(it) }
+                    ?: loaded()?.takeIf { looksLikeGlyph(it) }
+                    ?: adaptive()?.takeIf { looksLikeGlyph(it) }
+                    ?: generic()
+            }
+        }
 
         Log.d(
             "HyperIslandPro",
-            "Pill smallIcon rejected for $pkg: cached=${cached != null}, legacy=$legacyResId, manual=${manual?.javaClass?.simpleName}, loaded=${loaded?.javaClass?.simpleName}"
+            "PillIcon mode=${AppSettings.getPillIconRenderModeName(mode)} pkg=$pkg cached=${cached != null} legacy=$legacyResId chosen=${chosen?.javaClass?.simpleName}"
         )
-        return null
+
+        if (mode == AppSettings.PILL_ICON_LAUNCHER) chosen else chosen?.let { tintGlyph(it, tint) }
+    } catch (e: Exception) {
+        Log.d("HyperIslandPro", "Pill icon resolver failed for $pkg: ${e.message}")
+        loadGenericPillGlyph(pkg)
     }
 
-    private fun loadSmallIconByResource(pkg: String, icon: Icon?, legacyResId: Int): Drawable? {
+    private fun loadManualResourceDrawable(pkg: String, icon: Icon?): Drawable? {
         return try {
             val type = icon?.let { getIconTypeCompat(it) }
-            val iconResId = if (type == 2) icon?.let { getIconResIdCompat(it) } ?: 0 else 0
-            val resId = if (iconResId != 0) iconResId else legacyResId
+            if (type != 2) return null // Icon.TYPE_RESOURCE = 2
+            val resId = icon.let { getIconResIdCompat(it) } ?: 0
             if (resId == 0) return null
-            val resPkg = if (iconResId != 0) icon?.let { getIconResPackageCompat(it) }.orEmpty().ifBlank { pkg } else pkg
-            val res = packageManager.getResourcesForApplication(resPkg)
-            @Suppress("DEPRECATION")
-            res.getDrawable(resId, null)?.mutate()
+            val resPkg = icon.let { getIconResPackageCompat(it) }.ifBlank { pkg }
+            loadDrawableFromPackageResource(resPkg, resId)
         } catch (e: Exception) {
-            Log.d("HyperIslandPro", "Pill manual smallIcon load failed for $pkg: ${e.message}")
+            Log.d("HyperIslandPro", "manualResource failed for $pkg: ${e.message}")
             null
+        }
+    }
+
+    private fun loadLegacyResourceDrawable(pkg: String, legacyResId: Int): Drawable? {
+        if (legacyResId == 0) return null
+        return try {
+            loadDrawableFromPackageResource(pkg, legacyResId)
+        } catch (e: Exception) {
+            Log.d("HyperIslandPro", "legacyResource failed for $pkg/$legacyResId: ${e.message}")
+            null
+        }
+    }
+
+    private fun loadDrawableFromPackageResource(resPkg: String, resId: Int): Drawable? {
+        return try {
+            val pkgContext = createPackageContext(resPkg, Context.CONTEXT_IGNORE_SECURITY)
+            pkgContext.getDrawable(resId)?.mutate()
+        } catch (_: Exception) {
+            try {
+                val res = packageManager.getResourcesForApplication(resPkg)
+                @Suppress("DEPRECATION")
+                res.getDrawable(resId, null)?.mutate()
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 
@@ -2295,10 +2321,7 @@ class HyperAccessibilityService : AccessibilityService() {
             copy.draw(canvas)
 
             fun alphaAt(x: Int, y: Int) = Color.alpha(bmp.getPixel(x, y))
-            val cornerTransparent = listOf(
-                alphaAt(2, 2), alphaAt(size - 3, 2), alphaAt(2, size - 3), alphaAt(size - 3, size - 3)
-            ).all { it < 20 }
-
+            val cornerAlphaMax = maxOf(alphaAt(2, 2), alphaAt(size - 3, 2), alphaAt(2, size - 3), alphaAt(size - 3, size - 3))
             var nonTransparent = 0
             var total = 0
             var x = 0
@@ -2306,14 +2329,16 @@ class HyperAccessibilityService : AccessibilityService() {
                 var y = 0
                 while (y < size) {
                     total++
-                    if (Color.alpha(bmp.getPixel(x, y)) > 24) nonTransparent++
+                    if (Color.alpha(bmp.getPixel(x, y)) > 18) nonTransparent++
                     y += 2
                 }
                 x += 2
             }
             val fraction = nonTransparent.toFloat() / total.toFloat().coerceAtLeast(1f)
             bmp.recycle()
-            cornerTransparent && fraction in 0.025f..0.72f
+            val pass = cornerAlphaMax < 80 && fraction in 0.005f..0.86f
+            Log.d("HyperIslandPro", "PillGlyphCheck ${drawable.javaClass.simpleName}: corner=$cornerAlphaMax fraction=$fraction pass=$pass")
+            pass
         } catch (_: Exception) {
             false
         }
@@ -2329,12 +2354,6 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun loadLauncherPillIcon(pkg: String) = try {
         packageManager.getApplicationIcon(pkg)
-    } catch (_: Exception) { null }
-
-    private fun loadValidatedAdaptiveForeground(pkg: String) = try {
-        val icon = packageManager.getApplicationIcon(pkg)
-        val foreground = if (Build.VERSION.SDK_INT >= 26 && icon is AdaptiveIconDrawable) icon.foreground?.mutate() else null
-        if (foreground != null && looksLikeGlyph(foreground)) tintGlyph(foreground, getPillIconTint(pkg)) else null
     } catch (_: Exception) { null }
 
     private fun loadGenericPillGlyph(pkg: String) = object : Drawable() {
@@ -2370,15 +2389,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
         override fun getIntrinsicWidth(): Int = dp(32)
         override fun getIntrinsicHeight(): Int = dp(32)
-
-        override fun setAlpha(alpha: Int) {
-            paint.alpha = alpha
-            strokePaint.alpha = alpha
-        }
-        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
-            paint.colorFilter = colorFilter
-            strokePaint.colorFilter = colorFilter
-        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha; strokePaint.alpha = alpha }
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter; strokePaint.colorFilter = colorFilter }
         @Deprecated("Deprecated in Java")
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
