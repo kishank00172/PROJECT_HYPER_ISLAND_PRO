@@ -44,11 +44,15 @@ object AppSettings {
     const val DEFAULT_REPLY_LIQUID_EDGE_GAP_DP = 13
 
     const val PILL_ICON_AUTO = 0
-    const val PILL_ICON_SMALL_ONLY = 1
-    const val PILL_ICON_ADAPTIVE_FOREGROUND = 2
-    const val PILL_ICON_LAUNCHER = 3
-    const val PILL_ICON_GENERIC = 4
-    const val DEFAULT_PILL_ICON_RENDER_MODE = PILL_ICON_AUTO // TestLab-selectable pill icon renderer for compact island
+    const val PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION = 1
+    const val PILL_ICON_MANUAL_RESOURCE_VALIDATED = 2
+    const val PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION = 3
+    const val PILL_ICON_LOAD_DRAWABLE_VALIDATED = 4
+    const val PILL_ICON_LEGACY_NO_VALIDATION = 5
+    const val PILL_ICON_ADAPTIVE_NO_VALIDATION = 6
+    const val PILL_ICON_LAUNCHER = 7
+    const val PILL_ICON_GENERIC = 8
+    const val DEFAULT_PILL_ICON_RENDER_MODE = PILL_ICON_AUTO // TestLab-selectable pill icon resolver for compact island
 
     private const val CURRENT_DEFAULTS_VERSION = 5
 
@@ -150,12 +154,16 @@ object AppSettings {
     }
 
     fun getPillIconRenderModeName(mode: Int): String = when (mode.coerceIn(PILL_ICON_AUTO, PILL_ICON_GENERIC)) {
-        PILL_ICON_AUTO -> "Auto"
-        PILL_ICON_SMALL_ONLY -> "SmallIcon only"
-        PILL_ICON_ADAPTIVE_FOREGROUND -> "Adaptive foreground"
+        PILL_ICON_AUTO -> "Auto validated"
+        PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION -> "Manual resource no validation"
+        PILL_ICON_MANUAL_RESOURCE_VALIDATED -> "Manual resource validated"
+        PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION -> "loadDrawable no validation"
+        PILL_ICON_LOAD_DRAWABLE_VALIDATED -> "loadDrawable validated"
+        PILL_ICON_LEGACY_NO_VALIDATION -> "Legacy res no validation"
+        PILL_ICON_ADAPTIVE_NO_VALIDATION -> "Adaptive foreground no validation"
         PILL_ICON_LAUNCHER -> "Launcher icon"
         PILL_ICON_GENERIC -> "Generic glyph"
-        else -> "Auto"
+        else -> "Auto validated"
     }
 
     fun resetIslandDefaults(context: Context) {
