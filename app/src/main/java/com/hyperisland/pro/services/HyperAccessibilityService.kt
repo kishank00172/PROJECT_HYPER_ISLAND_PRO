@@ -13,6 +13,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.Path
@@ -22,6 +23,7 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
@@ -84,6 +86,65 @@ class HyperAccessibilityService : AccessibilityService() {
         val packageName: String, val notificationKey: String?, val appName: String, val title: String, val message: String,
         val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?
     )
+
+    private class InstagramGradientCameraDrawable : Drawable() {
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+        private val rect = RectF()
+
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val w = b.width().toFloat()
+            val h = b.height().toFloat()
+            if (w <= 0f || h <= 0f) return
+
+            val gradient = LinearGradient(
+                b.left.toFloat(), b.bottom.toFloat(), b.right.toFloat(), b.top.toFloat(),
+                intArrayOf(
+                    Color.rgb(252, 175, 69),   // orange
+                    Color.rgb(225, 48, 108),   // pink
+                    Color.rgb(131, 58, 180)    // purple
+                ),
+                floatArrayOf(0f, 0.52f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            strokePaint.shader = gradient
+            fillPaint.shader = gradient
+            strokePaint.strokeWidth = w * 0.085f
+
+            rect.set(
+                b.left + w * 0.18f,
+                b.top + h * 0.18f,
+                b.right - w * 0.18f,
+                b.bottom - h * 0.18f
+            )
+            canvas.drawRoundRect(rect, w * 0.20f, h * 0.20f, strokePaint)
+            canvas.drawCircle(b.left + w * 0.50f, b.top + h * 0.52f, w * 0.145f, strokePaint)
+            canvas.drawCircle(b.left + w * 0.69f, b.top + h * 0.33f, w * 0.045f, fillPaint)
+
+            strokePaint.shader = null
+            fillPaint.shader = null
+        }
+
+        override fun getIntrinsicWidth(): Int = 64
+        override fun getIntrinsicHeight(): Int = 64
+        override fun setAlpha(alpha: Int) {
+            strokePaint.alpha = alpha
+            fillPaint.alpha = alpha
+        }
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+            strokePaint.colorFilter = colorFilter
+            fillPaint.colorFilter = colorFilter
+        }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
 
     private class ReplyMorphView(context: Context) : View(context) {
         private val rect = RectF()
@@ -2217,35 +2278,41 @@ class HyperAccessibilityService : AccessibilityService() {
         val mode = AppSettings.getPillIconRenderMode(this)
         val tint = getPillIconTint(pkg)
 
-        val manual = { loadManualResourceDrawable(pkg, iconToUse) }
-        val loaded = { iconToUse?.let { loadViaIconLoadDrawable(pkg, it) } }
-        val legacy = { loadLegacyResourceDrawable(pkg, legacyResId) }
-        val adaptive = { loadPillDisplayIcon(pkg) }
-        val generic = { loadGenericPillGlyph(pkg) }
+        if (mode == AppSettings.PILL_ICON_AUTO && pkg.contains("instagram", true)) {
+            // Instagram's brand identity is the gradient. Notification smallIcon is monochrome,
+            // so Auto mode uses a clean gradient camera glyph instead of a flat red icon in the pill.
+            InstagramGradientCameraDrawable()
+        } else {
+            val manual = { loadManualResourceDrawable(pkg, iconToUse) }
+            val loaded = { iconToUse?.let { loadViaIconLoadDrawable(pkg, it) } }
+            val legacy = { loadLegacyResourceDrawable(pkg, legacyResId) }
+            val adaptive = { loadPillDisplayIcon(pkg) }
+            val generic = { loadGenericPillGlyph(pkg) }
 
-        val chosen = when (mode) {
-            AppSettings.PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION -> manual()
-            AppSettings.PILL_ICON_MANUAL_RESOURCE_VALIDATED -> manual()?.takeIf { looksLikeGlyph(it) }
-            AppSettings.PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION -> loaded()
-            AppSettings.PILL_ICON_LOAD_DRAWABLE_VALIDATED -> loaded()?.takeIf { looksLikeGlyph(it) }
-            AppSettings.PILL_ICON_LEGACY_NO_VALIDATION -> legacy()
-            AppSettings.PILL_ICON_ADAPTIVE_NO_VALIDATION -> adaptive()
-            AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg)
-            AppSettings.PILL_ICON_GENERIC -> generic()
-            else -> {
-                manual()?.takeIf { looksLikeGlyph(it) }
-                    ?: loaded()?.takeIf { looksLikeGlyph(it) }
-                    ?: adaptive()?.takeIf { looksLikeGlyph(it) }
-                    ?: generic()
+            val chosen = when (mode) {
+                AppSettings.PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION -> manual()
+                AppSettings.PILL_ICON_MANUAL_RESOURCE_VALIDATED -> manual()?.takeIf { looksLikeGlyph(it) }
+                AppSettings.PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION -> loaded()
+                AppSettings.PILL_ICON_LOAD_DRAWABLE_VALIDATED -> loaded()?.takeIf { looksLikeGlyph(it) }
+                AppSettings.PILL_ICON_LEGACY_NO_VALIDATION -> legacy()
+                AppSettings.PILL_ICON_ADAPTIVE_NO_VALIDATION -> adaptive()
+                AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg)
+                AppSettings.PILL_ICON_GENERIC -> generic()
+                else -> {
+                    manual()?.takeIf { looksLikeGlyph(it) }
+                        ?: loaded()?.takeIf { looksLikeGlyph(it) }
+                        ?: adaptive()?.takeIf { looksLikeGlyph(it) }
+                        ?: generic()
+                }
             }
+
+            Log.d(
+                "HyperIslandPro",
+                "PillIcon mode=${AppSettings.getPillIconRenderModeName(mode)} pkg=$pkg cached=${cached != null} legacy=$legacyResId chosen=${chosen?.javaClass?.simpleName}"
+            )
+
+            if (mode == AppSettings.PILL_ICON_LAUNCHER) chosen else chosen?.let { tintGlyph(it, tint) }
         }
-
-        Log.d(
-            "HyperIslandPro",
-            "PillIcon mode=${AppSettings.getPillIconRenderModeName(mode)} pkg=$pkg cached=${cached != null} legacy=$legacyResId chosen=${chosen?.javaClass?.simpleName}"
-        )
-
-        if (mode == AppSettings.PILL_ICON_LAUNCHER) chosen else chosen?.let { tintGlyph(it, tint) }
     } catch (e: Exception) {
         Log.d("HyperIslandPro", "Pill icon resolver failed for $pkg: ${e.message}")
         loadGenericPillGlyph(pkg)
