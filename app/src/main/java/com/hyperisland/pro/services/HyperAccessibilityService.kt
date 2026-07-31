@@ -1966,6 +1966,15 @@ class HyperAccessibilityService : AccessibilityService() {
             }?.start()
             gridRoot?.visibility = View.VISIBLE
             gridRoot?.alpha = 0f
+        } else if (target == IslandStage.STAGE2_PING) {
+            // Full -> pill: keep badge visible and fade expanded content away.
+            // Without this, expanded title/message gets clipped inside the small pill.
+            pillPreviewRoot?.animate()?.cancel()
+            pillPreviewRoot?.visibility = View.VISIBLE
+            pillPreviewRoot?.alpha = 1f
+            pillPreviewRoot?.bringToFront()
+            gridRoot?.animate()?.cancel()
+            gridRoot?.visibility = View.VISIBLE
         } else if (target == IslandStage.STAGE1_IDLE) {
             pillPreviewRoot?.animate()?.cancel()
             pillPreviewRoot?.animate()?.alpha(0f)?.setDuration(160L)?.withEndAction {
@@ -1984,8 +1993,13 @@ class HyperAccessibilityService : AccessibilityService() {
                 updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
                 if (target == IslandStage.STAGE3_FULL && notificationMode) {
                     gridRoot?.alpha = t
+                    pillPreviewRoot?.alpha = 1f - t
+                } else if (target == IslandStage.STAGE2_PING && notificationMode) {
+                    gridRoot?.alpha = 1f - t
+                    pillPreviewRoot?.alpha = 1f
                 } else if (target == IslandStage.STAGE1_IDLE && notificationMode) {
                     gridRoot?.alpha = 1f - t
+                    pillPreviewRoot?.alpha = 1f - t
                 }
                 islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat())
             }
@@ -1993,7 +2007,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 override fun onAnimationEnd(a: Animator) {
                     if (target == IslandStage.STAGE1_IDLE) {
                         gridRoot?.visibility = View.GONE
+                        pillPreviewRoot?.visibility = View.GONE
                         notificationMode = false
+                    }
+                    if (target == IslandStage.STAGE2_PING) {
+                        gridRoot?.visibility = View.GONE
+                        gridRoot?.alpha = 0f
+                        pillPreviewRoot?.visibility = View.VISIBLE
+                        pillPreviewRoot?.alpha = 1f
+                        pillPreviewRoot?.bringToFront()
                     }
                     if (target == IslandStage.STAGE3_FULL) {
                         gridRoot?.alpha = 1f
