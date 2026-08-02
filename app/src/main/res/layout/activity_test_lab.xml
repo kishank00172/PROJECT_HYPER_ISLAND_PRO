@@ -198,7 +198,8 @@
             android:text="Pill Icon Rendering Lab (temporary test)"
             android:textColor="@color/text_primary"
             android:textStyle="bold"
-            android:textSize="18sp" />
+            android:textSize="18sp"
+            android:visibility="gone" />
 
         <RadioGroup
             android:id="@+id/radioPillIconMode"
@@ -207,7 +208,8 @@
             android:layout_marginTop="10dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="14dp"
+            android:visibility="gone">
 
             <RadioButton
                 android:id="@+id/radioPillIconAuto"
@@ -257,7 +259,8 @@
             android:layout_marginTop="10dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="14dp"
+            android:visibility="gone">
 
             <RadioButton
                 android:id="@+id/radioPillAppTelegram"
@@ -300,7 +303,8 @@
             android:background="@drawable/bg_button_primary"
             android:text="PREVIEW PILL ICON"
             android:textColor="@color/amoled_black"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <Button
             android:id="@+id/btnPreviewReplyFirst"
