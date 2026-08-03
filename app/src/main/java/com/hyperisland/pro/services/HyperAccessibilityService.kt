@@ -421,7 +421,8 @@ class HyperAccessibilityService : AccessibilityService() {
             val shadeOpen = checkNotificationShadeState()
             if (shadeOpen != isShadeOpen) {
                 isShadeOpen = shadeOpen
-                this@HyperAccessibilityService.visualRoot?.animate()?.alpha(if (isShadeOpen) 0f else 1f)?.setDuration(if (isShadeOpen) 150 else 250)?.start()
+                this@HyperAccessibilityService.visualRoot?.animate()?.alpha(1f)?.setDuration(120)?.start()
+                if (isShadeOpen) markIslandNotificationsSeenFromShade()
             }
         }
         if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
@@ -433,6 +434,22 @@ class HyperAccessibilityService : AccessibilityService() {
             val appName = getAppName(pkg)
             val (t, m) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
             postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, System.currentTimeMillis(), null, emptyList(), null)
+        }
+    }
+
+    private fun markIslandNotificationsSeenFromShade() {
+        // User opened notification shade, so compact pill count is considered read/seen.
+        if (isReplyMode) return
+        autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
+        autoCollapseRunnable = null
+        notificationQueue.clear()
+        pillUnreadCount = 0
+        pillPreviewCount?.visibility = View.GONE
+        pillPreviewRoot?.visibility = View.GONE
+        pillPreviewRoot?.alpha = 0f
+        isProcessingQueue = false
+        if (currentStage == IslandStage.STAGE2_PING) {
+            setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
         }
     }
 
