@@ -439,17 +439,44 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun markIslandNotificationsSeenFromShade() {
         // User opened notification shade, so compact pill count is considered read/seen.
+        // Do not snap-hide the pill badge; fade it out smoothly so the flow doesn't break.
         if (isReplyMode) return
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         autoCollapseRunnable = null
         notificationQueue.clear()
         pillUnreadCount = 0
-        pillPreviewCount?.visibility = View.GONE
-        pillPreviewRoot?.visibility = View.GONE
-        pillPreviewRoot?.alpha = 0f
         isProcessingQueue = false
-        if (currentStage == IslandStage.STAGE2_PING) {
-            setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
+
+        val root = pillPreviewRoot
+        if (root != null && root.visibility == View.VISIBLE && root.alpha > 0f) {
+            root.animate()?.setListener(null)
+            root.animate()?.cancel()
+            root.animate()
+                ?.alpha(0f)
+                ?.scaleX(0.92f)
+                ?.scaleY(0.92f)
+                ?.setDuration(220L)
+                ?.setInterpolator(collapseInterpolator)
+                ?.setListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        pillPreviewCount?.visibility = View.GONE
+                        root.visibility = View.GONE
+                        root.alpha = 0f
+                        root.scaleX = 1f
+                        root.scaleY = 1f
+                        if (currentStage == IslandStage.STAGE2_PING) {
+                            setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
+                        }
+                    }
+                })
+                ?.start()
+        } else {
+            pillPreviewCount?.visibility = View.GONE
+            pillPreviewRoot?.visibility = View.GONE
+            pillPreviewRoot?.alpha = 0f
+            if (currentStage == IslandStage.STAGE2_PING) {
+                setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
+            }
         }
     }
 
