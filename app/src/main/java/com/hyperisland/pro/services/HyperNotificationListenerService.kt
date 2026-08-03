@@ -46,9 +46,10 @@ class HyperNotificationListenerService : NotificationListenerService() {
 
         PillIconCache.record(pkg, notification.smallIcon, notification.icon) // cache real icon data for Pill Icon Lab
 
-        val appName = getAppName(pkg)
-        val title = (notification.extras.getCharSequence(Notification.EXTRA_TITLE) ?: "").toString().trim()
-        val message = (notification.extras.getCharSequence(Notification.EXTRA_TEXT) ?: "").toString().trim()
+        val extracted = NotificationContentExtractor.extract(this, sbn) ?: return // Phase 3.6 smart content
+        val appName = extracted.appName
+        val title = extracted.conversationTitle
+        val message = extracted.latestMessage
 
         if (title.isBlank() && message.isBlank()) return
         
