@@ -529,6 +529,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
+            if (isShadeOpen) {
+                // Notification shade is already open; user is looking at notifications.
+                // Do not create/update the pill badge for messages arriving while shade is open.
+                markIslandNotificationsSeenFromShade()
+                return@post
+            }
             val now = System.currentTimeMillis()
             if (source == "AccessibilityFallback" && now - lastPrimaryEventTime < 1500L) return@post
             if (source == "NotificationListener") lastPrimaryEventTime = now
