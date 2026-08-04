@@ -21,6 +21,7 @@ class TestLabActivity : Activity() {
         bindReplyAnimationLab()
         bindLiquidCalibration()
         bindPillIconLab()
+        bindShadePullLab()
 
         findViewById<Button>(R.id.btnExpandIsland).setOnClickListener { HyperAccessibilityService.expandIslandFromApp(this) }
         findViewById<Button>(R.id.btnCollapseIsland).setOnClickListener { HyperAccessibilityService.collapseIslandFromApp(this) }
@@ -190,6 +191,43 @@ class TestLabActivity : Activity() {
         R.id.radioPillIconLauncher -> AppSettings.PILL_ICON_LEGACY_NO_VALIDATION
         R.id.radioPillIconGeneric -> AppSettings.PILL_ICON_GENERIC
         else -> AppSettings.PILL_ICON_AUTO
+    }
+
+    private fun bindShadePullLab() {
+        // Compare shade-open pill clear animations on device.
+        val group = findViewById<RadioGroup>(R.id.radioShadePullMode)
+        group.check(idForShadePullMode(AppSettings.getShadePullAnimationMode(this)))
+        group.setOnCheckedChangeListener { _, checkedId ->
+            val mode = shadePullModeForId(checkedId)
+            AppSettings.setShadePullAnimationMode(this, mode)
+            Toast.makeText(this, "Shade pull: ${AppSettings.getShadePullAnimationModeName(mode)}", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.btnPreviewShadePull).setOnClickListener {
+            if (!AppSettings.isIslandEnabled(this)) {
+                Toast.makeText(this, "Turn island ON first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val ok = HyperAccessibilityService.previewShadePullFromApp(this)
+            if (!ok) Toast.makeText(this, "Accessibility service not connected", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun idForShadePullMode(mode: Int): Int = when (mode) {
+        AppSettings.SHADE_PULL_SIMPLE -> R.id.radioShadePullSimple
+        AppSettings.SHADE_PULL_MY_ABSORB -> R.id.radioShadePullMyAbsorb
+        AppSettings.SHADE_PULL_KIMI_VACUUM -> R.id.radioShadePullKimi
+        AppSettings.SHADE_PULL_DEEPSEEK_MAGNETIC -> R.id.radioShadePullDeepSeek
+        AppSettings.SHADE_PULL_GPT_HIGH -> R.id.radioShadePullGptHigh
+        else -> R.id.radioShadePullGptHigh
+    }
+
+    private fun shadePullModeForId(id: Int): Int = when (id) {
+        R.id.radioShadePullSimple -> AppSettings.SHADE_PULL_SIMPLE
+        R.id.radioShadePullMyAbsorb -> AppSettings.SHADE_PULL_MY_ABSORB
+        R.id.radioShadePullKimi -> AppSettings.SHADE_PULL_KIMI_VACUUM
+        R.id.radioShadePullDeepSeek -> AppSettings.SHADE_PULL_DEEPSEEK_MAGNETIC
+        R.id.radioShadePullGptHigh -> AppSettings.SHADE_PULL_GPT_HIGH
+        else -> AppSettings.DEFAULT_SHADE_PULL_ANIMATION_MODE
     }
 
     private fun previewReplyAnimation(replySecond: Boolean) {
