@@ -25,6 +25,7 @@ object AppSettings {
     private const val KEY_REPLY_LIQUID_LEFT_GAP_DP = "reply_liquid_left_gap_dp"
     private const val KEY_REPLY_LIQUID_EDGE_GAP_DP = "reply_liquid_edge_gap_dp"
     private const val KEY_PILL_ICON_RENDER_MODE = "pill_icon_render_mode"
+    private const val KEY_SHADE_PULL_ANIMATION_MODE = "shade_pull_animation_mode"
 
     const val ENGINE_NONE = "none"
     const val ENGINE_ACCESSIBILITY = "accessibility"
@@ -53,6 +54,13 @@ object AppSettings {
     const val PILL_ICON_LAUNCHER = 7
     const val PILL_ICON_GENERIC = 8
     const val DEFAULT_PILL_ICON_RENDER_MODE = PILL_ICON_AUTO // TestLab-selectable pill icon resolver for compact island
+
+    const val SHADE_PULL_SIMPLE = 0
+    const val SHADE_PULL_MY_ABSORB = 1
+    const val SHADE_PULL_KIMI_VACUUM = 2
+    const val SHADE_PULL_DEEPSEEK_MAGNETIC = 3
+    const val SHADE_PULL_GPT_HIGH = 4
+    const val DEFAULT_SHADE_PULL_ANIMATION_MODE = SHADE_PULL_GPT_HIGH // default shade-pull preset
 
     private const val CURRENT_DEFAULTS_VERSION = 5
 
@@ -164,6 +172,24 @@ object AppSettings {
         PILL_ICON_LAUNCHER -> "Launcher icon"
         PILL_ICON_GENERIC -> "Generic glyph"
         else -> "Auto validated"
+    }
+
+    fun getShadePullAnimationMode(context: Context): Int {
+        return prefs(context).getInt(KEY_SHADE_PULL_ANIMATION_MODE, DEFAULT_SHADE_PULL_ANIMATION_MODE)
+            .coerceIn(SHADE_PULL_SIMPLE, SHADE_PULL_GPT_HIGH)
+    }
+
+    fun setShadePullAnimationMode(context: Context, mode: Int) {
+        prefs(context).edit().putInt(KEY_SHADE_PULL_ANIMATION_MODE, mode.coerceIn(SHADE_PULL_SIMPLE, SHADE_PULL_GPT_HIGH)).apply()
+    }
+
+    fun getShadePullAnimationModeName(mode: Int): String = when (mode.coerceIn(SHADE_PULL_SIMPLE, SHADE_PULL_GPT_HIGH)) {
+        SHADE_PULL_SIMPLE -> "Simple fade/scale"
+        SHADE_PULL_MY_ABSORB -> "Shade Pull Absorb"
+        SHADE_PULL_KIMI_VACUUM -> "Kimi Vacuum Extraction"
+        SHADE_PULL_DEEPSEEK_MAGNETIC -> "DeepSeek Magnetic Pull"
+        SHADE_PULL_GPT_HIGH -> "GPT High Magnetic"
+        else -> "GPT High Magnetic"
     }
 
     fun resetIslandDefaults(context: Context) {
