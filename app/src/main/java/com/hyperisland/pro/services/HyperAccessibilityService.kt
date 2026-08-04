@@ -342,6 +342,8 @@ class HyperAccessibilityService : AccessibilityService() {
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
         fun previewPillIconFromApp(context: Context, packageName: String, count: Int) =
             instance?.run { postPreviewPillIcon(packageName, count); true } ?: false
+        fun previewShadePullFromApp(context: Context) =
+            instance?.run { postPreviewShadePull(); true } ?: false
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -439,7 +441,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun markIslandNotificationsSeenFromShade() {
         // User opened notification shade, so compact pill count is considered read/seen.
-        // Do not snap-hide the pill badge; fade it out smoothly so the flow doesn't break.
+        // Visual exit uses selected Shade Pull preset instead of snap-hiding.
         if (isReplyMode) return
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         autoCollapseRunnable = null
@@ -449,27 +451,12 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val root = pillPreviewRoot
         if (root != null && root.visibility == View.VISIBLE && root.alpha > 0f) {
-            root.animate()?.setListener(null)
-            root.animate()?.cancel()
-            root.animate()
-                ?.alpha(0f)
-                ?.scaleX(0.92f)
-                ?.scaleY(0.92f)
-                ?.setDuration(220L)
-                ?.setInterpolator(collapseInterpolator)
-                ?.setListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
-                        pillPreviewCount?.visibility = View.GONE
-                        root.visibility = View.GONE
-                        root.alpha = 0f
-                        root.scaleX = 1f
-                        root.scaleY = 1f
-                        if (currentStage == IslandStage.STAGE2_PING) {
-                            setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
-                        }
-                    }
-                })
-                ?.start()
+            animatePillShadePull(root) {
+                pillPreviewCount?.visibility = View.GONE
+                if (currentStage == IslandStage.STAGE2_PING) {
+                    setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
+                }
+            }
         } else {
             pillPreviewCount?.visibility = View.GONE
             pillPreviewRoot?.visibility = View.GONE
@@ -478,6 +465,148 @@ class HyperAccessibilityService : AccessibilityService() {
                 setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
             }
         }
+    }
+
+    private fun animatePillShadePull(root: View, onEnd: () -> Unit) {
+        // Shade Pull Lab: selected preset controls how pill content is absorbed upward.
+        root.animate()?.setListener(null)
+        root.animate()?.cancel()
+        root.visibility = View.VISIBLE
+        root.alpha = 1f
+        root.translationY = 0f
+        root.scaleX = 1f
+        root.scaleY = 1f
+        root.pivotX = root.width / 2f
+        root.pivotY = 0f
+        root.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+        val mode = AppSettings.getShadePullAnimationMode(this)
+        if (mode == AppSettings.SHADE_PULL_SIMPLE) {
+            root.animate()
+                ?.alpha(0f)
+                ?.scaleX(0.92f)
+                ?.scaleY(0.92f)
+                ?.setDuration(220L)
+                ?.setInterpolator(collapseInterpolator)
+                ?.setListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        root.setLayerType(View.LAYER_TYPE_NONE, null)
+                        resetPillShadePullView(root)
+                        onEnd()
+                    }
+                })
+                ?.start()
+            return
+        }
+
+        val config = when (mode) {
+            AppSettings.SHADE_PULL_MY_ABSORB -> ShadePullConfig(
+                duration = 260L,
+                translationDp = -16f,
+                scaleTarget = 0.92f,
+                moveStart = 0.08f,
+                moveEnd = 1.00f,
+                alphaStart = 0.00f,
+                alphaEnd = 0.84f,
+                scaleStart = 0.12f,
+                scaleEnd = 0.94f,
+                moveCurve = PathInterpolator(0.16f, 1.0f, 0.30f, 1.0f),
+                fadeCurve = PathInterpolator(0.30f, 0.0f, 0.70f, 1.0f),
+                scaleCurve = PathInterpolator(0.22f, 0.0f, 0.0f, 1.0f)
+            )
+            AppSettings.SHADE_PULL_KIMI_VACUUM -> ShadePullConfig(
+                duration = 240L,
+                translationDp = -16f,
+                scaleTarget = 0.94f,
+                moveStart = 0.16f,
+                moveEnd = 1.00f,
+                alphaStart = 0.16f,
+                alphaEnd = 0.84f,
+                scaleStart = 0.16f,
+                scaleEnd = 1.00f,
+                moveCurve = PathInterpolator(0.20f, 0.0f, 0.0f, 1.0f),
+                fadeCurve = PathInterpolator(0.00f, 0.0f, 0.20f, 1.0f),
+                scaleCurve = PathInterpolator(0.40f, 0.0f, 0.20f, 1.0f)
+            )
+            AppSettings.SHADE_PULL_DEEPSEEK_MAGNETIC -> ShadePullConfig(
+                duration = 240L,
+                translationDp = -12f,
+                scaleTarget = 0.92f,
+                moveStart = 0.25f,
+                moveEnd = 1.00f,
+                alphaStart = 0.25f,
+                alphaEnd = 1.00f,
+                scaleStart = 0.00f,
+                scaleEnd = 1.00f,
+                moveCurve = PathInterpolator(0.55f, 0.0f, 0.20f, 1.0f),
+                fadeCurve = PathInterpolator(0.00f, 0.0f, 0.20f, 1.0f),
+                scaleCurve = PathInterpolator(0.55f, 0.0f, 0.20f, 1.0f)
+            )
+            else -> ShadePullConfig(
+                duration = 240L,
+                translationDp = -16f,
+                scaleTarget = 0.94f,
+                moveStart = 0.10f,
+                moveEnd = 0.92f,
+                alphaStart = 0.18f,
+                alphaEnd = 0.82f,
+                scaleStart = 0.00f,
+                scaleEnd = 1.00f,
+                moveCurve = PathInterpolator(0.35f, 0.0f, 0.12f, 1.0f),
+                fadeCurve = PathInterpolator(0.00f, 0.0f, 0.20f, 1.0f),
+                scaleCurve = PathInterpolator(0.20f, 0.0f, 0.20f, 1.0f)
+            )
+        }
+
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = config.duration
+            addUpdateListener { animator ->
+                val raw = animator.animatedValue as Float
+                val moveT = config.moveCurve.getInterpolation(segment(raw, config.moveStart, config.moveEnd))
+                val fadeT = config.fadeCurve.getInterpolation(segment(raw, config.alphaStart, config.alphaEnd))
+                val scaleT = config.scaleCurve.getInterpolation(segment(raw, config.scaleStart, config.scaleEnd))
+                val targetTranslation = dp(kotlin.math.abs(config.translationDp).toInt()).toFloat() * if (config.translationDp < 0f) -1f else 1f
+                val scale = 1f - ((1f - config.scaleTarget) * scaleT)
+                root.translationY = targetTranslation * moveT
+                root.alpha = 1f - fadeT
+                root.scaleX = scale
+                root.scaleY = scale
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    root.setLayerType(View.LAYER_TYPE_NONE, null)
+                    resetPillShadePullView(root)
+                    onEnd()
+                }
+                override fun onAnimationCancel(animation: Animator) {
+                    root.setLayerType(View.LAYER_TYPE_NONE, null)
+                }
+            })
+            start()
+        }
+    }
+
+    private data class ShadePullConfig(
+        val duration: Long,
+        val translationDp: Float,
+        val scaleTarget: Float,
+        val moveStart: Float,
+        val moveEnd: Float,
+        val alphaStart: Float,
+        val alphaEnd: Float,
+        val scaleStart: Float,
+        val scaleEnd: Float,
+        val moveCurve: PathInterpolator,
+        val fadeCurve: PathInterpolator,
+        val scaleCurve: PathInterpolator
+    )
+
+    private fun resetPillShadePullView(root: View) {
+        root.visibility = View.GONE
+        root.alpha = 0f
+        root.translationY = 0f
+        root.scaleX = 1f
+        root.scaleY = 1f
     }
 
     override fun onKeyEvent(event: KeyEvent?): Boolean {
@@ -642,6 +771,29 @@ class HyperAccessibilityService : AccessibilityService() {
             updateNotificationContent(model)
             updatePillBadge(model)
             triggerPillPreview()
+        }
+    }
+
+    private fun postPreviewShadePull() {
+        mainHandler.post {
+            if (!AppSettings.isIslandEnabled(this)) return@post
+            if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
+            pillUnreadCount = 7
+            pillPreviewIcon?.setImageDrawable(loadGenericPillGlyph("org.telegram.messenger"))
+            pillPreviewCount?.text = "7"
+            pillPreviewCount?.visibility = View.VISIBLE
+            pillPreviewRoot?.visibility = View.VISIBLE
+            pillPreviewRoot?.alpha = 1f
+            pillPreviewRoot?.translationY = 0f
+            pillPreviewRoot?.scaleX = 1f
+            pillPreviewRoot?.scaleY = 1f
+            currentStage = IslandStage.STAGE2_PING
+            updateIslandLayout(
+                dp(getTargetWidth(IslandStage.STAGE2_PING)),
+                dp(getTargetHeight(IslandStage.STAGE2_PING)),
+                dp(getTargetRadius(IslandStage.STAGE2_PING)).toFloat()
+            )
+            mainHandler.postDelayed({ markIslandNotificationsSeenFromShade() }, 450L)
         }
     }
 
