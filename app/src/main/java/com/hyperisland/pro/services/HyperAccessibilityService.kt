@@ -34,7 +34,12 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextUtils
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.transition.AutoTransition
 import android.transition.ChangeBounds
 import android.transition.Transition
@@ -84,7 +89,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private data class DisplayText(val appName: String, val title: String, val message: String)
     private data class NotificationModel(
         val packageName: String, val notificationKey: String?, val appName: String, val title: String, val message: String,
-        val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?
+        val unreadCount: Int, val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?
     )
 
     private class InstagramGradientCameraDrawable : Drawable() {
@@ -336,8 +341,8 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null) =
-            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, postTime, contentIntent, actions, smallIcon); true } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null) =
+            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, unreadCount, postTime, contentIntent, actions, smallIcon); true } ?: false
         fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
         fun previewPillIconFromApp(context: Context, packageName: String, count: Int) =
@@ -435,7 +440,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (textItems.isEmpty()) return
             val appName = getAppName(pkg)
             val (t, m) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
-            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, System.currentTimeMillis(), null, emptyList(), null)
+            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, 1, System.currentTimeMillis(), null, emptyList(), null)
         }
     }
 
@@ -655,7 +660,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?) {
+    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             if (isShadeOpen) {
@@ -678,7 +683,7 @@ class HyperAccessibilityService : AccessibilityService() {
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
             if (isReplyMode) return@post // while typing/replying, don't build an annoying backlog
             pillUnreadCount = (pillUnreadCount + 1).coerceAtMost(99)
-            notificationQueue.add(NotificationModel(packageName, notificationKey, appName, title, message, postTime, contentIntent, actions, smallIcon))
+            notificationQueue.add(NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, postTime, contentIntent, actions, smallIcon))
             if (currentStage == IslandStage.STAGE3_FULL) {
                 // User is actively reading expanded island; don't auto-shrink/replace it.
                 return@post
@@ -726,6 +731,7 @@ class HyperAccessibilityService : AccessibilityService() {
             appName = "Test Lab",
             title = if (replySecond) "Reply is second action" else "Reply is first action",
             message = modeName,
+            unreadCount = 1,
             postTime = System.currentTimeMillis(),
             contentIntent = null,
             actions = actions,
@@ -763,6 +769,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 appName = app,
                 title = app,
                 message = "Pill icon preview",
+                unreadCount = count.coerceIn(1, 99),
                 postTime = System.currentTimeMillis(),
                 contentIntent = null,
                 actions = emptyList(),
@@ -884,12 +891,25 @@ class HyperAccessibilityService : AccessibilityService() {
         exit.start()
     }
 
+    private fun buildTitleWithUnreadCount(title: String, unreadCount: Int): CharSequence {
+        // Keep message line clean; unread metadata lives in the title as subtle styled text.
+        if (unreadCount <= 1 || title.isBlank()) return title
+        val suffix = "  $unreadCount messages"
+        val full = "$title$suffix"
+        return SpannableString(full).apply {
+            val start = title.length
+            setSpan(ForegroundColorSpan(Color.rgb(0, 150, 255)), start, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(RelativeSizeSpan(0.72f), start, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(StyleSpan(Typeface.NORMAL), start, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+
     private fun updateNotificationContent(model: NotificationModel) {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName; currentNotificationKey = model.notificationKey; currentReplyAction = null
         this@HyperAccessibilityService.appIconView?.setImageDrawable(loadAppIcon(model.packageName))
         this@HyperAccessibilityService.appNameText?.text = model.appName
         this@HyperAccessibilityService.timeStampText?.text = formatNotificationTime(model.postTime)
-        this@HyperAccessibilityService.titleText?.text = model.title
+        this@HyperAccessibilityService.titleText?.text = buildTitleWithUnreadCount(model.title, model.unreadCount)
         this@HyperAccessibilityService.messageText?.text = model.message
         this@HyperAccessibilityService.titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
         this@HyperAccessibilityService.messageText?.visibility = if (model.message.isBlank()) View.GONE else View.VISIBLE
