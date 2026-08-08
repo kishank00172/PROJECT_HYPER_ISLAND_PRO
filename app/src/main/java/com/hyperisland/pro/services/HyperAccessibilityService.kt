@@ -898,7 +898,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val full = "$title$suffix"
         return SpannableString(full).apply {
             val start = title.length
-            setSpan(ForegroundColorSpan(Color.rgb(0, 150, 255)), start, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(ForegroundColorSpan(Color.rgb(145, 165, 178)), start, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             setSpan(RelativeSizeSpan(0.72f), start, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             setSpan(StyleSpan(Typeface.NORMAL), start, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
