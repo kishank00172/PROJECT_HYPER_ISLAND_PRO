@@ -7,7 +7,7 @@ import android.service.notification.StatusBarNotification
 
 /**
  * Phase 3.6 — Notification Intelligence (latest-message extraction).
- * Extracts latest chat message from MessagingStyle bundles when possible.
+ * Extracts latest chat message from MessagingStyle bundles when possible; unread count is returned separately.
  * Falls back to normal EXTRA_TITLE / EXTRA_TEXT for non-chat notifications.
  */
 object NotificationContentExtractor {
@@ -34,15 +34,15 @@ object NotificationContentExtractor {
             val latest = messages.last()
             val latestText = readMessageText(latest).trim()
             val sender = readMessageSender(latest).trim()
-            val conversation = readConversationTitle(extras).ifBlank { fallbackTitle }.ifBlank { sender }.ifBlank { appName }
+            val rawConversation = readConversationTitle(extras).ifBlank { fallbackTitle }.ifBlank { sender }.ifBlank { appName }
+            val conversation = stripMessageCountSuffix(rawConversation)
             if (latestText.isNotBlank()) {
                 val count = messages.size.coerceAtLeast(1)
-                val displayMessage = if (count > 1) "$latestText · +$count unread" else latestText
                 return ExtractedNotificationContent(
                     appName = appName,
                     conversationTitle = conversation,
                     senderName = sender.ifBlank { conversation },
-                    latestMessage = displayMessage,
+                    latestMessage = latestText,
                     unreadCount = count,
                     isMessagingStyle = true
                 )
@@ -106,6 +106,12 @@ object NotificationContentExtractor {
         } catch (_: Exception) {
             ""
         }
+    }
+
+    private fun stripMessageCountSuffix(value: String): String {
+        return value
+            .replace(Regex("\\s*\\(\\d+\\s+messages?\\)\\s*$", RegexOption.IGNORE_CASE), "")
+            .trim()
     }
 
     private fun getAppName(context: Context, pkg: String): String = try {
