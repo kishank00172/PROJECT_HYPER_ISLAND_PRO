@@ -80,6 +80,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
             appName = appName,
             title = title,
             message = message,
+            unreadCount = extracted.unreadCount,
             postTime = sbn.postTime,
             contentIntent = notification.contentIntent,
             actions = actionList,
