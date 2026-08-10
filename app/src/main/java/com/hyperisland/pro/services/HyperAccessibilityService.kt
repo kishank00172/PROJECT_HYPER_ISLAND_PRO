@@ -89,7 +89,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private data class DisplayText(val appName: String, val title: String, val message: String)
     private data class NotificationModel(
         val packageName: String, val notificationKey: String?, val appName: String, val title: String, val message: String,
-        val unreadCount: Int, val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?
+        val unreadCount: Int, val conversationKey: String, val conversationKeySource: String,
+        val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?
     )
 
     private class InstagramGradientCameraDrawable : Drawable() {
@@ -341,8 +342,8 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null) =
-            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, unreadCount, postTime, contentIntent, actions, smallIcon); true } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null) =
+            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon); true } ?: false
         fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
         fun previewPillIconFromApp(context: Context, packageName: String, count: Int) =
@@ -352,7 +353,9 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val notificationQueue = ArrayDeque<NotificationModel>()
+    private val notificationQueue = ArrayDeque<NotificationModel>() // legacy transient queue
+    private val notificationRing = ArrayList<NotificationModel>() // Target 2 bounded conversation ring
+    private var currentRingIndex = 0
     private var isProcessingQueue = false
     private var isShadeOpen = false
     private var isReplyMode = false
@@ -411,6 +414,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
     private var lastPrimaryEventTime = 0L
+    private var touchStartX = 0f
     private var touchStartY = 0f
     private val outlineRect = Rect()
     private var outlineRadius = 0f
@@ -440,7 +444,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (textItems.isEmpty()) return
             val appName = getAppName(pkg)
             val (t, m) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
-            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, 1, System.currentTimeMillis(), null, emptyList(), null)
+            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, 1, null, null, System.currentTimeMillis(), null, emptyList(), null)
         }
     }
 
@@ -450,8 +454,7 @@ class HyperAccessibilityService : AccessibilityService() {
         if (isReplyMode) return
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         autoCollapseRunnable = null
-        notificationQueue.clear()
-        pillUnreadCount = 0
+        clearNotificationRing()
         isProcessingQueue = false
 
         val root = pillPreviewRoot
@@ -644,23 +647,19 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         autoCollapseRunnable = null
-        if (currentStage == IslandStage.STAGE3_FULL && notificationMode && pillUnreadCount > 0) {
-            if (notificationQueue.isNotEmpty()) {
-                processNextInQueue()
-            } else {
-                pillPreviewRoot?.visibility = View.VISIBLE
-                pillPreviewRoot?.alpha = 1f
-                setStageAnimated(IslandStage.STAGE2_PING, ExpandReason.MANUAL_USER)
-            }
+        if (currentStage == IslandStage.STAGE3_FULL && notificationMode && notificationRing.isNotEmpty()) {
+            getCurrentRingModel()?.let { updatePillBadge(it) }
+            pillPreviewRoot?.visibility = View.VISIBLE
+            pillPreviewRoot?.alpha = 1f
+            setStageAnimated(IslandStage.STAGE2_PING, ExpandReason.MANUAL_USER)
         } else {
-            pillUnreadCount = 0
+            clearNotificationRing()
             pillPreviewCount?.visibility = View.GONE
-            notificationQueue.clear()
             setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
         }
     }
 
-    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?) {
+    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             if (isShadeOpen) {
@@ -682,8 +681,10 @@ class HyperAccessibilityService : AccessibilityService() {
             if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) { return@post }
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
             if (isReplyMode) return@post // while typing/replying, don't build an annoying backlog
-            pillUnreadCount = (pillUnreadCount + 1).coerceAtMost(99)
-            notificationQueue.add(NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, postTime, contentIntent, actions, smallIcon))
+            val finalConversationKey = conversationKey ?: "$packageName|title|${title.lowercase(Locale.getDefault()).trim()}"
+            val finalConversationKeySource = conversationKeySource ?: "serviceFallback"
+            val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon)
+            addOrUpdateNotificationRing(incomingModel)
             if (currentStage == IslandStage.STAGE3_FULL) {
                 // User is actively reading expanded island; don't auto-shrink/replace it.
                 return@post
@@ -732,6 +733,8 @@ class HyperAccessibilityService : AccessibilityService() {
             title = if (replySecond) "Reply is second action" else "Reply is first action",
             message = modeName,
             unreadCount = 1,
+            conversationKey = "test|reply|${if (replySecond) "second" else "first"}",
+            conversationKeySource = "preview",
             postTime = System.currentTimeMillis(),
             contentIntent = null,
             actions = actions,
@@ -770,6 +773,8 @@ class HyperAccessibilityService : AccessibilityService() {
                 title = app,
                 message = "Pill icon preview",
                 unreadCount = count.coerceIn(1, 99),
+                conversationKey = "preview|pill|$targetPackageName",
+                conversationKeySource = "preview",
                 postTime = System.currentTimeMillis(),
                 contentIntent = null,
                 actions = emptyList(),
@@ -811,6 +816,35 @@ class HyperAccessibilityService : AccessibilityService() {
         val pi = PendingIntent.getActivity(this, 7300 + requestCode, launchIntent, flags)
         val icon = Icon.createWithResource(this, android.R.drawable.ic_menu_send)
         return Notification.Action.Builder(icon, title, pi).build()
+    }
+
+    private fun addOrUpdateNotificationRing(model: NotificationModel) {
+        val index = notificationRing.indexOfFirst { it.conversationKey == model.conversationKey }
+        val merged = if (index >= 0) {
+            val old = notificationRing[index]
+            model.copy(unreadCount = maxOf(old.unreadCount, model.unreadCount))
+        } else {
+            model
+        }
+        if (index >= 0) notificationRing.removeAt(index)
+        notificationRing.add(0, merged)
+        currentRingIndex = 0
+        pillUnreadCount = notificationRing.sumOf { it.unreadCount }.coerceAtMost(99)
+        notificationQueue.clear()
+        notificationQueue.add(merged)
+    }
+
+    private fun getCurrentRingModel(): NotificationModel? {
+        if (notificationRing.isEmpty()) return null
+        currentRingIndex = currentRingIndex.coerceIn(0, notificationRing.lastIndex)
+        return notificationRing[currentRingIndex]
+    }
+
+    private fun clearNotificationRing() {
+        notificationRing.clear()
+        currentRingIndex = 0
+        notificationQueue.clear()
+        pillUnreadCount = 0
     }
 
     private fun processNextInQueue() {
@@ -908,7 +942,8 @@ class HyperAccessibilityService : AccessibilityService() {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName; currentNotificationKey = model.notificationKey; currentReplyAction = null
         this@HyperAccessibilityService.appIconView?.setImageDrawable(loadAppIcon(model.packageName))
         this@HyperAccessibilityService.appNameText?.text = model.appName
-        this@HyperAccessibilityService.timeStampText?.text = formatNotificationTime(model.postTime)
+        val ringIndicator = if (notificationRing.size > 1) " · ${currentRingIndex + 1}/${notificationRing.size}" else ""
+        this@HyperAccessibilityService.timeStampText?.text = "${formatNotificationTime(model.postTime)}$ringIndicator"
         this@HyperAccessibilityService.titleText?.text = buildTitleWithUnreadCount(model.title, model.unreadCount)
         this@HyperAccessibilityService.messageText?.text = model.message
         this@HyperAccessibilityService.titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
@@ -2159,6 +2194,58 @@ class HyperAccessibilityService : AccessibilityService() {
         }, 650)
     }
 
+    private fun navigateRingBySwipe(older: Boolean) {
+        if (isReplyMode || currentStage != IslandStage.STAGE3_FULL || notificationRing.size <= 1) return
+        val nextIndex = if (older) {
+            (currentRingIndex + 1).coerceAtMost(notificationRing.lastIndex)
+        } else {
+            (currentRingIndex - 1).coerceAtLeast(0)
+        }
+        if (nextIndex == currentRingIndex) {
+            playRingEdgeResistance(if (older) -1 else 1)
+            return
+        }
+        val direction = if (older) -1 else 1
+        val outX = dp(28).toFloat() * direction
+        val inX = -outX
+        gridRoot?.animate()?.setListener(null)
+        gridRoot?.animate()?.cancel()
+        gridRoot?.animate()
+            ?.alpha(0f)
+            ?.translationX(outX)
+            ?.setDuration(120L)
+            ?.setInterpolator(collapseInterpolator)
+            ?.setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    currentRingIndex = nextIndex
+                    getCurrentRingModel()?.let { updateNotificationContent(it) }
+                    gridRoot?.translationX = inX
+                    gridRoot?.animate()?.setListener(null)
+                    gridRoot?.animate()
+                        ?.alpha(1f)
+                        ?.translationX(0f)
+                        ?.setDuration(180L)
+                        ?.setInterpolator(morphInterpolator)
+                        ?.start()
+                }
+            })
+            ?.start()
+    }
+
+    private fun playRingEdgeResistance(direction: Int) {
+        val dx = dp(8).toFloat() * direction
+        gridRoot?.animate()?.setListener(null)
+        gridRoot?.animate()?.cancel()
+        gridRoot?.animate()
+            ?.translationX(dx)
+            ?.setDuration(70L)
+            ?.setInterpolator(morphInterpolator)
+            ?.withEndAction {
+                gridRoot?.animate()?.translationX(0f)?.setDuration(120L)?.setInterpolator(collapseInterpolator)?.start()
+            }
+            ?.start()
+    }
+
     private fun triggerFluidExpansion() {
         morphAnimator?.cancel()
         val startW = dp(AppSettings.getIslandWidthDp(this)); val pingW = dp(AppSettings.getIslandStage2WidthDp(this)); val targetW = dp(AppSettings.getIslandExpandedWidthDp(this))
@@ -2500,7 +2587,21 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addView(this@HyperAccessibilityService.morphLayer, FrameLayout.LayoutParams(-1, -1))
 
-            setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_UP) { if (e.rawY - touchStartY < -dp(24)) postSwipeUpIsland() else if (abs(e.rawY - touchStartY) < dp(10)) postToggleExpanded() } else if (e.action == MotionEvent.ACTION_DOWN) { touchStartY = e.rawY }; true }
+            setOnTouchListener { _, e ->
+                if (e.action == MotionEvent.ACTION_DOWN) {
+                    touchStartX = e.rawX
+                    touchStartY = e.rawY
+                } else if (e.action == MotionEvent.ACTION_UP) {
+                    val dx = e.rawX - touchStartX
+                    val dy = e.rawY - touchStartY
+                    when {
+                        dy < -dp(24) && abs(dy) > abs(dx) -> postSwipeUpIsland()
+                        currentStage == IslandStage.STAGE3_FULL && abs(dx) > dp(36) && abs(dx) > abs(dy) * 1.35f -> navigateRingBySwipe(older = dx < 0f)
+                        abs(dx) < dp(10) && abs(dy) < dp(10) -> postToggleExpanded()
+                    }
+                }
+                true
+            }
         }
         this@HyperAccessibilityService.islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
         visualRoot?.addView(this@HyperAccessibilityService.islandView, this@HyperAccessibilityService.islandLayoutParams); updateOutlineForIsland(w, h, r)
