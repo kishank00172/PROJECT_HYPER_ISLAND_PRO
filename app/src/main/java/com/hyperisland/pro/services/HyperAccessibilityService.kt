@@ -2450,7 +2450,37 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         
         this@HyperAccessibilityService.islandBackground = createIslandBackground(r)
-        this@HyperAccessibilityService.islandView = FrameLayout(this).apply {
+        this@HyperAccessibilityService.islandView = object : FrameLayout(this) {
+            override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+                if (e.action == MotionEvent.ACTION_DOWN) {
+                    this@HyperAccessibilityService.touchStartX = e.rawX
+                    this@HyperAccessibilityService.touchStartY = e.rawY
+                }
+
+                // Children first: Reply/action buttons must receive clicks before island gestures consume the touch.
+                val childHandled = super.dispatchTouchEvent(e)
+
+                if (e.action == MotionEvent.ACTION_UP) {
+                    val dx = e.rawX - this@HyperAccessibilityService.touchStartX
+                    val dy = e.rawY - this@HyperAccessibilityService.touchStartY
+                    when {
+                        dy < -dp(24) && abs(dy) > abs(dx) -> {
+                            postSwipeUpIsland()
+                            return true
+                        }
+                        currentStage == IslandStage.STAGE3_FULL && abs(dx) > dp(36) && abs(dx) > abs(dy) * 1.35f -> {
+                            navigateRingBySwipe(older = dx < 0f)
+                            return true
+                        }
+                        !childHandled && currentStage != IslandStage.STAGE3_FULL && abs(dx) < dp(10) && abs(dy) < dp(10) -> {
+                            postToggleExpanded()
+                            return true
+                        }
+                    }
+                }
+                return childHandled || currentStage != IslandStage.STAGE1_IDLE
+            }
+        }.apply {
             background = this@HyperAccessibilityService.islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, this@HyperAccessibilityService.outlineRadius) } }
             this@HyperAccessibilityService.gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(1), dp(1), dp(1), dp(1)); visibility = View.GONE; alpha = 0f; weightSum = 1f
@@ -2595,21 +2625,6 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addView(this@HyperAccessibilityService.morphLayer, FrameLayout.LayoutParams(-1, -1))
 
-            setOnTouchListener { _, e ->
-                if (e.action == MotionEvent.ACTION_DOWN) {
-                    touchStartX = e.rawX
-                    touchStartY = e.rawY
-                } else if (e.action == MotionEvent.ACTION_UP) {
-                    val dx = e.rawX - touchStartX
-                    val dy = e.rawY - touchStartY
-                    when {
-                        dy < -dp(24) && abs(dy) > abs(dx) -> postSwipeUpIsland()
-                        currentStage == IslandStage.STAGE3_FULL && abs(dx) > dp(36) && abs(dx) > abs(dy) * 1.35f -> navigateRingBySwipe(older = dx < 0f)
-                        currentStage != IslandStage.STAGE3_FULL && abs(dx) < dp(10) && abs(dy) < dp(10) -> postToggleExpanded()
-                    }
-                }
-                true
-            }
         }
         this@HyperAccessibilityService.islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
         visualRoot?.addView(this@HyperAccessibilityService.islandView, this@HyperAccessibilityService.islandLayoutParams); updateOutlineForIsland(w, h, r)
