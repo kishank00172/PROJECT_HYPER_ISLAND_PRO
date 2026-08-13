@@ -639,7 +639,15 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postUpdateIsland() = mainHandler.post { if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
     private fun postCollapseIsland() = mainHandler.post { if (isReplyMode) exitReplyMode() else setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) }
-    private fun postToggleExpanded() = mainHandler.post { if (notificationMode && currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else setStageAnimated(if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
+    private fun postToggleExpanded() = mainHandler.post {
+        // Tap expands/collapses the island shell only.
+        // Do NOT auto-open/collapse a notification from a generic tap while full expanded;
+        // that breaks action buttons and reply taps.
+        setStageAnimated(
+            if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL,
+            ExpandReason.MANUAL_USER
+        )
+    }
     private fun postSwipeUpIsland() = mainHandler.post {
         if (isReplyMode) {
             exitReplyMode()
@@ -2597,7 +2605,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     when {
                         dy < -dp(24) && abs(dy) > abs(dx) -> postSwipeUpIsland()
                         currentStage == IslandStage.STAGE3_FULL && abs(dx) > dp(36) && abs(dx) > abs(dy) * 1.35f -> navigateRingBySwipe(older = dx < 0f)
-                        abs(dx) < dp(10) && abs(dy) < dp(10) -> postToggleExpanded()
+                        currentStage != IslandStage.STAGE3_FULL && abs(dx) < dp(10) && abs(dy) < dp(10) -> postToggleExpanded()
                     }
                 }
                 true
