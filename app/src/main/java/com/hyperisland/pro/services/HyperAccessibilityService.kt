@@ -416,6 +416,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var lastPrimaryEventTime = 0L
     private var touchStartX = 0f
     private var touchStartY = 0f
+    private var outsideGestureActive = false
     private val outlineRect = Rect()
     private var outlineRadius = 0f
 
@@ -2380,16 +2381,38 @@ class HyperAccessibilityService : AccessibilityService() {
         // THE INTERCEPTOR: Detects touches based on Reply State
         // Phase 3.5 Fluid — Off-Switch + Reflection Hack (compile-safe)
         visualRoot = object : FrameLayout(this) {
-            override fun onTouchEvent(event: MotionEvent): Boolean {
-                if (isReplyMode && event.action == MotionEvent.ACTION_DOWN) {
-                    val rect = Rect()
-                    this@HyperAccessibilityService.islandView?.getGlobalVisibleRect(rect)
-                    if (!rect.contains(event.rawX.toInt(), event.rawY.toInt())) {
-                        exitReplyMode() // OUTSIDE TAP = BACK SWITCH
-                        return true
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                val action = event.actionMasked
+                val wantsOutsideTap = isReplyMode || currentStage == IslandStage.STAGE3_FULL
+
+                if (!wantsOutsideTap) {
+                    outsideGestureActive = false
+                    return super.dispatchTouchEvent(event)
+                }
+
+                val rect = Rect()
+                this@HyperAccessibilityService.islandView?.getGlobalVisibleRect(rect)
+                val insideIsland = rect.contains(event.rawX.toInt(), event.rawY.toInt())
+
+                when (action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        outsideGestureActive = !insideIsland
+                        if (outsideGestureActive) {
+                            if (isReplyMode) exitReplyMode() else postSwipeUpIsland()
+                            return true
+                        }
+                    }
+                    MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        if (outsideGestureActive) {
+                            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                                outsideGestureActive = false
+                            }
+                            return true
+                        }
                     }
                 }
-                return super.onTouchEvent(event)
+
+                return super.dispatchTouchEvent(event)
             }
         }.apply { 
             setBackgroundColor(0)
@@ -2424,14 +2447,14 @@ class HyperAccessibilityService : AccessibilityService() {
                             val region = info.javaClass.getField("touchableRegion").get(info) as Region
                             region.setEmpty()
 
-                            if (isReplyMode) {
-                                // FULL SCREEN INTERCEPTION during reply — Off-Switch
-                                // Prompt #2: "touch ko system ui ko mat do ... animation reverse me chal jayega"
+                            if (isReplyMode || currentStage == IslandStage.STAGE3_FULL) {
+                                // Full screen interception during Reply or Expanded mode:
+                                // root dispatchTouchEvent handles outside-tap collapse/exit without a second watcher window stealing child taps.
                                 val rootW = resources.displayMetrics.widthPixels
                                 val rootH = resources.displayMetrics.heightPixels
                                 region.set(0, 0, rootW, rootH)
                             } else {
-                                // Normal Island bounds — Touch Pass-through
+                                // Normal/Pill island bounds — Touch Pass-through
                                 val rect = Rect()
                                 this@HyperAccessibilityService.islandView?.getGlobalVisibleRect(rect)
                                 if (!rect.isEmpty()) {
