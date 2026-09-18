@@ -91,7 +91,8 @@ class HyperNotificationListenerService : NotificationListenerService() {
         // hides the children), pulling the children from the live shelf still shows the real chat.
         if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
             val children = try { getActiveNotifications() } catch (_: Exception) { null }
-            val members = children?.filter { it.key != sbn.key && it.notification?.groupKey == sbn.key }
+            // Notification.getGroup() is the child's group key; there is no `groupKey` property.
+            val members = children?.filter { it.key != sbn.key && it.notification?.group == sbn.key }
                 ?.sortedByDescending { it.postTime }
                 .orEmpty()
             if (members.isEmpty()) return drop("group-summary-without-children", sbn)
