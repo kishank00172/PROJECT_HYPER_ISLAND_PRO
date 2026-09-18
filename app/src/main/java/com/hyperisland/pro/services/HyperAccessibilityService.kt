@@ -2347,9 +2347,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 val t = it.animatedValue as Float
                 updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
                 gridRoot?.visibility = View.VISIBLE
-                val c = ((t - 0.35f) / 0.65f).coerceIn(0f, 1f)
-                gridRoot?.alpha = c
-                gridRoot?.translationY = (1f - c) * dp(6).toFloat()
+                gridRoot?.alpha = (t / 0.35f).coerceIn(0f, 1f)
             }
         }
         val set = AnimatorSet().apply {
@@ -2359,7 +2357,8 @@ class HyperAccessibilityService : AccessibilityService() {
                     gridRoot?.alpha = 1f
                     gridRoot?.translationY = 0f
                     islandView?.scaleX = 1f; islandView?.scaleY = 1f
-                    syncContentWidth()
+                    syncContentSize()
+                    flushDeferredRegionUpdate()
                     scheduleAutoCollapse()
                     updateOutsideWatcherForState()
                 }
@@ -2418,16 +2417,14 @@ class HyperAccessibilityService : AccessibilityService() {
                 // Only the pill badge cross-fades, since it swaps layers instead of being revealed.
                 if (target == IslandStage.STAGE3_FULL && notificationMode) {
                     // Shape leads, content follows: fade + 6dp settle in the last 65% of the grow.
-                    val c = ((t - 0.35f) / 0.65f).coerceIn(0f, 1f)
-                    gridRoot?.alpha = c
-                    gridRoot?.translationY = (1f - c) * dp(6).toFloat()
+                    // Quick opacity settle in the first third, then pure mask reveal. No translationY:
+                    // any deliberate text motion during the morph reads as jitter on a growing card.
+                    gridRoot?.alpha = (t / 0.35f).coerceIn(0f, 1f)
                     pillPreviewRoot?.alpha = 1f - (t / 0.6f).coerceIn(0f, 1f)
                 } else if (target == IslandStage.STAGE2_PING && notificationMode) {
                     // Collapse: the expanded page must be GONE by 45% of the shrink. Skipping this
                     // fade is what left expanded text hanging below the pill in the last frames.
-                    val c = 1f - (t / 0.45f).coerceIn(0f, 1f)
-                    gridRoot?.alpha = c
-                    gridRoot?.translationY = (1f - c) * dp(4).toFloat()
+                    gridRoot?.alpha = 1f - (t / 0.45f).coerceIn(0f, 1f)
                     pillPreviewRoot?.alpha = 1f
                 } else if (target == IslandStage.STAGE1_IDLE && notificationMode) {
                     gridRoot?.alpha = 1f - (t / 0.4f).coerceIn(0f, 1f)
@@ -2440,7 +2437,8 @@ class HyperAccessibilityService : AccessibilityService() {
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
                     gridRoot?.translationY = 0f
-                    syncContentWidth()
+                    syncContentSize()
+                    flushDeferredRegionUpdate()
                     if (target == IslandStage.STAGE1_IDLE) {
                         gridRoot?.visibility = View.GONE
                         pillPreviewRoot?.visibility = View.GONE
@@ -2466,16 +2464,27 @@ class HyperAccessibilityService : AccessibilityService() {
         anim.start()
     }
 
-    /** Content column width: always the expanded width, never the animated card width. */
+    /** Content box size: always the EXPANDED size, never the animated card size. */
     private fun expandedContentWidthPx(): Int = dp(AppSettings.getIslandExpandedWidthDp(this))
+    private fun expandedContentHeightPx(): Int = dp(AppSettings.getIslandExpandedHeightDp(this))
 
-    /** Re-sync the locked content width if the user changed the expanded-width slider mid-session. */
-    private fun syncContentWidth() {
+    /**
+     * Re-assert the locked content box if the user moved the expanded width/height sliders
+     * mid-session. Both dimensions must be fixed: leaving height at MATCH_PARENT makes the content
+     * re-centre on every morph frame (text crawling up/down), which is the expand-time jitter.
+     */
+    private fun syncContentSize() {
         val host = gridRoot ?: return
         val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return
-        val want = expandedContentWidthPx()
-        if (lp.width != want) {
-            lp.width = want
+        val w = expandedContentWidthPx()
+        val h = expandedContentHeightPx()
+        if (lp.width != w || lp.height != h) {
+            lp.width = w
+            lp.height = h
+            // TOP + horizontal centre, not CENTER: the card's top edge is fixed (topMargin = island Y)
+            // and it grows downward, so a vertically-centred child would slide down as the card grows.
+            // Anchored to the top, the content never moves — only the clip window widens/opens.
+            lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             host.layoutParams = lp
         }
     }
@@ -2686,7 +2695,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // (clipToOutline is on this container), so expanding/collapsing reveals or masks text
             // instead of re-measuring it at 48 intermediate widths. That re-wrap per frame was the
             // expand/collapse jitter — MATCH_PARENT here was the root cause.
-            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(expandedContentWidthPx(), -1, Gravity.START or Gravity.CENTER_VERTICAL))
+            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(expandedContentWidthPx(), expandedContentHeightPx(), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
 
             // Compact pill badge preview: stable pill, spread content.
             // Icon stays left, count badge stays right — no cramped center cluster.
@@ -2805,7 +2814,23 @@ class HyperAccessibilityService : AccessibilityService() {
     }
     private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) postCollapseIsland() ; false } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 4096 or 512 or 256, -3).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
     private fun removeOutsideWatcher() { try { windowManager?.removeViewImmediate(outsideWatcherView!!) } catch (_: Exception) {}; outsideWatcherView = null }
-    private fun forceRegionUpdate() { visualRoot?.post { visualRoot?.requestLayout(); visualRoot?.parent?.requestLayout() } }
+    private var regionUpdateDeferred = false
+
+    private fun forceRegionUpdate() {
+        // Never fight the morph: a requestLayout while the card is animating re-centres and re-clips
+        // the content mid-flight. Park it, and flush when the morph lands.
+        if (morphAnimator?.isRunning == true || ghostAnimator?.isRunning == true) {
+            regionUpdateDeferred = true
+            return
+        }
+        visualRoot?.post { visualRoot?.requestLayout(); visualRoot?.parent?.requestLayout() }
+    }
+
+    private fun flushDeferredRegionUpdate() {
+        if (!regionUpdateDeferred) return
+        regionUpdateDeferred = false
+        forceRegionUpdate()
+    }
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
     private fun hideIslandInternal() { detachRingPushLayer(); ringSwapInFlight = false; morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
