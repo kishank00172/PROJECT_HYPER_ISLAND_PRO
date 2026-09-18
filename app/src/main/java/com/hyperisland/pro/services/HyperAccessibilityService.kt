@@ -2268,13 +2268,16 @@ class HyperAccessibilityService : AccessibilityService() {
             ImageView(card.context).apply {
                 setImageBitmap(shot)
                 scaleType = ImageView.ScaleType.FIT_XY
-                translationZ = dp(2).toFloat()
+                // No translationZ here on purpose: a child with Z is drawn in the parent's overlay
+                // pass, which escapes clipToOutline. That leaked the frozen page outside the pill
+                // (the "ghost content" seen after a swipe that got cancelled mid-push).
             }.also { view ->
                 card.addView(view, FrameLayout.LayoutParams(host.width, host.height, Gravity.START or Gravity.TOP).apply {
                     leftMargin = host.left
                     topMargin = host.top
                 })
                 ringPushLayer = view
+                view.bringToFront() // draw last = on top, without opting out of the parent clip
             }
         } catch (_: Throwable) {
             null // allocation refused — degrade to a slide-in of the new page only
@@ -2289,8 +2292,15 @@ class HyperAccessibilityService : AccessibilityService() {
             ?.translationX(outX)
             ?.setDuration(110L)
             ?.setInterpolator(AccelerateInterpolator(1.05f))
-            ?.withEndAction { detachRingPushLayer() }
+            ?.setListener(object : AnimatorListenerAdapter() {
+                // withEndAction alone is NOT enough: it is skipped when the animation is cancelled
+                // (e.g. the user collapses mid-push), which strands the frozen page on screen.
+                override fun onAnimationEnd(animation: Animator) = detachRingPushLayer()
+                override fun onAnimationCancel(animation: Animator) = detachRingPushLayer()
+            })
             ?.start()
+        // Belt and braces: a lost callback can never leave a ghost layer behind.
+        mainHandler.postDelayed({ if (ringPushLayer != null) detachRingPushLayer() }, 420L)
         host.animate()
             ?.translationX(0f)
             ?.setDuration(110L)
@@ -2337,12 +2347,17 @@ class HyperAccessibilityService : AccessibilityService() {
                 val t = it.animatedValue as Float
                 updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
                 gridRoot?.visibility = View.VISIBLE
+                val c = ((t - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                gridRoot?.alpha = c
+                gridRoot?.translationY = (1f - c) * dp(6).toFloat()
             }
         }
         val set = AnimatorSet().apply {
             playSequentially(ping, expand)
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
+                    gridRoot?.alpha = 1f
+                    gridRoot?.translationY = 0f
                     islandView?.scaleX = 1f; islandView?.scaleY = 1f
                     syncContentWidth()
                     scheduleAutoCollapse()
@@ -2402,11 +2417,20 @@ class HyperAccessibilityService : AccessibilityService() {
                 // the real island behaves, and it kills the "text materialising mid-motion" smear.
                 // Only the pill badge cross-fades, since it swaps layers instead of being revealed.
                 if (target == IslandStage.STAGE3_FULL && notificationMode) {
-                    pillPreviewRoot?.alpha = 1f - t
+                    // Shape leads, content follows: fade + 6dp settle in the last 65% of the grow.
+                    val c = ((t - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                    gridRoot?.alpha = c
+                    gridRoot?.translationY = (1f - c) * dp(6).toFloat()
+                    pillPreviewRoot?.alpha = 1f - (t / 0.6f).coerceIn(0f, 1f)
                 } else if (target == IslandStage.STAGE2_PING && notificationMode) {
+                    // Collapse: the expanded page must be GONE by 45% of the shrink. Skipping this
+                    // fade is what left expanded text hanging below the pill in the last frames.
+                    val c = 1f - (t / 0.45f).coerceIn(0f, 1f)
+                    gridRoot?.alpha = c
+                    gridRoot?.translationY = (1f - c) * dp(4).toFloat()
                     pillPreviewRoot?.alpha = 1f
                 } else if (target == IslandStage.STAGE1_IDLE && notificationMode) {
-                    gridRoot?.alpha = 1f - t
+                    gridRoot?.alpha = 1f - (t / 0.4f).coerceIn(0f, 1f)
                     pillPreviewRoot?.alpha = 1f - t
                 }
                 // Was: islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI)) — a whole-card 4% vertical
@@ -2415,6 +2439,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
+                    gridRoot?.translationY = 0f
                     syncContentWidth()
                     if (target == IslandStage.STAGE1_IDLE) {
                         gridRoot?.visibility = View.GONE
@@ -2606,6 +2631,13 @@ class HyperAccessibilityService : AccessibilityService() {
                             postToggleExpanded()
                             return true
                         }
+                        // Was missing entirely: STAGE3_FULL had no tap case, so every tap inside the
+                        // expanded card fell through and the island looked dead. Buttons still win,
+                        // because childHandled is checked first.
+                        !childHandled && currentStage == IslandStage.STAGE3_FULL && abs(dx) < dp(10) && abs(dy) < dp(10) -> {
+                            openCurrentNotification()
+                            return true
+                        }
                     }
                 }
                 return childHandled || currentStage != IslandStage.STAGE1_IDLE
@@ -2775,7 +2807,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun removeOutsideWatcher() { try { windowManager?.removeViewImmediate(outsideWatcherView!!) } catch (_: Exception) {}; outsideWatcherView = null }
     private fun forceRegionUpdate() { visualRoot?.post { visualRoot?.requestLayout(); visualRoot?.parent?.requestLayout() } }
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
-    private fun hideIslandInternal() { morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
+    private fun hideIslandInternal() { detachRingPushLayer(); ringSwapInFlight = false; morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
