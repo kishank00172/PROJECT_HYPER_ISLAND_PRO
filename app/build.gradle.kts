@@ -75,3 +75,12 @@ dependencies {
 kotlin {
     jvmToolchain(17)
 }
+
+// Print every unit test by name. Without this a green "Unit tests" step could equally mean "no test
+// was found at all", which is not verification.
+tasks.withType<Test>().configureEach {
+    testLogging {
+        events("passed", "failed", "skipped")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
