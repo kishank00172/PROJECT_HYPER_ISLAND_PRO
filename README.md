@@ -67,3 +67,22 @@ Phase 1 will add:
 - Show/hide toggle
 - Basic X/Y/width/height settings
 - No fake cutout drawing
+
+## Dev flow — locked 2026-09-18
+
+**One branch: `main`.** No feature branches for routine work. This repo has 0 merge commits in its
+whole history and every fix so far went straight to `main`; branches only added cost here.
+
+- Push to `main` → CI (`Android Debug APK`) builds and **publishes a release asset**: tag `ci-<run>`,
+  file `app-debug.apk`. No GitHub artifact quota needed, login-in-browser download link:
+  `https://github.com/kishank00172/PROJECT_HYPER_ISLAND_PRO/releases/download/ci-<run>/app-debug.apk`
+- `versionName` carries the run: `0.3.6-phase3.6+b<run>` — check what is actually on the phone.
+- All builds are signed with `keystore/hyperisland-test.jks`, so a new APK **installs over** the old
+  one. No uninstall, permissions keep their grants.
+- Restore point = the **`last-good` tag**, not a branch. Move it forward whenever you have verified a
+  build on-device. Rollback = `git revert <bad-sha>` on `main` (never force-push `main`).
+- **Only exception** that earns a short-lived branch (delete within 24h): work CI cannot judge because
+  it is runtime/ROM behaviour — the reflection touch-region hack, manifest permission changes, keystore
+  rotation, anything that could brick boot. Reason: a green build proves compilation, not the device.
+- `ci-<run>` tags accumulate; delete the old ones you no longer need (keep the one pointed at by
+  `last-good`).
