@@ -37,6 +37,9 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace --parallel --build-cache --configuration-cache --no-daemon --no-watch-fs
         
       - name: Upload debug APK
+        # continue-on-error: quota exhaustion here must not redden a build that compiled fine,
+        # and it must not block the release-asset step below.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           # Run-numbered so the download page tells you which build you are holding.
