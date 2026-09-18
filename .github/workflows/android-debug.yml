@@ -1,5 +1,8 @@
 name: Android Debug APK
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [ main, master ]
@@ -42,3 +45,22 @@ jobs:
           name: hip-b${{ github.run_number }}-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 1
+
+      # Release assets live outside the Actions artifact quota, which is full — so this is the
+      # reliable way to get a test build onto a phone. Delete the ci-<run> tag when you no longer
+      # need the build.
+      - name: Publish APK as a release asset
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          TAG="ci-$GITHUB_RUN_NUMBER"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "CI build $GITHUB_RUN_NUMBER ($GITHUB_REF_NAME)" \
+              --notes "Automated test build from \`$GITHUB_SHA\`. Signed with the shared test key, so it installs **over** any previous CI build — no uninstall, no re-granting permissions."
+          fi
+          gh release upload "$TAG" "$APK" --clobber
+          echo "::notice::APK -> https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$(basename "$APK")"
