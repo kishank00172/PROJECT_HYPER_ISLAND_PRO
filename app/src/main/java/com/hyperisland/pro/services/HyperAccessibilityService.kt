@@ -2347,7 +2347,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 val t = it.animatedValue as Float
                 updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
                 gridRoot?.visibility = View.VISIBLE
-                gridRoot?.alpha = (t / 0.35f).coerceIn(0f, 1f)
+                gridRoot?.alpha = t
             }
         }
         val set = AnimatorSet().apply {
@@ -2357,7 +2357,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     gridRoot?.alpha = 1f
                     gridRoot?.translationY = 0f
                     islandView?.scaleX = 1f; islandView?.scaleY = 1f
-                    syncContentSize()
+                    syncContentWidth()
                     flushDeferredRegionUpdate()
                     scheduleAutoCollapse()
                     updateOutsideWatcherForState()
@@ -2416,11 +2416,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 // the real island behaves, and it kills the "text materialising mid-motion" smear.
                 // Only the pill badge cross-fades, since it swaps layers instead of being revealed.
                 if (target == IslandStage.STAGE3_FULL && notificationMode) {
-                    // Shape leads, content follows: fade + 6dp settle in the last 65% of the grow.
-                    // Quick opacity settle in the first third, then pure mask reveal. No translationY:
-                    // any deliberate text motion during the morph reads as jitter on a growing card.
-                    gridRoot?.alpha = (t / 0.35f).coerceIn(0f, 1f)
-                    pillPreviewRoot?.alpha = 1f - (t / 0.6f).coerceIn(0f, 1f)
+                    // Original feel restored: content fades across the whole morph, exactly as it
+                    // did before my changes. (The short 0-35% ramp read as "no animation at all" —
+                    // the text was already opaque while the card was still tiny.)
+                    gridRoot?.alpha = t
+                    pillPreviewRoot?.alpha = 1f - t
                 } else if (target == IslandStage.STAGE2_PING && notificationMode) {
                     // Collapse: the expanded page must be GONE by 45% of the shrink. Skipping this
                     // fade is what left expanded text hanging below the pill in the last frames.
@@ -2437,7 +2437,7 @@ class HyperAccessibilityService : AccessibilityService() {
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
                     gridRoot?.translationY = 0f
-                    syncContentSize()
+                    syncContentWidth()
                     flushDeferredRegionUpdate()
                     if (target == IslandStage.STAGE1_IDLE) {
                         gridRoot?.visibility = View.GONE
@@ -2464,29 +2464,22 @@ class HyperAccessibilityService : AccessibilityService() {
         anim.start()
     }
 
-    /** Content box size: always the EXPANDED size, never the animated card size. */
+    /** Content column width: always the expanded width, so the morph never re-wraps the text. */
     private fun expandedContentWidthPx(): Int = dp(AppSettings.getIslandExpandedWidthDp(this))
-    private fun expandedContentHeightPx(): Int = dp(AppSettings.getIslandExpandedHeightDp(this))
 
     /**
-     * Re-assert the locked content box if the user moved the expanded width/height sliders
-     * mid-session. Both dimensions must be fixed: leaving height at MATCH_PARENT makes the content
-     * re-centre on every morph frame (text crawling up/down), which is the expand-time jitter.
+     * Re-assert the locked content width if the expanded-width slider moved mid-session.
+     * Width only, on purpose: the earlier version also pinned the height and re-assigned
+     * layoutParams at onAnimationEnd, which forced one more layout pass right when the morph
+     * landed — a visible snap at the end. It is a no-op when nothing changed, so it is free.
      */
-    private fun syncContentSize() {
+    private fun syncContentWidth() {
         val host = gridRoot ?: return
         val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return
-        val w = expandedContentWidthPx()
-        val h = expandedContentHeightPx()
-        if (lp.width != w || lp.height != h) {
-            lp.width = w
-            lp.height = h
-            // TOP + horizontal centre, not CENTER: the card's top edge is fixed (topMargin = island Y)
-            // and it grows downward, so a vertically-centred child would slide down as the card grows.
-            // Anchored to the top, the content never moves — only the clip window widens/opens.
-            lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            host.layoutParams = lp
-        }
+        val want = expandedContentWidthPx()
+        if (lp.width == want) return
+        lp.width = want
+        host.layoutParams = lp
     }
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
@@ -2695,7 +2688,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // (clipToOutline is on this container), so expanding/collapsing reveals or masks text
             // instead of re-measuring it at 48 intermediate widths. That re-wrap per frame was the
             // expand/collapse jitter — MATCH_PARENT here was the root cause.
-            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(expandedContentWidthPx(), expandedContentHeightPx(), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(expandedContentWidthPx(), -1, Gravity.START or Gravity.CENTER_VERTICAL))
 
             // Compact pill badge preview: stable pill, spread content.
             // Icon stays left, count badge stays right — no cramped center cluster.
