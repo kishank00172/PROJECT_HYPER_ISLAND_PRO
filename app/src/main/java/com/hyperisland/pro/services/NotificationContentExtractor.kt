@@ -4,6 +4,7 @@ import android.app.Notification
 import android.content.Context
 import android.os.Bundle
 import android.service.notification.StatusBarNotification
+import com.hyperisland.pro.core.ConversationIdentity
 
 /**
  * Phase 3.6 — Notification Intelligence (latest-message extraction).
@@ -116,6 +117,12 @@ object NotificationContentExtractor {
         }
     }
 
+    /**
+     * Ranking lives in ConversationIdentity (Android-free, unit tested). Note what is NOT passed in
+     * any more: sbn.key. It identified a notification, not a conversation, which is what split one
+     * chat into several ring items. sbn.key is still used elsewhere as the per-notification identity
+     * (echo suppression, dedupe), where it is the correct thing to use.
+     */
     private fun buildConversationIdentity(
         pkg: String,
         sbn: StatusBarNotification,
@@ -123,27 +130,15 @@ object NotificationContentExtractor {
         extras: Bundle,
         conversationTitle: String,
         senderName: String
-    ): Pair<String, String> {
-        val shortcutId = readShortcutId(notification)
-        if (shortcutId.isNotBlank()) return "$pkg|shortcut|$shortcutId" to "shortcutId"
-
-        val key = sbn.key.orEmpty()
-        if (key.isNotBlank()) return "$pkg|sbnKey|$key" to "sbn.key"
-
-        val tag = sbn.tag.orEmpty()
-        if (tag.isNotBlank()) return "$pkg|idTag|${sbn.id}|$tag" to "id+tag"
-
-        val people = readPeopleIdentity(extras)
-        if (people.isNotBlank()) return "$pkg|people|$people" to "people"
-
-        val sender = normalizeKeyPart(senderName)
-        if (sender.isNotBlank()) return "$pkg|sender|$sender" to "sender"
-
-        val title = normalizeKeyPart(conversationTitle)
-        if (title.isNotBlank()) return "$pkg|title|$title" to "titleFallback"
-
-        return "$pkg|notification|${sbn.id}" to "idFallback"
-    }
+    ): Pair<String, String> = ConversationIdentity.build(
+        pkg = pkg,
+        shortcutId = readShortcutId(notification),
+        people = readPeopleIdentity(extras),
+        tag = sbn.tag.orEmpty(),
+        notificationId = sbn.id,
+        sender = senderName,
+        title = conversationTitle
+    )
 
     private fun readShortcutId(notification: Notification): String {
         return try {
@@ -166,15 +161,9 @@ object NotificationContentExtractor {
         return parts.map { normalizeKeyPart(it) }.filter { it.isNotBlank() }.distinct().sorted().joinToString("|")
     }
 
-    private fun normalizeKeyPart(value: String): String {
-        return value.lowercase().replace(Regex("\\s+"), " ").trim()
-    }
+    private fun normalizeKeyPart(value: String): String = ConversationIdentity.normalize(value)
 
-    private fun stripMessageCountSuffix(value: String): String {
-        return value
-            .replace(Regex("\\s*\\(\\d+\\s+messages?\\)\\s*$", RegexOption.IGNORE_CASE), "")
-            .trim()
-    }
+    private fun stripMessageCountSuffix(value: String): String = ConversationIdentity.stripMessageCountSuffix(value)
 
     private fun getAppName(context: Context, pkg: String): String = try {
         context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString()

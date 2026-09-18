@@ -32,6 +32,11 @@ jobs:
         with:
           gradle-version: 8.10.2
 
+      # Tests first: identity/ring logic is unit-testable and was the source of the "DMs vanished"
+      # bug, so a red test must block the APK instead of shipping it to a phone for discovery.
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon --no-watch-fs
+
       # --no-watch-fs add kar diya
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace --parallel --build-cache --configuration-cache --no-daemon --no-watch-fs
@@ -62,6 +67,7 @@ jobs:
           TAG="ci-$GITHUB_RUN_NUMBER"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
               --title "CI build $GITHUB_RUN_NUMBER ($GITHUB_REF_NAME)" \
               --notes "Automated test build from \`$GITHUB_SHA\`. Signed with the shared test key, so it installs **over** any previous CI build — no uninstall, no re-granting permissions."
           fi

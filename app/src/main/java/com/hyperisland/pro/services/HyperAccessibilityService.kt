@@ -331,6 +331,9 @@ class HyperAccessibilityService : AccessibilityService() {
     private val ghostReverseInterpolator = PathInterpolator(0.40f, 0.0f, 0.20f, 1.0f)
 
     companion object {
+        /** Hard cap for the Phase 3.6 ring carousel. 5 matches the HyperOS-style stack feel. */
+        private const val MAX_RING_ITEMS = 5
+
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
         private const val GLOBAL_ACTION_SHOW_KEYBOARD = 16
 
@@ -827,7 +830,20 @@ class HyperAccessibilityService : AccessibilityService() {
         return Notification.Action.Builder(icon, title, pi).build()
     }
 
+    /**
+     * Insert at the front, merged with any existing page for the same conversation.
+     *
+     * Two things this had wrong and now fixes:
+     *  - the list was described as "bounded" but nothing capped it, so a chatty group grew it
+     *    without limit while the island stayed open: the "1/N" counter only ever went up and the
+     *    badge sum kept adding unread counts of pages nobody could reach.
+     *  - it reset currentRingIndex to 0 unconditionally, i.e. a fresh message yanked a reader who
+     *    was on page 2/3 back to the newest page mid-swipe. We now re-find the page they were
+     *    reading by conversation key and stay on it; only someone already on the newest page follows
+     *    the new arrival. (If you prefer always-jump-to-newest, that is this whole when-block -> 0.)
+     */
     private fun addOrUpdateNotificationRing(model: NotificationModel) {
+        val readingKey = notificationRing.getOrNull(currentRingIndex)?.conversationKey
         val index = notificationRing.indexOfFirst { it.conversationKey == model.conversationKey }
         val merged = if (index >= 0) {
             val old = notificationRing[index]
@@ -837,7 +853,13 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         if (index >= 0) notificationRing.removeAt(index)
         notificationRing.add(0, merged)
-        currentRingIndex = 0
+        while (notificationRing.size > MAX_RING_ITEMS) {
+            notificationRing.removeAt(notificationRing.lastIndex)
+        }
+        currentRingIndex = when {
+            readingKey == null || currentRingIndex == 0 -> 0
+            else -> notificationRing.indexOfFirst { it.conversationKey == readingKey }.coerceAtLeast(0)
+        }
         pillUnreadCount = notificationRing.sumOf { it.unreadCount }.coerceAtMost(99)
         notificationQueue.clear()
         notificationQueue.add(merged)

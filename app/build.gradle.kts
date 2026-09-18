@@ -66,6 +66,12 @@ android {
     }
 }
 
+dependencies {
+    // Pure-JVM unit tests (app/src/test). No Robolectric: the logic under test — conversation
+    // identity ranking, ring merge/cap — is deliberately Android-free so CI can actually run it.
+    testImplementation("junit:junit:4.13.2")
+}
+
 kotlin {
     jvmToolchain(17)
 }

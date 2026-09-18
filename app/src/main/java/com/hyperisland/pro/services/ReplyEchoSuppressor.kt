@@ -27,10 +27,17 @@ object ReplyEchoSuppressor {
     private const val IMMEDIATE_ECHO_WINDOW_MS = 800L
 
     // Personal-build Instagram rule:
-    // Instagram often echoes my own notification reply without "You:" marker.
-    // If the same sent text appears again from Instagram within 10s, suppress it.
-    private const val PERSONAL_INSTAGRAM_ECHO_WINDOW_MS = 10_000L
-    private const val PERSONAL_INSTAGRAM_TITLE_HINT = "kishan kumar"
+    // Instagram re-posts my own notification reply without any "You:" marker, so text has to carry
+    // the match. Two deliberate tightenings, both learned the hard way on device:
+    //  - the window is short (an echo rides the same post, it does not arrive 9s later)
+    //  - it never ignores the thread any more, and never matches on substrings (see MIN_ECHO_TEXT)
+    // The old rule was "Instagram + my text appears anywhere inside the incoming message, within
+    // 10s" -> reply "ok" and every incoming chat containing "ok" ("look at this") was deleted.
+    // That is why whole stretches of Instagram DMs never reached the island.
+    private const val PERSONAL_INSTAGRAM_ECHO_WINDOW_MS = 2_500L
+
+    /** Below this many characters, text is not evidence of anything. Never suppress on it. */
+    private const val MIN_ECHO_TEXT = 6
 
     private const val RETAIN_WINDOW_MS = 12_000L
 
@@ -159,7 +166,12 @@ object ReplyEchoSuppressor {
             }
 
             if (matchIndex >= 0) {
+                val hit = pending[matchIndex]
                 pending.removeAt(matchIndex)
+                // One line per suppression, always on: "a message vanished and nobody knew why" was
+                // the actual bug report. Filtered out of release noise by level if that ever matters.
+                Log.i(TAG, "SUPPRESSED echo pkg=$pkg thread=\"$title\" text=\"${message.take(60)}\" " +
+                    "sent=\"${hit.replyText.take(60)}\" ageMs=${now - hit.createdAt}")
                 true
             } else {
                 false
@@ -184,13 +196,12 @@ object ReplyEchoSuppressor {
         if (age !in 0L..RETAIN_WINDOW_MS) return false
 
         val sentText = entry.replyText
-        val latestTextMatches = latestMessagingMessage?.text?.let { latestText ->
-            latestText == sentText || latestText.contains(sentText)
-        } == true
-        val normalTextMatches = cleanMessage == sentText ||
-            cleanMessage.contains(sentText) ||
-            cleanTitle == sentText ||
-            combinedClean.contains(sentText)
+        if (sentText.length < MIN_ECHO_TEXT) return false // "ok", "hi", "\ud83d\udc4d" match half the language
+        val latestTextMatches = latestMessagingMessage?.text == sentText
+        val normalTextMatches = cleanMessage == sentText || cleanTitle == sentText
+        // Same thread guard: an echo rides the notification of the thread I replied from. If the
+        // incoming notification belongs to a different thread, it is a real message, not my echo.
+        val sameThread = entry.conversationTitle.isBlank() || baseTitle == entry.conversationTitle
 
         if (!latestTextMatches && !normalTextMatches) return false
 
@@ -198,11 +209,8 @@ object ReplyEchoSuppressor {
         // If I replied from Instagram notification and the exact same text comes back within 10 seconds,
         // suppress it even if Instagram does not use "You:" and even if title formatting changes.
         val isInstagram = entry.packageName.contains("instagram", ignoreCase = true) || pkg.contains("instagram", ignoreCase = true)
-        val instagramTextMatches = normalTextMatches || latestTextMatches
+        val instagramTextMatches = (normalTextMatches || latestTextMatches) && sameThread
         if (isInstagram && instagramTextMatches && age <= PERSONAL_INSTAGRAM_ECHO_WINDOW_MS) {
-            return true
-        }
-        if (isInstagram && baseTitle.contains(PERSONAL_INSTAGRAM_TITLE_HINT) && instagramTextMatches && age <= PERSONAL_INSTAGRAM_ECHO_WINDOW_MS) {
             return true
         }
 
@@ -217,9 +225,8 @@ object ReplyEchoSuppressor {
             if (senderIsSelfLike && age <= SELF_MARKER_WINDOW_MS) return true
         }
 
-        // Tier 3: personal-build Instagram fallback.
-        // Same app + same sent text within 4.5s. This intentionally does not require title match.
-        if (normalTextMatches && age <= SAME_CONVERSATION_WINDOW_MS) return true
+        // Tier 3: same app + identical sent text within 4.5s, and only for the same thread.
+        if (normalTextMatches && sameThread && age <= SAME_CONVERSATION_WINDOW_MS) return true
 
         // Tier 4: explicit WhatsApp/Telegram self markers.
         val titleIsSelf = baseTitle == "you" || baseTitle == "me"
