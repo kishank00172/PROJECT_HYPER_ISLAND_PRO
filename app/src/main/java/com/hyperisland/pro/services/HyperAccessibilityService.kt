@@ -854,6 +854,9 @@ class HyperAccessibilityService : AccessibilityService() {
         currentRingIndex = 0
         notificationQueue.clear()
         pillUnreadCount = 0
+        // A collapse/clear mid-push would otherwise strand the snapshot layer and the guard.
+        ringSwapInFlight = false
+        detachRingPushLayer()
     }
 
     private fun processNextInQueue() {
@@ -2203,8 +2206,34 @@ class HyperAccessibilityService : AccessibilityService() {
         }, 650)
     }
 
+    // Ring carousel state: one push in flight at a time, plus the frozen outgoing page.
+    private var ringSwapInFlight = false
+    private var ringPushLayer: ImageView? = null
+    private var ringPushBitmap: Bitmap? = null
+
+    private fun detachRingPushLayer() {
+        ringPushLayer?.let { layer -> (layer.parent as? FrameLayout)?.removeView(layer) }
+        ringPushLayer = null
+        ringPushBitmap?.recycle()
+        ringPushBitmap = null
+    }
+
+    /**
+     * Push Slide Carousel V2.
+     *
+     * V1 was a cross-fade: gridRoot faded to alpha 0 while sliding 28dp, the content swapped,
+     * then it faded back in — and the swap re-wrapped text at whatever width the card happened
+     * to be mid-morph. V2 never touches opacity and pushes two pages in lock-step:
+     *   - outgoing = a frozen snapshot of the live view, drawn on top inside the same card
+     *   - incoming = the live gridRoot, updated once, already laid out at the locked width
+     *   - both travel the same distance on the same frames; the card clipToOutline masks edges
+     * 220ms total (110 + 110, no gap). A second flick is ignored until the push settles, so a
+     * half-swapped page is no longer reachable.
+     */
     private fun navigateRingBySwipe(older: Boolean) {
         if (isReplyMode || currentStage != IslandStage.STAGE3_FULL || notificationRing.size <= 1) return
+        if (ringSwapInFlight) return
+
         val nextIndex = if (older) {
             (currentRingIndex + 1).coerceAtMost(notificationRing.lastIndex)
         } else {
@@ -2214,30 +2243,62 @@ class HyperAccessibilityService : AccessibilityService() {
             playRingEdgeResistance(if (older) -1 else 1)
             return
         }
-        val direction = if (older) -1 else 1
-        val outX = dp(28).toFloat() * direction
-        val inX = -outX
-        gridRoot?.animate()?.setListener(null)
-        gridRoot?.animate()?.cancel()
-        gridRoot?.animate()
-            ?.alpha(0f)
+
+        val host = gridRoot
+        val card = host?.parent as? FrameLayout
+        if (host == null || card == null || host.width <= 0 || host.height <= 0) {
+            currentRingIndex = nextIndex
+            getCurrentRingModel()?.let { updateNotificationContent(it) }
+            return
+        }
+
+        ringSwapInFlight = true
+        val dir = if (older) -1 else 1
+        val travel = (host.width * 0.86f).coerceAtLeast(dp(140).toFloat())
+        val outX = dir * travel
+
+        host.animate().cancel()
+
+        val layer: ImageView? = try {
+            val shot = Bitmap.createBitmap(host.width, host.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(shot)
+            canvas.translate(-host.translationX, -host.translationY)
+            host.draw(canvas)
+            ringPushBitmap = shot
+            ImageView(card.context).apply {
+                setImageBitmap(shot)
+                scaleType = ImageView.ScaleType.FIT_XY
+                translationZ = dp(2).toFloat()
+            }.also { view ->
+                card.addView(view, FrameLayout.LayoutParams(host.width, host.height, Gravity.START or Gravity.TOP).apply {
+                    leftMargin = host.left
+                    topMargin = host.top
+                })
+                ringPushLayer = view
+            }
+        } catch (_: Throwable) {
+            null // allocation refused — degrade to a slide-in of the new page only
+        }
+
+        currentRingIndex = nextIndex
+        getCurrentRingModel()?.let { updateNotificationContent(it) }
+
+        host.alpha = 1f
+        host.translationX = -outX
+        layer?.animate()
             ?.translationX(outX)
-            ?.setDuration(120L)
-            ?.setInterpolator(collapseInterpolator)
-            ?.setListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    currentRingIndex = nextIndex
-                    getCurrentRingModel()?.let { updateNotificationContent(it) }
-                    gridRoot?.translationX = inX
-                    gridRoot?.animate()?.setListener(null)
-                    gridRoot?.animate()
-                        ?.alpha(1f)
-                        ?.translationX(0f)
-                        ?.setDuration(180L)
-                        ?.setInterpolator(morphInterpolator)
-                        ?.start()
-                }
-            })
+            ?.setDuration(110L)
+            ?.setInterpolator(AccelerateInterpolator(1.05f))
+            ?.withEndAction { detachRingPushLayer() }
+            ?.start()
+        host.animate()
+            ?.translationX(0f)
+            ?.setDuration(110L)
+            ?.setInterpolator(morphInterpolator)
+            ?.withEndAction {
+                host.translationX = 0f
+                ringSwapInFlight = false
+            }
             ?.start()
     }
 
@@ -2261,9 +2322,34 @@ class HyperAccessibilityService : AccessibilityService() {
         val startH = dp(AppSettings.getIslandHeightDp(this)); val targetH = dp(AppSettings.getIslandExpandedHeightDp(this))
         val startR = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat(); val targetR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
         currentStage = IslandStage.STAGE3_FULL; expandReason = ExpandReason.AUTO_NOTIFICATION
-        val ping = ValueAnimator.ofFloat(0f, 1f).apply { duration = 150L; addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) } }
-        val expand = ValueAnimator.ofFloat(0f, 1f).apply { duration = 650L; interpolator = expandInterpolator; addUpdateListener { val t = it.animatedValue as Float; updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t)); this@HyperAccessibilityService.gridRoot?.alpha = t; this@HyperAccessibilityService.gridRoot?.visibility = View.VISIBLE; this@HyperAccessibilityService.islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat()) } }
-        val set = AnimatorSet().apply { playSequentially(ping, expand); addListener(object : AnimatorListenerAdapter() { override fun onAnimationEnd(a: Animator) { scheduleAutoCollapse(); updateOutsideWatcherForState() } }) }
+        val ping = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 120L
+            addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) }
+        }
+        // Auto-notification expand, cleaned up for the mask approach:
+        //  - 650 -> 360ms, so a defect can't hide inside a slow morph
+        //  - no gridRoot alpha ramp (the outline clips the content; a fade just looked like blur)
+        //  - no islandView scaleY squash (that scaled the TEXT, which is what read as jitter)
+        val expand = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 360L
+            interpolator = expandInterpolator
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
+                gridRoot?.visibility = View.VISIBLE
+            }
+        }
+        val set = AnimatorSet().apply {
+            playSequentially(ping, expand)
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: Animator) {
+                    islandView?.scaleX = 1f; islandView?.scaleY = 1f
+                    syncContentWidth()
+                    scheduleAutoCollapse()
+                    updateOutsideWatcherForState()
+                }
+            })
+        }
         morphAnimator = set; set.start()
     }
 
@@ -2283,7 +2369,10 @@ class HyperAccessibilityService : AccessibilityService() {
                 pillPreviewRoot?.visibility = View.GONE
             }?.start()
             gridRoot?.visibility = View.VISIBLE
-            gridRoot?.alpha = 0f
+            // Kept fully opaque so the mask reveal, not a fade, is what you see.
+            gridRoot?.alpha = 1f
+            islandView?.scaleY = 1f
+            islandView?.scaleX = 1f
         } else if (target == IslandStage.STAGE2_PING) {
             // Full -> pill: keep badge visible and fade expanded content away.
             // Without this, expanded title/message gets clipped inside the small pill.
@@ -2304,25 +2393,29 @@ class HyperAccessibilityService : AccessibilityService() {
         val targetH = dp(getTargetHeight(target))
         val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = if (target == IslandStage.STAGE1_IDLE) 400L else 600L
+            duration = when (target) { IslandStage.STAGE1_IDLE -> 320L; IslandStage.STAGE2_PING -> 340L; else -> 380L }
             interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                // Expanded content is NO LONGER alpha-faded: the card outline masks it, which is how
+                // the real island behaves, and it kills the "text materialising mid-motion" smear.
+                // Only the pill badge cross-fades, since it swaps layers instead of being revealed.
                 if (target == IslandStage.STAGE3_FULL && notificationMode) {
-                    gridRoot?.alpha = t
                     pillPreviewRoot?.alpha = 1f - t
                 } else if (target == IslandStage.STAGE2_PING && notificationMode) {
-                    gridRoot?.alpha = 1f - t
                     pillPreviewRoot?.alpha = 1f
                 } else if (target == IslandStage.STAGE1_IDLE && notificationMode) {
                     gridRoot?.alpha = 1f - t
                     pillPreviewRoot?.alpha = 1f - t
                 }
-                islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI).toFloat())
+                // Was: islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI)) — a whole-card 4% vertical
+                // squash on every morph. Scaling the card scales the TEXT, so it blurred and "breathed"
+                // on both expand and collapse. The rounded-corner growth alone carries the motion now.
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
+                    syncContentWidth()
                     if (target == IslandStage.STAGE1_IDLE) {
                         gridRoot?.visibility = View.GONE
                         pillPreviewRoot?.visibility = View.GONE
@@ -2346,6 +2439,20 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         morphAnimator = anim
         anim.start()
+    }
+
+    /** Content column width: always the expanded width, never the animated card width. */
+    private fun expandedContentWidthPx(): Int = dp(AppSettings.getIslandExpandedWidthDp(this))
+
+    /** Re-sync the locked content width if the user changed the expanded-width slider mid-session. */
+    private fun syncContentWidth() {
+        val host = gridRoot ?: return
+        val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return
+        val want = expandedContentWidthPx()
+        if (lp.width != want) {
+            lp.width = want
+            host.layoutParams = lp
+        }
     }
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
@@ -2543,7 +2650,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
                 addView(iconSec, LinearLayout.LayoutParams(0, -2, 0.2f)); addView(contentSec, LinearLayout.LayoutParams(0, -2, 0.8f))
             }
-            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(-1, -1))
+            // Content is locked to the EXPANDED width for its whole life. The card clips it
+            // (clipToOutline is on this container), so expanding/collapsing reveals or masks text
+            // instead of re-measuring it at 48 intermediate widths. That re-wrap per frame was the
+            // expand/collapse jitter — MATCH_PARENT here was the root cause.
+            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(expandedContentWidthPx(), -1, Gravity.START or Gravity.CENTER_VERTICAL))
 
             // Compact pill badge preview: stable pill, spread content.
             // Icon stays left, count badge stays right — no cramped center cluster.

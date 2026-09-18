@@ -36,5 +36,9 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: hyper-island-pro-phase0-debug-apk
+          # Run-numbered so the download page tells you which build you are holding.
+          # retention-days: 1 — artifact storage quota was full, which silently failed every
+          # upload (job red, code fine). 1 day is enough to grab a test build.
+          name: hip-b${{ github.run_number }}-debug
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 1

@@ -3,6 +3,18 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// SHARED TEST SIGNING KEY — every CI build is signed with this same key, so a new APK
+// installs as an UPDATE instead of a conflicting install. That is what keeps grant state alive:
+// overlay / notification-listener / accessibility grants are tied to the package, and only die
+// when you UNINSTALL. Before this, each CI debug build used a throwaway debug keystore, which
+// forced uninstall + reinstall + re-granting all four permissions on every test.
+// Never use this key for a Play Store upload (it is committed to the repo, in plaintext passwords).
+val hipTestStoreFile = rootProject.file("keystore/hyperisland-test.jks")
+
+// Monotonic build id: CI run number, offset so it is always above the old hard-coded 3.
+// The versionName now carries it, so you can tell which build is on the phone at a glance.
+val hipBuildId: Int = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0) + 1000
+
 android {
     namespace = "com.hyperisland.pro"
     compileSdk = 35
@@ -11,8 +23,17 @@ android {
         applicationId = "com.hyperisland.pro"
         minSdk = 33
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.1-phase3"
+        versionCode = hipBuildId
+        versionName = "0.3.6-phase3.6+b$hipBuildId"
+    }
+
+    signingConfigs {
+        create("testKey") {
+            storeFile = hipTestStoreFile
+            storePassword = "hyperisland-test"
+            keyAlias = "hyperisland"
+            keyPassword = "hyperisland-test"
+        }
     }
 
     buildFeatures {
@@ -21,6 +42,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("testKey")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -28,6 +50,8 @@ android {
             )
         }
         debug {
+            // Same key as release: debug <-> release swaps still install as updates during testing.
+            signingConfig = signingConfigs.getByName("testKey")
             versionNameSuffix = "-debug"
         }
     }
