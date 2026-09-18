@@ -2412,9 +2412,14 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
-                // Expanded content is NO LONGER alpha-faded: the card outline masks it, which is how
-                // the real island behaves, and it kills the "text materialising mid-motion" smear.
-                // Only the pill badge cross-fades, since it swaps layers instead of being revealed.
+                // Morph opacity policy (measured on device, twice — do not "improve" it blind):
+                //  - expand: linear cross-fade over the whole morph. A fast ramp (alpha in by ~35%)
+                //    was tried and reads as "no animation, content just appears".
+                //  - collapse to pill: expanded page must be fully faded by ~45% of the shrink, or
+                //    it hangs below the shrunken card (the ghost text in the screenshot).
+                //  - collapse to idle: out by ~40%.
+                // The content column is width-locked (see expandedContentWidthPx) so none of these
+                // fades hide a re-wrap; the fade is not the anti-jitter mechanism, the lock is.
                 if (target == IslandStage.STAGE3_FULL && notificationMode) {
                     // Original feel restored: content fades across the whole morph, exactly as it
                     // did before my changes. (The short 0-35% ramp read as "no animation at all" —
