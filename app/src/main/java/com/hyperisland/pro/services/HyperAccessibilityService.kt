@@ -90,7 +90,10 @@ class HyperAccessibilityService : AccessibilityService() {
     private data class NotificationModel(
         val packageName: String, val notificationKey: String?, val appName: String, val title: String, val message: String,
         val unreadCount: Int, val conversationKey: String, val conversationKeySource: String,
-        val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?
+        val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?,
+        /** True when the notification carries conversation extras (MessagingStyle / conversationTitle).
+         *  Drives ring eviction: junk that only wears CATEGORY_MESSAGE must not push real chats out. */
+        val isMessagingStyle: Boolean = false
     )
 
     private class InstagramGradientCameraDrawable : Drawable() {
@@ -333,6 +336,8 @@ class HyperAccessibilityService : AccessibilityService() {
     companion object {
         /** Hard cap for the Phase 3.6 ring carousel. 5 matches the HyperOS-style stack feel. */
         private const val MAX_RING_ITEMS = 5
+        /** Same tag the notification listener logs every show/drop under: `adb logcat -s HIP_TRACE`. */
+        private const val TRACE_TAG = "HIP_TRACE"
 
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
         private const val GLOBAL_ACTION_SHOW_KEYBOARD = 16
@@ -345,8 +350,11 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null) =
-            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon); true } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null, isMessagingStyle: Boolean = false) =
+            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle); true } ?: false
+        /** Drop exactly one conversation from the ring (used by the listener's removal callback). */
+        fun dismissConversationFromApp(context: Context, conversationKey: String) =
+            instance?.run { mainHandler.post { dismissConversationFromRing(conversationKey) }; true } ?: false
         fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
         fun previewPillIconFromApp(context: Context, packageName: String, count: Int) =
@@ -448,7 +456,9 @@ class HyperAccessibilityService : AccessibilityService() {
             if (textItems.isEmpty()) return
             val appName = getAppName(pkg)
             val (t, m) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
-            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, 1, null, null, System.currentTimeMillis(), null, emptyList(), null)
+            // isMessagingStyle=true here because this path only ever sees genuinely posted notifications;
+            // ranking them below listener-delivered items would let listener noise evict a real chat.
+            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, 1, null, null, System.currentTimeMillis(), null, emptyList(), smallIcon = null, isMessagingStyle = true)
         }
     }
 
@@ -671,7 +681,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?) {
+    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             if (isShadeOpen) {
@@ -695,7 +705,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (isReplyMode) return@post // while typing/replying, don't build an annoying backlog
             val finalConversationKey = conversationKey ?: "$packageName|title|${title.lowercase(Locale.getDefault()).trim()}"
             val finalConversationKeySource = conversationKeySource ?: "serviceFallback"
-            val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon)
+            val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle)
             addOrUpdateNotificationRing(incomingModel)
             if (currentStage == IslandStage.STAGE3_FULL) {
                 // User is actively reading expanded island; don't auto-shrink/replace it.
@@ -854,7 +864,12 @@ class HyperAccessibilityService : AccessibilityService() {
         if (index >= 0) notificationRing.removeAt(index)
         notificationRing.add(0, merged)
         while (notificationRing.size > MAX_RING_ITEMS) {
-            notificationRing.removeAt(notificationRing.lastIndex)
+            // Eviction order matters more than the cap. On this device Snapchat posts eight promo
+            // notifications that carry CATEGORY_MESSAGE but no conversation extras; with a plain
+            // tail-drop that flood pushed every real chat out of the ring, which is part of what felt
+            // like "my messages disappear". Non-conversations go first, newest real chat survives.
+            val junk = notificationRing.indexOfLast { !it.isMessagingStyle }
+            notificationRing.removeAt(if (junk >= 0) junk else notificationRing.lastIndex)
         }
         currentRingIndex = when {
             readingKey == null || currentRingIndex == 0 -> 0
@@ -879,6 +894,41 @@ class HyperAccessibilityService : AccessibilityService() {
         // A collapse/clear mid-push would otherwise strand the snapshot layer and the guard.
         ringSwapInFlight = false
         detachRingPushLayer()
+    }
+
+    /**
+     * Discard ONE conversation from the ring. This is the operation the app never had: tapping a card
+     * used to hide the whole island while keeping the tapped chat, and the source app cancelling its
+     * own notification (measured: Instagram does it ~0.5 s after posting, reason REASON_APP_CANCEL)
+     * went completely unnoticed - so the read chat came back with the next message and the unread
+     * badge only ever went up.
+     */
+    private fun dismissConversationFromRing(conversationKey: String) {
+        val index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
+        if (index < 0) {
+            Log.i(TRACE_TAG, "DISMISS no page for key=$conversationKey ring=${notificationRing.size}")
+            return
+        }
+        notificationRing.removeAt(index)
+        if (ringSwapInFlight) {
+            // A swipe push owns a frozen snapshot of the page that was just deleted.
+            ringSwapInFlight = false
+            detachRingPushLayer()
+        }
+        currentRingIndex = if (notificationRing.isEmpty()) 0 else index.coerceAtMost(notificationRing.lastIndex)
+        pillUnreadCount = notificationRing.sumOf { it.unreadCount }.coerceAtMost(99)
+        notificationQueue.clear()
+        val current = getCurrentRingModel()
+        Log.i(TRACE_TAG, "DISMISS dropped 1 page remaining=${notificationRing.size} unread=$pillUnreadCount")
+        if (current == null) {
+            postCollapseIsland()
+            return
+        }
+        notificationQueue.add(current)
+        updateNotificationContent(current)
+        updatePillBadge(current)
+        // Deliberately no stage change: expanded stays expanded and shows the next chat, a pill stays
+        // a pill with the new badge. Answering one chat must never hide the others.
     }
 
     private fun processNextInQueue() {
@@ -2532,7 +2582,20 @@ class HyperAccessibilityService : AccessibilityService() {
         autoCollapseRunnable = Runnable { if (notificationQueue.isNotEmpty()) processNextInQueue() else setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.AUTO_NOTIFICATION) }.also { mainHandler.postDelayed(it, delay) }
     }
 
-    private fun openCurrentNotification() { if (isReplyMode) return; try { currentPendingIntent?.send() ?: currentPackageName?.let { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } } catch (_: Exception) {}; postCollapseIsland() }
+    private fun openCurrentNotification() {
+        if (isReplyMode) return
+        val openedKey = getCurrentRingModel()?.conversationKey
+        try {
+            currentPendingIntent?.send() ?: currentPackageName?.let { pkg ->
+                packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+        } catch (_: Exception) {}
+        // "Tap a card" means "I handled THIS one", so this one is discarded and the rest stay visible.
+        // It used to be postCollapseIsland(), which hid the expanded view and the pill badge together -
+        // every other unread chat vanished unopened, while the chat you had just read stayed in the ring
+        // and came back on the next notification.
+        if (openedKey != null) dismissConversationFromRing(openedKey) else postCollapseIsland()
+    }
 
     private fun showIslandInternal() {
         hideIslandInternal()
