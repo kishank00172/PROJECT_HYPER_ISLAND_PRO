@@ -17,11 +17,12 @@ class ConversationIdentityTest {
         pkg: String = "com.instagram.android",
         shortcut: String = "",
         people: String = "",
+        conv: String = "",
         tag: String = "",
         nid: Int = 1,
         sender: String = "",
         title: String = ""
-    ) = ConversationIdentity.build(pkg, shortcut, people, tag, nid, sender, title)
+    ) = ConversationIdentity.build(pkg, shortcut, people, conv, tag, nid, sender, title)
 
     /** THE regression: a fresh notification id per message must NOT create a new thread. */
     @Test
@@ -97,5 +98,46 @@ class ConversationIdentityTest {
     @Test
     fun normalizeCollapsesAllWhitespace() {
         assertEquals("a b c", ConversationIdentity.normalize("  A\t\nB   c "))
+    }
+
+    /** The exact shape the 2026-09-19 device capture shows for an Instagram DM. */
+    @Test
+    fun instagramShapedRecordsMergeOnTheirRealShortcutId() {
+        val a = id(shortcut = "thread_shortcut_59789964840_3402823668417", nid = 64278,
+            sender = "Homieees!!\ud83d\udc31", title = "(kish.ank001) Homieees!!\ud83d\udc31: @shikhakumari320")
+        val b = id(shortcut = "thread_shortcut_59789964840_3402823668417", nid = 64279,
+            sender = "Homieees!!\ud83d\udc31", title = "(kish.ank001) Homieees!!\ud83d\udc31: @shikhakumari320")
+        assertEquals("shortcutId", a.second)
+        assertEquals(a.first, b.first)
+    }
+
+    /**
+     * A group thread puts the SENDER in the title, so sender+title would create one card per person in
+     * the same chat. android.conversationTitle names the thread and survives the sender changing.
+     */
+    @Test
+    fun groupThreadStaysOneCardWhenTheSenderChanges() {
+        val one = id(pkg = "com.whatsapp", conv = "Chat + Fun Vibes", sender = "Ri", title = "Ri")
+        val two = id(pkg = "com.whatsapp", conv = "Chat + Fun Vibes", sender = "Kishan", title = "Kishan")
+        assertEquals("conversationTitle", one.second)
+        assertEquals(one.first, two.first)
+    }
+
+    /**
+     * WhatsApp bakes the unread count into conversationTitle ("(18 messages)"). If that leaked into the
+     * key, every new message would fork the thread and the ring would grow a page per message.
+     */
+    @Test
+    fun bakedInMessageCountIsStrippedFromTheConversationTitle() {
+        val before = id(pkg = "com.whatsapp", conv = "Chat + Fun Vibes (17 messages)", title = "Ri", sender = "Ri")
+        val after = id(pkg = "com.whatsapp", conv = "Chat + Fun Vibes (18 messages)", title = "Ri", sender = "Ri")
+        assertEquals(before.first, after.first)
+        assertEquals("conversationTitle", before.second)
+    }
+
+    @Test
+    fun shortcutIdStillBeatsTheConversationTitle() {
+        val a = id(shortcut = "thread_shortcut_1", conv = "Chat + Fun Vibes")
+        assertEquals("shortcutId", a.second)
     }
 }

@@ -16,13 +16,20 @@ import java.util.Locale
  * accessibility fallback keyed on the title, so the same chat merged or split depending on which
  * path delivered it.
  *
- * Ranking, strongest signal first:
- *   1. shortcutId      set by the app to name the conversation thread; stable across messages
- *   2. people          the notification's person list; stable, and it separates two "Ram"s
- *   3. sender + title   what a human reads as the thread
- *   4. title           conversation name only
- *   5. id + tag        last resort, NOT an identity we want to rely on
- *   6. notification id  true fallback so the key is never blank
+ * Ranking, strongest signal first (each tier re-checked against the 2026-09-19 device capture in
+ * the notification-lab repo, which is the first time this was measured instead of assumed):
+ *   1. shortcutId        IG/InstaPro publish one per thread ("thread_shortcut_<uid>_<tid>") and it is
+ *                        identical across updates, so this is the tier that makes "3 messages = 1
+ *                        card" true for Instagram.
+ *   2. people            now fed from the Person objects (android.messagingUser / sender_person) whose
+ *                        getKey() is a stable numeric id; the older android.people read stayed, but on
+ *                        this device that key simply is not present, so it used to return "".
+ *   3. conversationTitle android.conversationTitle names the thread and survives a change of sender,
+ *                        which sender+title does not (group threads put the sender in the title).
+ *   4. sender + title    what a human reads as the thread
+ *   5. title             conversation name only
+ *   6. id + tag          last resort, NOT an identity we want to rely on
+ *   7. notification id    true fallback so the key is never blank
  */
 object ConversationIdentity {
 
@@ -30,6 +37,7 @@ object ConversationIdentity {
         pkg: String,
         shortcutId: String,
         people: String,
+        conversationTitle: String,
         tag: String,
         notificationId: Int,
         sender: String,
@@ -42,7 +50,9 @@ object ConversationIdentity {
         if (peopleKey.isNotBlank()) return "$pkg|people|$peopleKey" to "people"
 
         val senderKey = normalize(sender)
-        val titleKey = normalize(title)
+        val titleKey = stripMessageCountSuffix(normalize(title))
+        val convKey = stripMessageCountSuffix(normalize(conversationTitle))
+        if (convKey.isNotBlank() && convKey != titleKey) return "$pkg|thread|$convKey" to "conversationTitle"
         if (senderKey.isNotBlank() && titleKey.isNotBlank() && senderKey != titleKey) {
             return "$pkg|conv|$senderKey|$titleKey" to "sender+title"
         }

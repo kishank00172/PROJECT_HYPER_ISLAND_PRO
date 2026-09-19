@@ -40,8 +40,11 @@ object NotificationContentExtractor {
             val rawConversation = readConversationTitle(extras).ifBlank { fallbackTitle }.ifBlank { sender }.ifBlank { appName }
             val conversation = stripMessageCountSuffix(rawConversation)
             if (latestText.isNotBlank()) {
-                val count = messages.size.coerceAtLeast(1)
-                val identity = buildConversationIdentity(pkg, sbn, notification, extras, conversation, sender)
+                // The app's own badge number is the unread count; messages.size is only how much
+                // history the style happens to carry (capture: IG sent number=2 with 3 messages in the
+                // style, so size alone over-reported, while InstaPro's 7/7 agreed by luck).
+                val count = if (notification.number > 0) notification.number else messages.size.coerceAtLeast(1)
+                val identity = buildConversationIdentity(pkg, sbn, notification, extras, conversation, sender, readThreadTitle(extras))
                 return ExtractedNotificationContent(
                     appName = appName,
                     conversationTitle = conversation,
@@ -58,7 +61,7 @@ object NotificationContentExtractor {
         val title = fallbackTitle.ifBlank { appName }
         val text = fallbackText
         if (title.isBlank() && text.isBlank()) return null
-        val identity = buildConversationIdentity(pkg, sbn, notification, extras, title, title)
+        val identity = buildConversationIdentity(pkg, sbn, notification, extras, title, title, readThreadTitle(extras))
         return ExtractedNotificationContent(
             appName = appName,
             conversationTitle = title,
@@ -129,11 +132,13 @@ object NotificationContentExtractor {
         notification: Notification,
         extras: Bundle,
         conversationTitle: String,
-        senderName: String
+        senderName: String,
+        threadTitle: String
     ): Pair<String, String> = ConversationIdentity.build(
         pkg = pkg,
         shortcutId = readShortcutId(notification),
         people = readPeopleIdentity(extras),
+        conversationTitle = threadTitle,
         tag = sbn.tag.orEmpty(),
         notificationId = sbn.id,
         sender = senderName,
@@ -158,7 +163,53 @@ object NotificationContentExtractor {
             val list = extras.get("android.people.list") as? ArrayList<*>
             list?.forEach { if (it != null) parts.add(it.toString()) }
         } catch (_: Exception) {}
+        // Device capture, 2026-09-19: Instagram, InstaPro, WhatsApp, Telegram and Discord all leave
+        // android.people out of the bundle entirely and put the conversation's person in
+        // android.messagingUser / android.messagingStyleUser as an android.app.Person. Its getKey() is
+        // a stable numeric id ("59789964840"), which is exactly what separates two chats that happen
+        // to have the same display name - something names alone can never do.
+        parts.add(readPersonIdentity(extras, "android.messagingUser"))
+        parts.add(readPersonIdentity(extras, "android.messagingStyleUser"))
         return parts.map { normalizeKeyPart(it) }.filter { it.isNotBlank() }.distinct().sorted().joinToString("|")
+    }
+
+    private fun readPersonIdentity(extras: Bundle, key: String): String {
+        val person = try {
+            @Suppress("DEPRECATION")
+            extras.getParcelable(key)
+        } catch (_: Exception) {
+            null
+        } ?: return ""
+        return try {
+            val cls = person.javaClass
+            val id = try { cls.getMethod("getKey").invoke(person)?.toString().orEmpty() } catch (_: Exception) { "" }
+            if (id.isNotBlank()) id else try { cls.getMethod("getName").invoke(person)?.toString().orEmpty() } catch (_: Exception) { "" }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    /** android.conversationTitle when the app sets one, else "" (never the per-message EXTRA_TITLE). */
+    private fun readThreadTitle(extras: Bundle): String =
+        (extras.getCharSequence("android.conversationTitle") ?: "").toString().trim()
+
+    /**
+     * Is this a conversation, or an app wearing a message category? Measured on the same device:
+     * every real chat (WhatsApp children, Instagram, InstaPro, Telegram, Discord) carries at least
+     * one of android.messages / android.messagingUser / android.conversationTitle, and the noise does
+     * not - including eight Snapchat promos that DO set CATEGORY_MESSAGE. WhatsApp chats have no
+     * category at all, which is why filtering a re-sync on CATEGORY_MESSAGE alone lost them.
+     */
+    fun looksLikeConversation(notification: Notification?): Boolean {
+        val extras = notification?.extras ?: return false
+        return try {
+            val keys = extras.keySet()
+            keys.contains(Notification.EXTRA_MESSAGES) ||
+                keys.contains("android.messagingUser") ||
+                keys.contains("android.conversationTitle")
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun normalizeKeyPart(value: String): String = ConversationIdentity.normalize(value)
