@@ -2,8 +2,11 @@ package com.hyperisland.pro.services
 
 import android.app.Notification
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.service.notification.NotificationListenerService.RankingMap
 import android.util.Log
 import android.view.accessibility.AccessibilityManager
 import com.hyperisland.pro.core.AppSettings
@@ -18,6 +21,20 @@ class HyperNotificationListenerService : NotificationListenerService() {
         /** How long a re-posted notification stays blocked as a zombie repeat. */
         private const val ZOMBIE_BLOCK_MS = 20_000L
         private const val ZOMBIE_SWEEP_AFTER = 64
+
+        // NotificationListenerService.REASON_* values spelled out, so nothing here depends on a
+        // constant the SDK may or may not expose. The 2026-09-19 device capture showed reason 8:
+        // opening a chat in the app cancels its own notification, and that is exactly the moment the
+        // island should drop the page.
+        private const val REASON_CANCEL_ALL = 1
+        private const val REASON_CANCEL = 2
+        private const val REASON_TIMEOUT = 4
+        private const val REASON_GROUP_SUMMARY_CANCELED = 5
+        private const val REASON_APP_CANCEL = 8
+        private const val REASON_APP_CANCEL_ALL = 9
+
+        /** Instagram cancelled a notification 559 ms after posting it (measured). 1.5 s is the floor. */
+        private const val REMOVAL_GRACE_MS = 1_500L
     }
 
     private data class RepeatInfo(var count: Int, var firstSeenAt: Long, var lastSeenAt: Long, var blockedUntil: Long)
@@ -25,6 +42,10 @@ class HyperNotificationListenerService : NotificationListenerService() {
 
     // Threads seen since the last connect, so a re-sync cannot double-post what already arrived.
     private val recentlyHandled = HashMap<String, Long>()
+
+    // Removals are delayed a beat: cancel-then-re-post during an update must not blink the card out.
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val pendingRemovals = HashMap<String, Runnable>()
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -48,8 +69,13 @@ class HyperNotificationListenerService : NotificationListenerService() {
         var replayed = 0
         for (sbn in active) {
             if (sbn.packageName == packageName) continue
-            // Only chat-shaped notifications get replayed; do not resurrect music/timer noise.
-            val isChat = sbn.notification?.category == Notification.CATEGORY_MESSAGE
+            // CATEGORY_MESSAGE alone is the wrong filter and this is where the capture paid for it:
+            // WhatsApp's real chat notifications carry NO category at all (only their bundle summary
+            // says "21 messages from 3 chats"), so a re-sync used to replay the summary and skip every
+            // actual chat - WhatsApp looked permanently broken after the OEM killed the service.
+            val n = sbn.notification ?: continue
+            val isChat = NotificationContentExtractor.looksLikeConversation(n) ||
+                n.category == Notification.CATEGORY_MESSAGE
             if (!isChat) continue
             Log.i(TRACE_TAG, "RESYNC replay ${sbn.packageName} ${sbn.key}")
             handlePosted(sbn, resync = true)
@@ -84,6 +110,9 @@ class HyperNotificationListenerService : NotificationListenerService() {
         val pkg = sbn.packageName ?: return drop("no-package", sbn)
         val notification = sbn.notification ?: return drop("no-notification", sbn)
 
+        // Anything posted right now wins over a removal that is still inside its grace window.
+        cancelPendingRemoval(sbn.key)
+
         if (pkg == packageName) return drop("own-notification", sbn)
         if (!AppSettings.isIslandEnabled(this)) return drop("island-disabled", sbn)
 
@@ -91,8 +120,18 @@ class HyperNotificationListenerService : NotificationListenerService() {
         // hides the children), pulling the children from the live shelf still shows the real chat.
         if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
             val children = try { getActiveNotifications() } catch (_: Exception) { null }
-            // Notification.getGroup() is the child's group key; there is no `groupKey` property.
-            val members = children?.filter { it.key != sbn.key && it.notification?.group == sbn.key }
+            val groupName = notification.group
+            // Children carry the group NAME, the summary carries the same name in Notification.getGroup();
+            // StatusBarNotification.key ("0|com.whatsapp|1|null|10289") never equals it, which is why the
+            // first version of this branch matched nothing. Same package is not optional either: WhatsApp
+            // and the ShareKaro app both use a plain group name ("group_key_messages" / "group").
+            val members: List<StatusBarNotification> = if (groupName.isNullOrBlank()) emptyList() else children
+                ?.filter {
+                    it.key != sbn.key &&
+                        it.packageName == sbn.packageName &&
+                        it.notification?.group == groupName &&
+                        (it.notification?.flags?.and(Notification.FLAG_GROUP_SUMMARY) ?: 0) == 0
+                }
                 ?.sortedByDescending { it.postTime }
                 .orEmpty()
             if (members.isEmpty()) return drop("group-summary-without-children", sbn)
@@ -114,6 +153,8 @@ class HyperNotificationListenerService : NotificationListenerService() {
         val appName = extracted.appName
         val title = extracted.conversationTitle
         val message = extracted.latestMessage
+
+        cancelPendingRemoval(extracted.conversationKey)
 
         if (title.isBlank() && message.isBlank()) return drop("blank-title-and-body", sbn)
 
@@ -157,8 +198,54 @@ class HyperNotificationListenerService : NotificationListenerService() {
             postTime = sbn.postTime,
             contentIntent = notification.contentIntent,
             actions = actionList,
-            smallIcon = notification.smallIcon
+            smallIcon = notification.smallIcon,
+            isMessagingStyle = NotificationContentExtractor.looksLikeConversation(notification)
         )
+    }
+
+    /**
+     * "The app removed this notification" finally means something. Two reasons are honoured: the user
+     * swiped it away in the shade, or the app cancelled it (opening the chat in WhatsApp/Instagram does
+     * this, capture reason = 8). Everything else - a group summary being torn down, a re-post - is
+     * ignored, because those are not the user reading anything.
+     */
+    override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?, reason: Int) {
+        super.onNotificationRemoved(sbn, rankingMap, reason)
+        if (sbn == null) return
+        val pkg = sbn.packageName ?: return
+        if (pkg == packageName) return
+        if (reason == REASON_CANCEL_ALL || reason == REASON_APP_CANCEL_ALL) {
+            // Clearing the whole shelf is already owned by the shade-open path in the island, which
+            // marks everything seen; doing it twice would fight over the same state.
+            Log.i(TRACE_TAG, "IGNORE removal reason=$reason pkg=$pkg (bulk: shade owns this)")
+            return
+        }
+        if (reason != REASON_CANCEL && reason != REASON_APP_CANCEL && reason != REASON_TIMEOUT) {
+            Log.i(TRACE_TAG, "IGNORE removal reason=$reason pkg=$pkg")
+            return
+        }
+        val extracted = sbn.notification?.let { NotificationContentExtractor.extract(this, sbn) }
+        val key = extracted?.conversationKey
+        if (key.isNullOrBlank()) {
+            drop("removal-without-conversation-key", sbn, "reason=$reason")
+            return
+        }
+        val notificationKey = sbn.key
+        val task = Runnable {
+            pendingRemovals.remove(key)
+            pendingRemovals.remove(notificationKey)
+            Log.i(TRACE_TAG, "REMOVE reason=$reason pkg=$pkg thread=\"${extracted.conversationTitle}\"")
+            HyperAccessibilityService.dismissConversationFromApp(this, key)
+        }
+        pendingRemovals[key]?.let { mainHandler.removeCallbacks(it) }
+        pendingRemovals[key] = task
+        notificationKey?.let { pendingRemovals[it] = task }
+        mainHandler.postDelayed(task, REMOVAL_GRACE_MS)
+    }
+
+    private fun cancelPendingRemoval(key: String?) {
+        if (key.isNullOrBlank()) return
+        pendingRemovals.remove(key)?.let { mainHandler.removeCallbacks(it) }
     }
 
     private fun drop(reason: String, sbn: StatusBarNotification?, extra: String = "") {
