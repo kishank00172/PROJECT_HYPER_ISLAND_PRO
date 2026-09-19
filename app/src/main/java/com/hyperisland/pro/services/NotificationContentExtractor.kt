@@ -174,9 +174,11 @@ object NotificationContentExtractor {
     }
 
     private fun readPersonIdentity(extras: Bundle, key: String): String {
+        // The Class-typed overload (API 33) is used on purpose: the deprecated generic one cannot
+        // infer its type argument from a value that is only ever reflected on, which is what broke the
+        // build here.
         val person = try {
-            @Suppress("DEPRECATION")
-            extras.getParcelable(key)
+            extras.getParcelable(key, android.os.Parcelable::class.java)
         } catch (_: Exception) {
             null
         } ?: return ""
