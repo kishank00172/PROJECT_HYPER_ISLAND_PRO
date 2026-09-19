@@ -122,3 +122,21 @@ broadcast** PendingIntent with `resultKey=DirectNotificationConstants.DirectRepl
 `RemoteInput.addResultsToIntent` may replace the accessibility typing hack — runtime-only, needs a
 flag in Test Lab); avatars (`person.icon` is a 175×175 bitmap, `shortcutInfo.extras.imageHash` is a real
 cache key); `values*/strings.xml` still says "Phase 0" — a stale trap, not a bug.
+
+### APK delivery — locked 2026-09-19 (tester asked for links, not files)
+
+The build is handed over as a **download link**, and `/home/user` keeps **at most one** APK (the build
+being tested); it gets deleted as soon as he says the install happened. Do not let the workspace fill up
+with `hip-build-*.apk` files.
+
+Mirror hosts, as measured from the sandbox (this saves the next session from re-discovering it):
+- **tmpfiles.org** — works, no account: `curl -F "file=@app-debug.apk" https://tmpfiles.org/api/v1/upload`
+  returns a page URL; the page's real href is `…/dl/<token>/<id>/<name>` and that serves raw bytes.
+  **Files die in 60 minutes**, so always also give the GitHub release link.
+- catbox.moe — `Invalid uploader` for every anonymous API upload from here (datacenter IP); litterbox 500s.
+- uguu.se — `415 Filetype not allowed` for `.apk` (and 3 h retention). 0x0.st — uploads disabled.
+  pixeldrain — API needs a key. So: tmpfiles + the release link, nothing fancier.
+
+Always verify a mirror before handing it over: download it back and compare sha256 with the release
+asset — an accepted upload is not a working download. GitHub release assets stay the durable source:
+`releases/download/ci-<run>/app-debug.apk`.
