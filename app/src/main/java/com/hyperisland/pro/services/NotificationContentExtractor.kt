@@ -44,7 +44,7 @@ object NotificationContentExtractor {
                 // history the style happens to carry (capture: IG sent number=2 with 3 messages in the
                 // style, so size alone over-reported, while InstaPro's 7/7 agreed by luck).
                 val count = if (notification.number > 0) notification.number else messages.size.coerceAtLeast(1)
-                val identity = buildConversationIdentity(pkg, sbn, notification, extras, conversation, sender, readThreadTitle(extras))
+                val identity = buildConversationIdentity(pkg, sbn, notification, conversation, sender, readThreadTitle(extras))
                 return ExtractedNotificationContent(
                     appName = appName,
                     conversationTitle = conversation,
@@ -61,7 +61,7 @@ object NotificationContentExtractor {
         val title = fallbackTitle.ifBlank { appName }
         val text = fallbackText
         if (title.isBlank() && text.isBlank()) return null
-        val identity = buildConversationIdentity(pkg, sbn, notification, extras, title, title, readThreadTitle(extras))
+        val identity = buildConversationIdentity(pkg, sbn, notification, title, title, readThreadTitle(extras))
         return ExtractedNotificationContent(
             appName = appName,
             conversationTitle = title,
@@ -121,23 +121,23 @@ object NotificationContentExtractor {
     }
 
     /**
-     * Ranking lives in ConversationIdentity (Android-free, unit tested). Note what is NOT passed in
-     * any more: sbn.key. It identified a notification, not a conversation, which is what split one
-     * chat into several ring items. sbn.key is still used elsewhere as the per-notification identity
-     * (echo suppression, dedupe), where it is the correct thing to use.
+     * Ranking lives in ConversationIdentity (Android-free, unit tested). Two things are deliberately
+     * NOT passed in: sbn.key, which identified a notification rather than a conversation and is what
+     * split one chat into several ring items (it stays in use for echo suppression and dedupe, where a
+     * per-notification identity is the right thing), and the notification's Person extras, which on
+     * this device name the notification's OWNER ("You" / "me" / our own id) for every chat an app owns
+     * and would therefore merge unrelated chats instead of separating them.
      */
     private fun buildConversationIdentity(
         pkg: String,
         sbn: StatusBarNotification,
         notification: Notification,
-        extras: Bundle,
         conversationTitle: String,
         senderName: String,
         threadTitle: String
     ): Pair<String, String> = ConversationIdentity.build(
         pkg = pkg,
         shortcutId = readShortcutId(notification),
-        people = readPeopleIdentity(extras),
         conversationTitle = threadTitle,
         tag = sbn.tag.orEmpty(),
         notificationId = sbn.id,
@@ -148,44 +148,6 @@ object NotificationContentExtractor {
     private fun readShortcutId(notification: Notification): String {
         return try {
             notification.javaClass.getMethod("getShortcutId").invoke(notification)?.toString().orEmpty()
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
-    private fun readPeopleIdentity(extras: Bundle): String {
-        val parts = ArrayList<String>()
-        try {
-            extras.getStringArray("android.people")?.forEach { if (it.isNotBlank()) parts.add(it) }
-        } catch (_: Exception) {}
-        try {
-            @Suppress("DEPRECATION")
-            val list = extras.get("android.people.list") as? ArrayList<*>
-            list?.forEach { if (it != null) parts.add(it.toString()) }
-        } catch (_: Exception) {}
-        // Device capture, 2026-09-19: Instagram, InstaPro, WhatsApp, Telegram and Discord all leave
-        // android.people out of the bundle entirely and put the conversation's person in
-        // android.messagingUser / android.messagingStyleUser as an android.app.Person. Its getKey() is
-        // a stable numeric id ("59789964840"), which is exactly what separates two chats that happen
-        // to have the same display name - something names alone can never do.
-        parts.add(readPersonIdentity(extras, "android.messagingUser"))
-        parts.add(readPersonIdentity(extras, "android.messagingStyleUser"))
-        return parts.map { normalizeKeyPart(it) }.filter { it.isNotBlank() }.distinct().sorted().joinToString("|")
-    }
-
-    private fun readPersonIdentity(extras: Bundle, key: String): String {
-        // The Class-typed overload (API 33) is used on purpose: the deprecated generic one cannot
-        // infer its type argument from a value that is only ever reflected on, which is what broke the
-        // build here.
-        val person = try {
-            extras.getParcelable(key, android.os.Parcelable::class.java)
-        } catch (_: Exception) {
-            null
-        } ?: return ""
-        return try {
-            val cls = person.javaClass
-            val id = try { cls.getMethod("getKey").invoke(person)?.toString().orEmpty() } catch (_: Exception) { "" }
-            if (id.isNotBlank()) id else try { cls.getMethod("getName").invoke(person)?.toString().orEmpty() } catch (_: Exception) { "" }
         } catch (_: Exception) {
             ""
         }

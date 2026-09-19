@@ -16,27 +16,32 @@ import java.util.Locale
  * accessibility fallback keyed on the title, so the same chat merged or split depending on which
  * path delivered it.
  *
- * Ranking, strongest signal first (each tier re-checked against the 2026-09-19 device capture in
- * the notification-lab repo, which is the first time this was measured instead of assumed):
- *   1. shortcutId        IG/InstaPro publish one per thread ("thread_shortcut_<uid>_<tid>") and it is
- *                        identical across updates, so this is the tier that makes "3 messages = 1
- *                        card" true for Instagram.
- *   2. people            now fed from the Person objects (android.messagingUser / sender_person) whose
- *                        getKey() is a stable numeric id; the older android.people read stayed, but on
- *                        this device that key simply is not present, so it used to return "".
- *   3. conversationTitle android.conversationTitle names the thread and survives a change of sender,
- *                        which sender+title does not (group threads put the sender in the title).
- *   4. sender + title    what a human reads as the thread
- *   5. title             conversation name only
- *   6. id + tag          last resort, NOT an identity we want to rely on
- *   7. notification id    true fallback so the key is never blank
+ * Ranking, strongest signal first (each tier re-checked against the 2026-09-19 device capture, which
+ * is the first time this was measured instead of assumed):
+ *   1. shortcutId        one per conversation thread. Instagram "thread_shortcut_<uid>_<tid>" is the
+ *                        same string on every message of that thread, and WhatsApp/Telegram/Discord set
+ *                        it per chat too - this single tier is what makes "3 messages = 1 card" and
+ *                        "two chats named Ram = 2 cards" both true at once.
+ *   2. conversationTitle android.conversationTitle names the thread and survives a sender change,
+ *                        which sender+title does not (a group thread puts the SENDER in the title).
+ *   3. sender + title    what a human reads as the thread
+ *   4. title             conversation name only
+ *   5. id + tag          last resort, NOT an identity we want to rely on
+ *   6. notification id    true fallback so the key is never blank
+ *
+ * Deliberately MISSING: a "people" tier. It was written, then measured, then deleted. The notification's
+ * person is the OWNER of the notification, not the conversation: WhatsApp and Telegram report the same
+ * Person for every chat they own (key=null, name="You"), Discord reports key="me", and Instagram
+ * reports our own id ("59789964840" / "Kishan Kumar"). Keying identity on it would have merged every
+ * WhatsApp chat into one card and every Telegram chat into one card - a far worse bug than the one it
+ * was meant to fix. Per-chat separation already comes from shortcutId above.
  */
+
 object ConversationIdentity {
 
     fun build(
         pkg: String,
         shortcutId: String,
-        people: String,
         conversationTitle: String,
         tag: String,
         notificationId: Int,
@@ -45,9 +50,6 @@ object ConversationIdentity {
     ): Pair<String, String> {
         val shortcut = shortcutId.trim()
         if (shortcut.isNotBlank()) return "$pkg|shortcut|$shortcut" to "shortcutId"
-
-        val peopleKey = normalize(people)
-        if (peopleKey.isNotBlank()) return "$pkg|people|$peopleKey" to "people"
 
         val senderKey = normalize(sender)
         val titleKey = stripMessageCountSuffix(normalize(title))

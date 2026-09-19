@@ -16,13 +16,12 @@ class ConversationIdentityTest {
     private fun id(
         pkg: String = "com.instagram.android",
         shortcut: String = "",
-        people: String = "",
         conv: String = "",
         tag: String = "",
         nid: Int = 1,
         sender: String = "",
         title: String = ""
-    ) = ConversationIdentity.build(pkg, shortcut, people, conv, tag, nid, sender, title)
+    ) = ConversationIdentity.build(pkg, shortcut, conv, tag, nid, sender, title)
 
     /** THE regression: a fresh notification id per message must NOT create a new thread. */
     @Test
@@ -52,12 +51,27 @@ class ConversationIdentityTest {
         assertEquals("shortcutId", a.second)
     }
 
+    /**
+     * Why there is no "people" tier, and what replaced it. These are the real shortcutId values off
+     * the device capture: WhatsApp reports the same Person ("You") for every chat it owns, so the
+     * person is useless as an identity, while the per-chat shortcutId separates two chats that share a
+     * display name - which is the case the people tier was supposed to cover.
+     */
     @Test
-    fun peopleSeparatesTwoContactsWithTheSameDisplayName() {
-        val ram1 = id(people = "555111", sender = "Ram", title = "Ram")
-        val ram2 = id(people = "555999", sender = "Ram", title = "Ram")
+    fun shortcutIdSeparatesTwoChatsThatShareADisplayName() {
+        val ram1 = id(pkg = "com.whatsapp", shortcut = "147167071174732@lid", sender = "Ram", title = "Ram")
+        val ram2 = id(pkg = "com.whatsapp", shortcut = "241334631796929@lid", sender = "Ram", title = "Ram")
         assertNotEquals(ram1.first, ram2.first)
-        assertEquals("people", ram1.second)
+        assertEquals("shortcutId", ram1.second)
+    }
+
+    /** Several Telegram chats in the capture set no shortcutId; the title has to split those. */
+    @Test
+    fun titleStillSplitsChatsWhenTheAppSetsNoShortcut() {
+        val a = id(pkg = "org.telegram.messenger", sender = "[Marsa] Network", title = "[Marsa] Network")
+        val b = id(pkg = "org.telegram.messenger", sender = "Avatar deals", title = "Avatar deals")
+        assertNotEquals(a.first, b.first)
+        assertEquals("sender", a.second)
     }
 
     /** Apps bake "(N messages)" into the title; if that leaked into the key the thread would move. */
