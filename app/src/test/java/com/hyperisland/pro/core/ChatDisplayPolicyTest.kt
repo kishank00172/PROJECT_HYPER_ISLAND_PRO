@@ -82,7 +82,7 @@ class ChatDisplayPolicyTest {
     }
 
     @Test
-    fun nothingChat-shapedFallsBackToMessage() {
+    fun nothingChatShapedFallsBackToMessage() {
         assertEquals("Message", ChatDisplayPolicy.displayTitle("", "", "", "", ""))
     }
 
