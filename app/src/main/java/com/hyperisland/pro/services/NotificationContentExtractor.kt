@@ -46,7 +46,7 @@ object NotificationContentExtractor {
         // Android's own definition: android.messagingUser is the *user of this conversation*, i.e. me. Its
         // key is the account id (seq 335: key='59789964840' / name='Kishan Kumar'), which is what settles
         // "did I send this" when a display name is something the app invented.
-        @Suppress("DEPRECATION") val selfKey = personKey(extras.get("android.messagingUser"))
+        val selfKey = personKey(extras.get("android.messagingUser"))
         // isGroupConversation is the field that says whether a thread name is even meaningful: in a 1:1 the
         // thread IS the peer, so a 1:1 title filled with my own handle (Instagram does this) must not become
         // the headline.
@@ -146,7 +146,6 @@ object NotificationContentExtractor {
 
     /** The sender Person's key on a MessagingStyle message, when the app filled one in. */
     private fun readSenderPersonKey(bundle: Bundle): String = try {
-        @Suppress("DEPRECATION")
         personKey(bundle.get("sender_person"))
     } catch (_: Exception) {
         ""
