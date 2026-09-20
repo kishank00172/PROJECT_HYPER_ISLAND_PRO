@@ -108,7 +108,9 @@ object ChatDisplayPolicy {
      * the part after the last ": " still names who spoke.
      */
     fun peerFromIGTitle(extraTitle: String): String {
-        val v = ConversationIdentity.normalize(extraTitle)
+        // Whitespace collapsed, case kept: a headline is printed, a key is compared. CI caught the
+        // difference - the first version lower-cased and the card would have said "meta ai".
+        val v = extraTitle.trim().replace(Regex("\\s+"), " ")
         val cut = v.lastIndexOf(": ")
         if (cut < 2 || cut > v.length - 3) return ""
         val tail = v.substring(cut + 2).trim()
