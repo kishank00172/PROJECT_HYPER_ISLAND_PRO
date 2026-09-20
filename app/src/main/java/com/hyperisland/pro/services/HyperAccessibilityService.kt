@@ -66,8 +66,10 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
+import com.hyperisland.pro.core.ChatDisplayPolicy
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
@@ -93,7 +95,9 @@ class HyperAccessibilityService : AccessibilityService() {
         val postTime: Long, val contentIntent: PendingIntent?, val actions: List<Notification.Action>, val smallIcon: Icon?,
         /** True when the notification carries conversation extras (MessagingStyle / conversationTitle).
          *  Drives ring eviction: junk that only wears CATEGORY_MESSAGE must not push real chats out. */
-        val isMessagingStyle: Boolean = false
+        val isMessagingStyle: Boolean = false,
+        /** The message's own instant, when the app told us one; 0 means "fall back to postTime". */
+        val displayTimeMs: Long = 0L
     )
 
     private class InstagramGradientCameraDrawable : Drawable() {
@@ -350,8 +354,8 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null, isMessagingStyle: Boolean = false) =
-            instance?.run { postNotificationEvent("NotificationListener", packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle); true } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) =
+            instance?.run { postNotificationEvent(packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs); true } ?: false
         /** Drop exactly one conversation from the ring (used by the listener's removal callback). */
         fun dismissConversationFromApp(context: Context, conversationKey: String) =
             instance?.run { mainHandler.post { dismissConversationFromRing(conversationKey) }; true } ?: false
@@ -424,7 +428,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private var autoCollapseRunnable: Runnable? = null
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
-    private var lastPrimaryEventTime = 0L
     private var touchStartX = 0f
     private var touchStartY = 0f
     private var outsideGestureActive = false
@@ -448,18 +451,18 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (isShadeOpen) markIslandNotificationsSeenFromShade()
             }
         }
-        if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
-            val pkg = event.packageName?.toString().orEmpty()
-            if (pkg.isBlank() || pkg == packageName || !AppSettings.isIslandEnabled(this)) return
-            val rawText = event.text ?: return
-            val textItems = rawText.mapNotNull { it?.toString()?.trim() }.filter { it.isNotBlank() }
-            if (textItems.isEmpty()) return
-            val appName = getAppName(pkg)
-            val (t, m) = if (textItems.size >= 2) textItems[0] to textItems.drop(1).joinToString(" • ") else appName to textItems[0]
-            // isMessagingStyle=true here because this path only ever sees genuinely posted notifications;
-            // ranking them below listener-delivered items would let listener noise evict a real chat.
-            postNotificationEvent("AccessibilityFallback", pkg, null, appName, t, m, 1, null, null, System.currentTimeMillis(), null, emptyList(), smallIcon = null, isMessagingStyle = true)
-        }
+        // Notification ingestion used to have a second source: this event's CharSequence list,
+        // which is all AccessibilityEvent exposes for a notification. It produced a *degraded* card -
+        // title taken from a text line (which is why the headline read "Instagram"), postTime stamped
+        // as "now", and `actions = emptyList()`, i.e. never any quick actions - and it fired for every
+        // notification whether or not the listener had also seen it. Its only brake was "the listener
+        // showed something in the last 1500 ms", so anything the listener *deliberately* dropped (an
+        // echo, noise) came back through here. A fallback should run when the primary path fails; this
+        // one ran when the primary path said "no", which is why the same chat looked right sometimes and
+        // wrong other times. The listener is the ingestion path; it carries the real postTime, the
+        // reply actions and the MessagingStyle bundles, and it re-syncs on connect (see
+        // HyperNotificationListenerService). Accessibility stays for what only it can do: typing a
+        // reply into another app, and the island's own touch handling.
     }
 
     private fun markIslandNotificationsSeenFromShade() {
@@ -681,7 +684,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun postNotificationEvent(source: String, packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false) {
+    private fun postNotificationEvent(packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             if (isShadeOpen) {
@@ -691,8 +694,6 @@ class HyperAccessibilityService : AccessibilityService() {
                 return@post
             }
             val now = System.currentTimeMillis()
-            if (source == "AccessibilityFallback" && now - lastPrimaryEventTime < 1500L) return@post
-            if (source == "NotificationListener") lastPrimaryEventTime = now
             val display = buildDisplayText(appName, title, message)
             // Safety net: NotificationListener should suppress echoes first, but Accessibility fallback can still duplicate.
             if (ReplyEchoSuppressor.shouldSuppress(packageName, display.title, display.message, null, notificationKey)) {
@@ -705,7 +706,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (isReplyMode) return@post // while typing/replying, don't build an annoying backlog
             val finalConversationKey = conversationKey ?: "$packageName|title|${title.lowercase(Locale.getDefault()).trim()}"
             val finalConversationKeySource = conversationKeySource ?: "serviceFallback"
-            val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle)
+            val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs)
             addOrUpdateNotificationRing(incomingModel)
             if (currentStage == IslandStage.STAGE3_FULL) {
                 // User is actively reading expanded island; don't auto-shrink/replace it.
@@ -1027,7 +1028,7 @@ class HyperAccessibilityService : AccessibilityService() {
         this@HyperAccessibilityService.appIconView?.setImageDrawable(loadAppIcon(model.packageName))
         this@HyperAccessibilityService.appNameText?.text = model.appName
         val ringIndicator = if (notificationRing.size > 1) " · ${currentRingIndex + 1}/${notificationRing.size}" else ""
-        this@HyperAccessibilityService.timeStampText?.text = "${formatNotificationTime(model.postTime)}$ringIndicator"
+        this@HyperAccessibilityService.timeStampText?.text = "${timeLabelFor(model)}$ringIndicator"
         this@HyperAccessibilityService.titleText?.text = buildTitleWithUnreadCount(model.title, model.unreadCount)
         this@HyperAccessibilityService.messageText?.text = model.message
         this@HyperAccessibilityService.titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
@@ -3127,7 +3128,27 @@ class HyperAccessibilityService : AccessibilityService() {
     } catch (_: Exception) { null }
 
     private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
-    private fun formatNotificationTime(t: Long) = if (t <= 0L || System.currentTimeMillis() - t < 60000L) "now" else SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(t))
+    /**
+     * Stamps a card with the *message's* instant when the app published one. The old one-liner used
+     * postTime only, and Instagram pushes a thread's whole backlog in one go (capture seq 85: message
+     * time 12.6 minutes before postTime), so a ten-minute-old chat arrived reading "now" - exactly the
+     * complaint from the device.
+     */
+    private fun timeLabelFor(model: NotificationModel): String {
+        val stamp = if (model.displayTimeMs > 0L) model.displayTimeMs else model.postTime
+        val now = System.currentTimeMillis()
+        val stampDay = Calendar.getInstance().apply { timeInMillis = stamp }
+        val today = Calendar.getInstance().apply { timeInMillis = now }
+        val sameLocalDay = stampDay.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+            stampDay.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+        return ChatDisplayPolicy.timeLabel(
+            millis = stamp,
+            nowMs = now,
+            sameLocalDay = sameLocalDay,
+            clockText = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(stamp)),
+            dateText = SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(stamp))
+        )
+    }
     private fun buildDisplayText(appName: String, t: String, m: String): DisplayText { val a = appName.trim().ifBlank { "App" }; var ti = t.trim(); var me = m.trim(); if (ti.equals(a, true)) { ti = me; me = "" }; if (ti.isBlank() && me.isNotBlank()) { ti = me; me = "" }; return DisplayText(a, ti, me) }
     private fun updateOutlineForIsland(w: Int, h: Int, r: Float) { val left = ((resources.displayMetrics.widthPixels - w) / 2) + dp(AppSettings.getIslandXDp(this)); val top = dp(AppSettings.getIslandYDp(this)); outlineRect.set(left, top, left + w, top + h); outlineRadius = r; islandLayoutParams?.topMargin = top }
     private fun lerpEven(s: Int, e: Int, p: Float): Int { val v = (s + ((e - s) * p)).roundToInt(); return if (v % 2 != 0) v + 1 else v }

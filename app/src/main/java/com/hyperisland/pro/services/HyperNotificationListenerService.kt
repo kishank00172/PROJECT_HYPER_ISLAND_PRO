@@ -199,7 +199,8 @@ class HyperNotificationListenerService : NotificationListenerService() {
             contentIntent = notification.contentIntent,
             actions = actionList,
             smallIcon = notification.smallIcon,
-            isMessagingStyle = NotificationContentExtractor.looksLikeConversation(notification)
+            isMessagingStyle = NotificationContentExtractor.looksLikeConversation(notification),
+            displayTimeMs = extracted.displayTimeMs
         )
     }
 
