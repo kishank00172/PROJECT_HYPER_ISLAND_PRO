@@ -2332,6 +2332,15 @@ class HyperAccessibilityService : AccessibilityService() {
     private var ringSwapInFlight = false
     private var ringSwapStartedAt = 0L
     private var ringSwapGuard: Runnable? = null
+
+    /** What the current touch is doing to the card. NONE until the finger proves it is a drag. */
+    private val DRAG_NONE = 0
+    private val DRAG_PAGES = 1
+    private val DRAG_NUDGE = 2
+    private var dragMode = DRAG_NONE
+    private var dragOlder = true
+    private var dragPrevIndex = 0
+    private var dragPrevModel: NotificationModel? = null
     private var ringPushLayer: ImageView? = null
     private var ringPushBitmap: Bitmap? = null
 
@@ -2358,12 +2367,17 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun endRingSwap(reason: String) {
         ringSwapGuard?.let { mainHandler.removeCallbacks(it) }
         ringSwapGuard = null
-        if (!ringSwapInFlight && ringPushLayer == null && (gridRoot?.translationX ?: 0f) == 0f) return
-        val wasInFlight = ringSwapInFlight
+        val busy = ringSwapInFlight || dragMode != DRAG_NONE || ringPushLayer != null
+        val moved = (gridRoot?.translationX ?: 0f) != 0f || (gridRoot?.translationY ?: 0f) != 0f ||
+            (pillPreviewRoot?.translationX ?: 0f) != 0f || (pillPreviewRoot?.translationY ?: 0f) != 0f
+        if (!busy && !moved) return
+        dragMode = DRAG_NONE
+        dragPrevModel = null
         ringSwapInFlight = false
         detachRingPushLayer()
         gridRoot?.let { it.animate().cancel(); it.translationX = 0f; it.translationY = 0f }
-        if (wasInFlight) TraceLog.ring("swap ended ($reason)")
+        pillPreviewRoot?.let { it.animate().cancel(); it.translationX = 0f; it.translationY = 0f }
+        if (busy) TraceLog.ring("swap ended ($reason)")
     }
 
     /**
@@ -2391,27 +2405,65 @@ class HyperAccessibilityService : AccessibilityService() {
         return IslandGesture(
             touchSlopPx = cfg.scaledTouchSlop.toFloat(),
             minFlingPxPerS = cfg.scaledMinimumFlingVelocity.toFloat(),
-            pageCommitPx = maxOf(dp(26).toFloat(), cardW * 0.24f),
+            // 18% of the card, not 24%: with the neighbour now visible during the drag the page change is
+            // obvious, so a small deliberate flick should be enough. Committing also needs either this
+            // travel or a real fling velocity - see IslandGesture.end.
+            pageCommitPx = maxOf(dp(20).toFloat(), cardW * 0.18f),
             maxDragPx = cardW * 0.45f,
             maxLiftPx = dp(44).toFloat()
         )
     }
 
-    /** What a drag moves: the expanded card, or the pill when that is all there is to grab. */
     private fun draggableView(): View? =
         if (currentStage == IslandStage.STAGE3_FULL) gridRoot else (pillPreviewRoot ?: islandView)
 
-    /** Finger-follow: the page rides 1:1 while dragging, so the gesture answers before the lift. */
+    /**
+     * Finger-follow. Two modes, and which one applies depends on whether there is a page to push:
+     *  - DRAG_PAGES - the page under the finger is frozen into a layer and the live view already holds
+     *    the neighbour, so both travel together inside the pill. This is the fix for "left ya right side
+     *    kuchh nahi tha": the neighbour used to be built only at release, and translating just gridRoot
+     *    (the pill background belongs to islandView and never moves) slid the content out of a fixed
+     *    black card and left the side being dragged towards holding nothing. Now the page you are pulling
+     *    in is on screen while you pull.
+     *  - DRAG_NUDGE - no neighbour (ring edge, pill stage, vertical swipe): shift the content a little as
+     *    resistance, hard-capped so no empty band can appear inside the pill. The cap is *rendering only*;
+     *    the recogniser still decides on its own uncapped numbers, so a small visible nudge does not make
+     *    a swipe harder to commit.
+     */
     private fun showDragOffset(g: IslandGesture) {
-        if (ringSwapInFlight) return // the settle owns the transform until it ends
+        if (ringSwapInFlight) return // a settle owns the transform until it ends
+        if (dragMode == DRAG_NONE && g.axisIsHorizontal && g.offsetX != 0f &&
+            currentStage == IslandStage.STAGE3_FULL
+        ) {
+            dragMode = if (startRingPush(older = g.offsetX < 0f)) DRAG_PAGES else DRAG_NUDGE
+        }
+        if (dragMode == DRAG_PAGES) {
+            val host = gridRoot
+            val layer = ringPushLayer
+            if (host == null || layer == null || host.width <= 0) return
+            val dir = if (dragOlder) -1f else 1f
+            val width = host.width.toFloat()
+            host.animate().cancel()
+            host.translationX = g.offsetX - dir * width
+            host.translationY = 0f
+            layer.animate().cancel()
+            layer.translationX = g.offsetX
+            layer.translationY = 0f
+            return
+        }
         val v = draggableView() ?: return
+        val capX = dp(18).toFloat()
         v.animate().cancel()
-        v.translationX = g.offsetX
-        v.translationY = g.offsetY
+        v.translationX = g.offsetX.coerceIn(-capX, capX)
+        v.translationY = g.offsetY.coerceIn(-dp(20).toFloat(), dp(6).toFloat())
     }
 
-    /** Release without a commit: come back on the same curve the pages settle on, never a jump. */
+    /** Release without a commit: the pushed page goes back the way it came, on the settle's own curve. */
     private fun springBackDrag() {
+        if (dragMode == DRAG_PAGES) {
+            finishRingPush(ringPushLayer?.translationX ?: 0f, commit = false)
+            return
+        }
         val v = draggableView() ?: return
         v.animate().cancel()
         v.animate().translationX(0f).translationY(0f)
@@ -2420,71 +2472,44 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun clearDragVisuals() {
-        val v = draggableView() ?: return
-        v.animate().cancel()
-        v.translationX = 0f
-        v.translationY = 0f
+        val v = draggableView()
+        v?.animate()?.cancel()
+        v?.translationX = 0f
+        v?.translationY = 0f
     }
 
     /**
-     * Push Slide Carousel V3 - and it now says whether a page actually changed, so the caller can spring
-     * the card back instead of leaving it hanging at a half-dragged offset.
+     * Puts the card into "two pages under the finger": the visible page is snapshotted into
+     * [ringPushLayer], the live view is re-pointed at the neighbour and parked one card-width away, where
+     * a continuing drag would have it. Returns false when there is nothing to push (ring edge, reply
+     * mode, collapsed stage, no measurable card, or a snapshot the system refused to allocate) so the
+     * caller falls back to a nudge instead of showing a half-built carousel.
      *
-     * V2 (b1325) was a *lift-triggered* animation: nothing moved while the finger travelled, then at
-     * ACTION_UP the live page was teleported to -travel before animating back, and the two layers ran on
-     * different curves (AccelerateInterpolator(1.05) out, morphInterpolator in) at a fixed 110 ms each.
-     * That is the whole reason it read as a jhatka instead of a slide: the content snapped one frame
-     * before it started moving, and the seam between the two pages slid.
-     *
-     * V3 starts from where the finger stopped (fromOffsetPx, already applied to the live view), hands
-     * the frozen page that exact offset, puts the incoming page one card-width away - where a continuing
-     * drag would have put it, so it sits clipped outside the card and nothing pops - and settles both the
-     * same distance, same duration, same curve. The further the drag got, the shorter the settle: a flick
-     * finishes quickly, a slow pull takes its time.
+     * The snapshot is the whole trick: text is static while a drag is happening, so a frozen image is
+     * indistinguishable from a live second card - and it costs no layout, no reflow, and no re-wrapped
+     * paragraph mid-gesture (the thing that made the old cross-fade look cheap).
      */
-    private fun navigateRingBySwipe(older: Boolean, fromOffsetPx: Float = 0f): Boolean {
+    private fun startRingPush(older: Boolean): Boolean {
+        if (dragMode != DRAG_NONE || ringSwapInFlight) return false
         if (isReplyMode || currentStage != IslandStage.STAGE3_FULL || notificationRing.size <= 1) return false
-        if (ringSwapInFlight) {
-            val age = System.currentTimeMillis() - ringSwapStartedAt
-            if (age < 260L) {
-                TraceLog.gesture("swipe ignored: previous push still settling (${age}ms)")
-                return false
-            }
-            // A settle that outlived its own guard means something cancelled it without telling us. End it
-            // here rather than leave the island deaf to swipes for good.
-            TraceLog.ring("swap was stuck for ${age}ms - force ending before this swipe")
-            endRingSwap("stuck")
-        }
-
         val nextIndex = if (older) {
             (currentRingIndex + 1).coerceAtMost(notificationRing.lastIndex)
         } else {
             (currentRingIndex - 1).coerceAtLeast(0)
         }
-        if (nextIndex == currentRingIndex) return false // ring edge: the drag was already damped there
-
+        if (nextIndex == currentRingIndex) return false
         val host = gridRoot
         val card = host?.parent as? FrameLayout
-        if (host == null || card == null || host.width <= 0 || host.height <= 0) {
-            currentRingIndex = nextIndex
-            getCurrentRingModel()?.let { updateNotificationContent(it) }
-            return true
-        }
+        if (host == null || card == null || host.width <= 0 || host.height <= 0) return false
 
-        ringSwapInFlight = true
-        ringSwapStartedAt = System.currentTimeMillis()
-        val width = host.width.toFloat()
         val dir = if (older) -1f else 1f
-        // Keep the start inside the range the drag could have produced, so the two layers are never
-        // further apart than one card (a cancelled/abandoned drag can hand us a stale offset).
-        val off = fromOffsetPx.coerceIn(-width * 0.45f, width * 0.45f)
-        val outEnd = dir * width
-        val inStart = off - dir * width
-        val distance = (width - abs(off)).coerceAtLeast(1f)
-        val settleMs = (110L + (120L * (distance / width))).toLong().coerceIn(90L, 240L)
-        TraceLog.ring("push ${if (older) "older" else "newer"} idx=$nextIndex/${notificationRing.size} off=${off.toInt()} settle=${settleMs}ms")
-
-        host.animate().cancel()
+        val width = host.width.toFloat()
+        val prevIndex = currentRingIndex
+        val prevModel = getCurrentRingModel()
+        dragOlder = older
+        dragPrevIndex = prevIndex
+        dragPrevModel = prevModel
+        ringSwapStartedAt = System.currentTimeMillis()
 
         val layer: ImageView? = try {
             val shot = Bitmap.createBitmap(host.width, host.height, Bitmap.Config.ARGB_8888)
@@ -2495,10 +2520,10 @@ class HyperAccessibilityService : AccessibilityService() {
             ImageView(card.context).apply {
                 setImageBitmap(shot)
                 scaleType = ImageView.ScaleType.FIT_XY
-                translationX = off
-                // No translationZ here on purpose: a child with Z is drawn in the parent's overlay
-                // pass, which escapes clipToOutline. That leaked the frozen page outside the pill
-                // (the "ghost content" seen after a swipe that got cancelled mid-push).
+                translationX = host.translationX
+                // No translationZ here on purpose: a child with Z is drawn in the parent's overlay pass,
+                // which escapes clipToOutline. That leaked the frozen page outside the pill (the "ghost
+                // content" seen after a swipe that got cancelled mid-push).
             }.also { view ->
                 card.addView(view, FrameLayout.LayoutParams(host.width, host.height, Gravity.START or Gravity.TOP).apply {
                     leftMargin = host.left
@@ -2508,35 +2533,93 @@ class HyperAccessibilityService : AccessibilityService() {
                 view.bringToFront() // draw last = on top, without opting out of the parent clip
             }
         } catch (_: Throwable) {
-            null // allocation refused - the live page still slides in on its own
+            null // allocation refused
+        }
+        if (layer == null) {
+            // No frozen page means no push to show: undo the content swap and let the nudge handle it.
+            dragOlder = older
+            dragPrevModel = null
+            currentRingIndex = prevIndex
+            getCurrentRingModel()?.let { updateNotificationContent(it) }
+            TraceLog.ring("push refused: snapshot unavailable")
+            return false
         }
 
         currentRingIndex = nextIndex
         getCurrentRingModel()?.let { updateNotificationContent(it) }
-
         host.alpha = 1f
-        host.translationX = inStart
+        host.animate().cancel()
         host.translationY = 0f
+        // off is 0 at this instant, so the live neighbour sits exactly one card-width from where the
+        // frozen page will be when the finger reaches it.
+        host.translationX = -dir * width
+        TraceLog.ring("push started ${if (older) "older" else "newer"} -> page ${currentRingIndex + 1}/${notificationRing.size}")
+        return true
+    }
+
+    /**
+     * Ends a push: settle onto the neighbour (commit) or send it back (spring). Both layers always run
+     * the same distance, the same duration and the same curve - different curves for the two pages is
+     * what made the seam slide, which was the whole complaint about the old animation. Duration scales
+     * with the travel that is left, so a flick that was nearly finished finishes quickly and a slow drag
+     * takes its time.
+     */
+    private fun finishRingPush(fromOffsetPx: Float, commit: Boolean) {
+        val host = gridRoot
+        if (host == null || host.width <= 0) { endRingSwap("no host"); return }
+        val width = host.width.toFloat()
+        val dir = if (dragOlder) -1f else 1f
+        val off = fromOffsetPx.coerceIn(-width * 0.45f, width * 0.45f)
+        val layer = ringPushLayer
+        val layerTarget = if (commit) dir * width else 0f
+        val hostTarget = if (commit) 0f else -dir * width
+        val travel = abs(hostTarget - (off - dir * width)).coerceAtLeast(1f)
+        val settleMs = (90L + (150L * (travel / width))).toLong().coerceIn(90L, 240L)
+
+        ringSwapInFlight = true
+        ringSwapStartedAt = System.currentTimeMillis()
+        TraceLog.ring("settle ${if (commit) "commit" else "spring back"} off=${off.toInt()} ${settleMs}ms")
+
+        host.animate().cancel()
+        layer?.animate()?.cancel()
+        layer?.translationX = off
+        host.translationX = off - dir * width
+
         layer?.animate()
-            ?.translationX(outEnd)
+            ?.translationX(layerTarget)
             ?.setDuration(settleMs)
             ?.setInterpolator(ghostMagneticInterpolator)
             ?.setListener(object : AnimatorListenerAdapter() {
-                // withEndAction alone is NOT enough: it is skipped when the animation is cancelled
-                // (e.g. the user collapses mid-push), which strands the frozen page on screen.
+                // withEndAction alone is NOT enough: it is skipped when the animation is cancelled (e.g.
+                // the user collapses mid-push), which strands the frozen page on screen.
                 override fun onAnimationEnd(animation: Animator) = detachRingPushLayer()
                 override fun onAnimationCancel(animation: Animator) = detachRingPushLayer()
             })
             ?.start()
-        // Belt and braces: whoever ends this, the state comes back whole.
+        // Belt and braces: a posted Runnable, because an animation callback is exactly the thing that can
+        // go missing when a stage morph cancels this settle.
         ringSwapGuard?.let { mainHandler.removeCallbacks(it) }
         ringSwapGuard = Runnable { endRingSwap("guard timeout") }.also { mainHandler.postDelayed(it, settleMs + 350L) }
         host.animate()
-            ?.translationX(0f)
+            ?.translationX(hostTarget)
             ?.setDuration(settleMs)
             ?.setInterpolator(ghostMagneticInterpolator)
-            ?.withEndAction { endRingSwap("settled") }
+            ?.withEndAction {
+                if (!commit) {
+                    // The live view was holding the neighbour; give the page back to the finger's origin.
+                    currentRingIndex = dragPrevIndex
+                    dragPrevModel?.let { updateNotificationContent(it) }
+                }
+                endRingSwap(if (commit) "settled" else "sprung back")
+            }
             ?.start()
+    }
+
+    /** Kept for callers without a drag behind them (and as the ring-edge answer: false = spring back). */
+    private fun navigateRingBySwipe(older: Boolean, fromOffsetPx: Float = 0f): Boolean {
+        if (dragMode == DRAG_PAGES) { finishRingPush(fromOffsetPx, commit = true); return true }
+        if (!startRingPush(older)) return false
+        finishRingPush(fromOffsetPx, commit = true)
         return true
     }
 
@@ -2860,6 +2943,8 @@ class HyperAccessibilityService : AccessibilityService() {
                         val g = ensureGesture()
                         islandGesture = g
                         TraceLog.gesture("down ${e.rawX.toInt()},${e.rawY.toInt()} stage=$currentStage ring=${notificationRing.size}")
+                        // A new touch must not inherit a push that never finished settling.
+                        if (dragMode != DRAG_NONE || ringSwapInFlight) endRingSwap("new touch")
                         g.begin(
                             x = e.rawX,
                             y = e.rawY,
@@ -2896,7 +2981,11 @@ class HyperAccessibilityService : AccessibilityService() {
                         g.move(e.rawX, e.rawY, e.eventTime)
                         val offX = g.offsetX
                         val act = g.end(e.eventTime)
-                        TraceLog.gesture("up action=$act off=${offX.toInt()} child@down=$childHandled stage=$currentStage ring=${notificationRing.size}")
+                        TraceLog.gesture(
+                            "up action=$act off=${offX.toInt()} travel=${g.travelXAtRelease.toInt()} " +
+                                "vel=${g.velocityXAtRelease.toInt()} horizontal=${g.axisIsHorizontal} " +
+                                "child@down=$childHandled drag=$dragMode stage=$currentStage ring=${notificationRing.size}"
+                        )
                         when (act) {
                             IslandGesture.Action.TAP -> {
                                 clearDragVisuals()
@@ -2911,8 +3000,27 @@ class HyperAccessibilityService : AccessibilityService() {
                                 postSwipeUpIsland()
                             }
                             IslandGesture.Action.PAGE_OLDER, IslandGesture.Action.PAGE_NEWER -> {
-                                val committed = navigateRingBySwipe(older = act == IslandGesture.Action.PAGE_OLDER, fromOffsetPx = offX)
-                                if (!committed) springBackDrag()
+                                val older = act == IslandGesture.Action.PAGE_OLDER
+                                when {
+                                    dragMode == DRAG_PAGES && dragOlder == older -> finishRingPush(offX, commit = true)
+                                    dragMode == DRAG_PAGES -> {
+                                        // Started one way, finished the other: the push is undone, not
+                                        // hijacked. Finishing it in the new direction would need a second
+                                        // neighbour snapshot mid-flight, which is how ghosts get drawn.
+                                        TraceLog.gesture("direction flipped mid-drag - springing back")
+                                        finishRingPush(offX, commit = false)
+                                    }
+                                    else -> {
+                                        // Nudge mode: no neighbour was on that side when the drag began. If
+                                        // the finger came back and went off the other way, let it push -
+                                        // otherwise a direction reversal would be silently swallowed.
+                                        if (dragMode == DRAG_NUDGE) {
+                                            clearDragVisuals()
+                                            dragMode = DRAG_NONE
+                                        }
+                                        if (!navigateRingBySwipe(older = older, fromOffsetPx = 0f)) springBackDrag()
+                                    }
+                                }
                             }
                             IslandGesture.Action.NONE -> springBackDrag()
                         }

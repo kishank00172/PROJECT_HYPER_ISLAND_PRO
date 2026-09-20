@@ -44,6 +44,18 @@ class IslandGesture(
     var dragging = false
         private set
 
+    /**
+     * Read-only diagnostics for the caller's trace log. A report of "swipe kiya, kuchh nahi hua" is only
+     * answerable if the log can say what the recogniser saw: which axis it latched, how far it travelled
+     * and how fast the finger was moving at the lift.
+     */
+    val axisIsHorizontal: Boolean
+        get() = horizontalAxis
+    val travelXAtRelease: Float
+        get() = travelledX
+    val velocityXAtRelease: Float
+        get() = velX
+
     private var armed = false
     private var allowTap = true
     private var pagesEnabled = false

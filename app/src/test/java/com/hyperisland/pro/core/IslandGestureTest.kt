@@ -108,6 +108,7 @@ class IslandGestureTest {
         g.move(0f, -40f, 10L)   // clearly vertical first
         g.move(200f, -45f, 20L) // then a lot of horizontal travel
         assertEquals("the horizontal leg must not steal the gesture", 0f, g.offsetX, 0.01f)
+        assertFalse("and the latched axis must be readable for the log", g.axisIsHorizontal)
         assertEquals(IslandGesture.Action.SWIPE_UP, g.end(25L))
     }
 
