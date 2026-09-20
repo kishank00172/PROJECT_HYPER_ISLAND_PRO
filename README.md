@@ -89,9 +89,15 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position — updated 2026-09-19 (read me first if you lost the plot)
 
-`main` head carries the **b1330** round (release `ci-330`); `last-good` still points at `ff98959`
+`main` head carries the **b1333** round (release `ci-333`); `last-good` still points at `ff98959`
 (release `ci-314`) on purpose: the morph feel **and** the message-capture behaviour are both waiting for
 an on-device verdict from the only tester we have. When a build is called good, move `last-good` to it.
+
+b1333 = touch + swipe feel + the pill counter: `core/IslandGesture.kt` latches drag-vs-tap and the card
+now rides under the finger (commit settles both layers on one curve, no teleport); the ring holds 24
+chats instead of my old 5 and logs every eviction; the pill badge counts **conversations**, not a sum of
+app badges (the old sum double-counted WhatsApp's group summary and stuck at 99 because Telegram's badge
+said 946536). Group summaries are refused at the extractor.
 
 b1330 = the four symptoms reported on b1325 (own name on a card, headline "Instagram", old messages
 stamped "now", no quick actions). Cause: we printed EXTRA_TITLE (which on Instagram means *last
