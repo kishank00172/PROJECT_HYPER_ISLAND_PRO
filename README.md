@@ -87,11 +87,22 @@ whole history and every fix so far went straight to `main`; branches only added 
 - `ci-<run>` tags accumulate; delete the old ones you no longer need (keep the one pointed at by
   `last-good`).
 
-## Current position — updated 2026-09-19 (read me first if you lost the plot)
+## Current position - updated 2026-09-20 (read me first if you lost the plot)
 
-`main` head carries the **b1338** round (release `ci-338`); `last-good` still points at `ff98959`
-(release `ci-314`) on purpose: the morph feel **and** the message-capture behaviour are both waiting for
-an on-device verdict from the only tester we have. When a build is called good, move `last-good` to it.
+`main` head carries the **b1343** round (release `ci-343`, commit `2fd52ba`, 52 JVM tests green);
+`last-good` still points at `ff98959` (release `ci-314`) on purpose: the morph feel, the swipe feel and the
+sender-name fix are all waiting for an on-device verdict from the only tester we have. When a build is
+called good, move `last-good` to it.
+
+b1343 = what the card is *headed with*. In a 1:1 the name comes from the newest message's sender, not from
+`android.conversationTitle`: Instagram writes the owner's own handle into that field for a 1:1, so his
+username printed where `Meta AI` belonged (`uploads/noti.txt` seq 335 - conversationTitle='kish.ank001',
+messages[0].sender='Meta AI', isGroupConversation=false). Groups keep the thread name; that one boolean
+picks the branch. "Me" is `android.selfDisplayName` equality **or** the message's `sender_person` key equal
+to `android.messagingUser`'s key, because a username is not a display name and neither is stable. Chat
+previews fold onto one line, which is what removes the stray ellipsis a blank line inside a message produced
+under `maxLines=2` + ellipsize. And the trace log prints the rule that fired (`rule=1to1:sender`), so the
+next wrong name is a line in the file instead of another rebuild.
 
 b1338 = the swipe now shows the incoming page *while the finger is moving* (startRingPush at the moment
 the drag latches, both pages driven in lock-step, one curve, one duration; commit needs 18% of the card
@@ -119,7 +130,7 @@ and a second ingestion path inside the accessibility service kept producing degr
 **deleted** — notification ingestion is the NotificationListenerService alone; accessibility stays for
 typing replies and touch handling. Display rules live in `core/ChatDisplayPolicy.kt` with 18 JVM tests
 against real capture values (52 tests in CI total), and the rule is: **a group is named by which thread, a
-1:1 by who spoke** - `android.isGroupConversation` decides which branch runs. That reversal is b1339's fix:
+1:1 by who spoke** - `android.isGroupConversation` decides which branch runs. That reversal is b1343's fix:
 in a 1:1 with Meta AI,
 Instagram put the owner's own handle in `android.conversationTitle`, and trusting the thread name printed
 `kish.ank001` as the headline of a message from Meta AI. "Me" is now proven by `android.selfDisplayName` *or*
