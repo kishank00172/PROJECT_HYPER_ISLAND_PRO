@@ -2324,13 +2324,13 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun ensureGesture(): IslandGesture {
         val cfg = ViewConfiguration.get(this)
-        val cardW = (islandView?.width ?: 0).coerceAtLeast(dpLocal(220f).toInt()).toFloat()
+        val cardW = (islandView?.width ?: 0).coerceAtLeast(dp(220)).toFloat()
         return IslandGesture(
             touchSlopPx = cfg.scaledTouchSlop.toFloat(),
             minFlingPxPerS = cfg.scaledMinimumFlingVelocity.toFloat(),
-            pageCommitPx = maxOf(dpLocal(26f), cardW * 0.24f),
+            pageCommitPx = maxOf(dp(26).toFloat(), cardW * 0.24f),
             maxDragPx = cardW * 0.45f,
-            maxLiftPx = dpLocal(44f)
+            maxLiftPx = dp(44).toFloat()
         )
     }
 
