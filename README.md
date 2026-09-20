@@ -89,9 +89,15 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position — updated 2026-09-19 (read me first if you lost the plot)
 
-`main` head carries the **b1336** round (release `ci-336`); `last-good` still points at `ff98959`
+`main` head carries the **b1338** round (release `ci-338`); `last-good` still points at `ff98959`
 (release `ci-314`) on purpose: the morph feel **and** the message-capture behaviour are both waiting for
 an on-device verdict from the only tester we have. When a build is called good, move `last-good` to it.
+
+b1338 = the swipe now shows the incoming page *while the finger is moving* (startRingPush at the moment
+the drag latches, both pages driven in lock-step, one curve, one duration; commit needs 18% of the card
+width instead of 24%). Before this, dragging moved only the content inside a stationary pill background and
+the neighbour was created at release - so the side you dragged towards was empty, which is what "jagah khali
+hai" meant. Ring edge / no-neighbour drags get a capped 18dp nudge instead of an empty band.
 
 b1336 = a page push could strand the card content one card-width off the pill (its reset lived in
 `withEndAction`, which `gridRoot?.animate()?.cancel()` skips) — that blank card, and the swipe-ignoring
