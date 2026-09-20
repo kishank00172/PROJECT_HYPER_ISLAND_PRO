@@ -75,7 +75,7 @@ object NotificationContentExtractor {
                     isMessagingStyle = true,
                     conversationKey = identity.first,
                     conversationKeySource = identity.second,
-                    displayTimeMs = ChatDisplayPolicy.displayTimeMs(times[newest], notification.getWhen(), sbn.postTime, now)
+                    displayTimeMs = ChatDisplayPolicy.displayTimeMs(times[newest], notification.`when`, sbn.postTime, now)
                 )
             }
         }
@@ -94,7 +94,7 @@ object NotificationContentExtractor {
             isMessagingStyle = false,
             conversationKey = identity.first,
             conversationKeySource = identity.second,
-            displayTimeMs = ChatDisplayPolicy.displayTimeMs(0L, notification.getWhen(), sbn.postTime, now)
+            displayTimeMs = ChatDisplayPolicy.displayTimeMs(0L, notification.`when`, sbn.postTime, now)
         )
     }
 
