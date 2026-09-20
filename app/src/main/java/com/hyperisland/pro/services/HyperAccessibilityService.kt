@@ -719,7 +719,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postNotificationEvent(packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
-            TraceLog.ingest("show $packageName '${display.title}' ${display.message.take(40)}")
             if (isShadeOpen) {
                 // Notification shade is already open; user is looking at notifications.
                 // Do not create/update the pill badge for messages arriving while shade is open.
@@ -728,6 +727,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             val now = System.currentTimeMillis()
             val display = buildDisplayText(appName, title, message)
+            TraceLog.ingest("show $packageName '${display.title}' ${display.message.take(40)}")
             // Safety net: NotificationListener should suppress echoes first, but Accessibility fallback can still duplicate.
             if (ReplyEchoSuppressor.shouldSuppress(packageName, display.title, display.message, null, notificationKey)) {
                 TraceLog.ingest("drop reply-echo from $packageName")
