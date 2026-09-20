@@ -4,6 +4,7 @@ import android.app.Notification
 import android.content.Context
 import android.os.Bundle
 import android.service.notification.StatusBarNotification
+import com.hyperisland.pro.core.ChatDisplayPolicy
 import com.hyperisland.pro.core.ConversationIdentity
 
 /**
@@ -20,7 +21,9 @@ object NotificationContentExtractor {
         val unreadCount: Int,
         val isMessagingStyle: Boolean,
         val conversationKey: String,
-        val conversationKeySource: String
+        val conversationKeySource: String,
+        /** What the card is stamped with: the newest message's own time when the app gives one. */
+        val displayTimeMs: Long
     )
 
     fun extract(context: Context, sbn: StatusBarNotification): ExtractedNotificationContent? {
@@ -28,50 +31,78 @@ object NotificationContentExtractor {
         val notification = sbn.notification ?: return null
         val extras = notification.extras ?: return null
         val appName = getAppName(context, pkg)
+        val now = System.currentTimeMillis()
 
         val fallbackTitle = (extras.getCharSequence(Notification.EXTRA_TITLE) ?: "").toString().trim()
         val fallbackText = (extras.getCharSequence(Notification.EXTRA_TEXT) ?: "").toString().trim()
+        val threadTitle = readThreadTitle(extras)
+        // Instagram publishes its own display name under android.selfDisplayName, which is the only
+        // reliable way to tell "they wrote to you" apart from "you wrote to them" (capture seq 10: a
+        // message the tester's own AI sent was titled with his own name, because EXTRA_TITLE on
+        // Instagram means "last sender", not "conversation"). Nothing used to read it.
+        val selfName = (extras.getCharSequence("android.selfDisplayName") ?: "").toString().trim()
 
         val messages = extractMessagingBundles(extras)
         if (messages.isNotEmpty()) {
-            val latest = messages.last()
-            val latestText = readMessageText(latest).trim()
-            val sender = readMessageSender(latest).trim()
-            val rawConversation = readConversationTitle(extras).ifBlank { fallbackTitle }.ifBlank { sender }.ifBlank { appName }
-            val conversation = stripMessageCountSuffix(rawConversation)
-            if (latestText.isNotBlank()) {
+            val times = ArrayList<Long>(messages.size)
+            val bodies = ArrayList<String>(messages.size)
+            for (b in messages) {
+                times.add(readMessageTime(b))
+                bodies.add(readMessageText(b))
+            }
+            // Which element is "the latest" is not answered by the array position: Instagram's bundle
+            // is neither time-sorted (seq 8: …602962 then …595013) nor free of empty padding entries
+            // (seq 85: "Sent a reel", "", "Sent a reel"). Reading .last() blindly is how a card landed
+            // on a blank message and then fell out of this branch entirely, printing "Instagram".
+            val newest = ChatDisplayPolicy.newestIndex(times, bodies, fallbackText)
+            if (newest >= 0) {
+                val latest = messages[newest]
+                val latestText = bodies[newest].trim()
+                val sender = readMessageSender(latest).trim()
+                val rawConversation = readConversationTitle(extras).ifBlank { fallbackTitle }.ifBlank { sender }.ifBlank { appName }
+                val conversation = stripMessageCountSuffix(rawConversation)
                 // The app's own badge number is the unread count; messages.size is only how much
                 // history the style happens to carry (capture: IG sent number=2 with 3 messages in the
                 // style, so size alone over-reported, while InstaPro's 7/7 agreed by luck).
                 val count = if (notification.number > 0) notification.number else messages.size.coerceAtLeast(1)
-                val identity = buildConversationIdentity(pkg, sbn, notification, conversation, sender, readThreadTitle(extras))
+                val identity = buildConversationIdentity(pkg, sbn, notification, conversation, sender, threadTitle)
                 return ExtractedNotificationContent(
                     appName = appName,
-                    conversationTitle = conversation,
+                    conversationTitle = ChatDisplayPolicy.displayTitle(threadTitle, fallbackTitle, sender, selfName, appName),
                     senderName = sender.ifBlank { conversation },
                     latestMessage = latestText,
                     unreadCount = count,
                     isMessagingStyle = true,
                     conversationKey = identity.first,
-                    conversationKeySource = identity.second
+                    conversationKeySource = identity.second,
+                    displayTimeMs = ChatDisplayPolicy.displayTimeMs(times[newest], notification.getWhen(), sbn.postTime, now)
                 )
             }
         }
 
-        val title = fallbackTitle.ifBlank { appName }
-        val text = fallbackText
-        if (title.isBlank() && text.isBlank()) return null
-        val identity = buildConversationIdentity(pkg, sbn, notification, title, title, readThreadTitle(extras))
+        // No body at all and no thread name means there is nothing to show, whatever the app calls
+        // itself - a card headed "Google" with an empty message line is how the weather summary used
+        // to look.
+        if (fallbackTitle.isBlank() && fallbackText.isBlank() && threadTitle.isBlank()) return null
+        val identity = buildConversationIdentity(pkg, sbn, notification, fallbackTitle, fallbackTitle, threadTitle)
         return ExtractedNotificationContent(
             appName = appName,
-            conversationTitle = title,
-            senderName = title,
-            latestMessage = text,
-            unreadCount = 1,
+            conversationTitle = ChatDisplayPolicy.displayTitle(threadTitle, fallbackTitle, "", selfName, appName),
+            senderName = fallbackTitle,
+            latestMessage = fallbackText,
+            unreadCount = if (notification.number > 0) notification.number else 1,
             isMessagingStyle = false,
             conversationKey = identity.first,
-            conversationKeySource = identity.second
+            conversationKeySource = identity.second,
+            displayTimeMs = ChatDisplayPolicy.displayTimeMs(0L, notification.getWhen(), sbn.postTime, now)
         )
+    }
+
+    /** MessagingStyle.Message.time, or 0 when the app did not set one. */
+    private fun readMessageTime(bundle: Bundle): Long = try {
+        bundle.getLong("time")
+    } catch (_: Exception) {
+        0L
     }
 
     private fun extractMessagingBundles(extras: Bundle): List<Bundle> {
