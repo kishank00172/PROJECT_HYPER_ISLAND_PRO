@@ -40,6 +40,8 @@ object ChatDisplayPolicy {
      *  - the app's name is never a thread name; a card headed "Instagram" carries no information, so an
      *    empty-string headline is better than a fake one and MESSAGE is the last resort
      */
+    private val SUMMARY_TEXT = Regex("^\\d+ (new )?messages?( (from|in) \\d+ .*)?$", RegexOption.IGNORE_CASE)
+
     fun displayTitle(
         threadTitle: String,
         extraTitle: String,
@@ -75,6 +77,24 @@ object ChatDisplayPolicy {
             if (close in 2..40 && v.length > close + 2) v = v.substring(close + 1).trim()
         }
         return v
+    }
+
+    /**
+     * A group summary is a container, not a message: WhatsApp posts "WhatsApp / 21 messages from 3
+     * chats" and Telegram posts "Telegram / 946536 new messages from 5 chats" *alongside* the per-chat
+     * notifications. Two things make them harmful here:
+     *  - their badge number is the app-wide unread total, so counting them double-counts every chat
+     *    beneath it (measured: 21 + 2 + 1 + 18 = 42 shown for what is really 21), and Telegram's badge
+     *    was literally 946536, which pinned the pill to its ceiling;
+     *  - their headline is the app name, which is the one thing the island should never print.
+     * The framework flag does not save us on this device: both summaries were posted with flags 512 and
+     * 529, i.e. FLAG_GROUP_SUMMARY (128) unset, so the listener's flag check let them through as
+     * ordinary notifications. Shape of the text is the honest detector.
+     */
+    fun isGroupSummary(appName: String, title: String, text: String): Boolean {
+        val titleIsTheApp = title.isBlank() || title.trim().equals(appName.trim(), ignoreCase = true)
+        if (!titleIsTheApp) return false
+        return SUMMARY_TEXT.matches(text.trim().replace(Regex("\\s+"), " "))
     }
 
     /**

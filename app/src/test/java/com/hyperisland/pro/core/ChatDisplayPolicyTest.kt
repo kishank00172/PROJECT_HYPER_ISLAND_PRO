@@ -86,6 +86,20 @@ class ChatDisplayPolicyTest {
         assertEquals("Message", ChatDisplayPolicy.displayTitle("", "", "", "", ""))
     }
 
+    /**
+     * The two summary notifications from the capture. They were becoming cards: each one ate a slot,
+     * headed itself with the app name, and made the badge count double.
+     */
+    @Test
+    fun appGroupSummariesAreRecognisedAndRefused() {
+        assertTrue(ChatDisplayPolicy.isGroupSummary("WhatsApp", "WhatsApp", "21 messages from 3 chats"))
+        assertTrue(ChatDisplayPolicy.isGroupSummary("Telegram", "Telegram", "946536 new messages from 5 chats"))
+        // A real chat whose body merely mentions numbers must survive.
+        assertFalse(ChatDisplayPolicy.isGroupSummary("WhatsApp", "Ri \u2705", "Game me aa"))
+        assertFalse(ChatDisplayPolicy.isGroupSummary("Instagram", "Instagram", "Sent a reel"))
+        assertFalse(ChatDisplayPolicy.isGroupSummary("Telegram", "Avatar deals", "3 messages waiting for you"))
+    }
+
     /** WhatsApp bakes the count into the title; it belongs to the badge, not the headline. */
     @Test
     fun bakedInMessageCountIsTrimmedFromTheHeadline() {

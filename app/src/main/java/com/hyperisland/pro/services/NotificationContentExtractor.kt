@@ -42,6 +42,13 @@ object NotificationContentExtractor {
         // Instagram means "last sender", not "conversation"). Nothing used to read it.
         val selfName = (extras.getCharSequence("android.selfDisplayName") ?: "").toString().trim()
 
+        // A group summary is a container, not a message - "WhatsApp / 21 messages from 3 chats". The
+        // framework flag that should have caught it was not set by either app on this device (measured:
+        // flags 512 and 529, FLAG_GROUP_SUMMARY=128 absent), so the listener let them through and each
+        // one became a card: it ate a slot, headed itself with the app name, and its badge is the
+        // app-wide total, which double-counted every chat under it.
+        if (ChatDisplayPolicy.isGroupSummary(appName, fallbackTitle, fallbackText)) return null
+
         val messages = extractMessagingBundles(extras)
         if (messages.isNotEmpty()) {
             val times = ArrayList<Long>(messages.size)

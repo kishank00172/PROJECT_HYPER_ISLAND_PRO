@@ -50,6 +50,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.WindowManager
@@ -67,6 +68,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
+import com.hyperisland.pro.core.IslandGesture
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Calendar
@@ -338,8 +340,15 @@ class HyperAccessibilityService : AccessibilityService() {
     private val ghostReverseInterpolator = PathInterpolator(0.40f, 0.0f, 0.20f, 1.0f)
 
     companion object {
-        /** Hard cap for the Phase 3.6 ring carousel. 5 matches the HyperOS-style stack feel. */
-        private const val MAX_RING_ITEMS = 5
+        /**
+         * How many conversations the island holds at once. There is no platform rule and no Dynamic
+         * Island precedent for this number - the first carousel copied "a stack of 5" from HyperOS and I
+         * kept it, which meant six chats arriving together dropped one outright. The shelf is the real
+         * limit now: 24 is a guard against an unbounded list (overlay memory, and a page indicator nobody
+         * would ever flip through), not a design choice. Eviction is logged, so a dropped chat is
+         * auditable instead of silent.
+         */
+        private const val MAX_RING_ITEMS = 24
         /** Same tag the notification listener logs every show/drop under: `adb logcat -s HIP_TRACE`. */
         private const val TRACE_TAG = "HIP_TRACE"
 
@@ -396,7 +405,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private var pillPreviewRoot: FrameLayout? = null
     private var pillPreviewIcon: ImageView? = null
     private var pillPreviewCount: TextView? = null
-    private var pillUnreadCount: Int = 0
+    /** The pill badge: how many conversations are stacked right now. Not a sum of app badges. */
+    private var pillChatCount: Int = 0
 
     // Reply UI
     private var replyBar: LinearLayout? = null
@@ -428,8 +438,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private var autoCollapseRunnable: Runnable? = null
     private var lastIslandFingerprint = ""
     private var lastIslandFingerprintTime = 0L
-    private var touchStartX = 0f
-    private var touchStartY = 0f
     private var outsideGestureActive = false
     private val outlineRect = Rect()
     private var outlineRadius = 0f
@@ -788,7 +796,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (!AppSettings.isIslandEnabled(this)) return@post
             if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
             val app = getAppName(targetPackageName)
-            pillUnreadCount = count.coerceIn(1, 99)
+            pillChatCount = count.coerceIn(1, 99)
             val model = NotificationModel(
                 packageName = targetPackageName,
                 notificationKey = null,
@@ -813,7 +821,7 @@ class HyperAccessibilityService : AccessibilityService() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
-            pillUnreadCount = 7
+            pillChatCount = 7
             pillPreviewIcon?.setImageDrawable(loadGenericPillGlyph("org.telegram.messenger"))
             pillPreviewCount?.text = "7"
             pillPreviewCount?.visibility = View.VISIBLE
@@ -870,13 +878,15 @@ class HyperAccessibilityService : AccessibilityService() {
             // tail-drop that flood pushed every real chat out of the ring, which is part of what felt
             // like "my messages disappear". Non-conversations go first, newest real chat survives.
             val junk = notificationRing.indexOfLast { !it.isMessagingStyle }
-            notificationRing.removeAt(if (junk >= 0) junk else notificationRing.lastIndex)
+            val dropped = if (junk >= 0) junk else notificationRing.lastIndex
+            Log.i(TRACE_TAG, "RING over capacity (${notificationRing.size} > $MAX_RING_ITEMS) dropping ${notificationRing[dropped].packageName}")
+            notificationRing.removeAt(dropped)
         }
         currentRingIndex = when {
             readingKey == null || currentRingIndex == 0 -> 0
             else -> notificationRing.indexOfFirst { it.conversationKey == readingKey }.coerceAtLeast(0)
         }
-        pillUnreadCount = notificationRing.sumOf { it.unreadCount }.coerceAtMost(99)
+        pillChatCount = notificationRing.size
         notificationQueue.clear()
         notificationQueue.add(merged)
     }
@@ -891,7 +901,7 @@ class HyperAccessibilityService : AccessibilityService() {
         notificationRing.clear()
         currentRingIndex = 0
         notificationQueue.clear()
-        pillUnreadCount = 0
+        pillChatCount = 0
         // A collapse/clear mid-push would otherwise strand the snapshot layer and the guard.
         ringSwapInFlight = false
         detachRingPushLayer()
@@ -917,10 +927,10 @@ class HyperAccessibilityService : AccessibilityService() {
             detachRingPushLayer()
         }
         currentRingIndex = if (notificationRing.isEmpty()) 0 else index.coerceAtMost(notificationRing.lastIndex)
-        pillUnreadCount = notificationRing.sumOf { it.unreadCount }.coerceAtMost(99)
+        pillChatCount = notificationRing.size
         notificationQueue.clear()
         val current = getCurrentRingModel()
-        Log.i(TRACE_TAG, "DISMISS dropped 1 page remaining=${notificationRing.size} unread=$pillUnreadCount")
+        Log.i(TRACE_TAG, "DISMISS dropped 1 page remaining=${notificationRing.size} chats=$pillChatCount")
         if (current == null) {
             postCollapseIsland()
             return
@@ -951,8 +961,8 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(loadPillNotificationIcon(model.packageName, model.smallIcon))
-        pillPreviewCount?.text = if (pillUnreadCount <= 1) "" else pillUnreadCount.coerceAtMost(99).toString()
-        pillPreviewCount?.visibility = if (pillUnreadCount <= 1) View.GONE else View.VISIBLE
+        pillPreviewCount?.text = if (pillChatCount <= 1) "" else pillChatCount.toString()
+        pillPreviewCount?.visibility = if (pillChatCount <= 1) View.GONE else View.VISIBLE
     }
 
     private fun triggerPillPreview() {
@@ -1013,7 +1023,9 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun buildTitleWithUnreadCount(title: String, unreadCount: Int): CharSequence {
         // Keep message line clean; unread metadata lives in the title as subtle styled text.
         if (unreadCount <= 1 || title.isBlank()) return title
-        val suffix = "  $unreadCount messages"
+        // "new", not "messages": this is the app's own unread badge for this thread, which is not the
+        // same number as how many lines the notification happens to carry.
+        val suffix = "  $unreadCount new"
         val full = "$title$suffix"
         return SpannableString(full).apply {
             val start = title.length
@@ -2303,32 +2315,98 @@ class HyperAccessibilityService : AccessibilityService() {
      * 220ms total (110 + 110, no gap). A second flick is ignored until the push settles, so a
      * half-swapped page is no longer reachable.
      */
-    private fun navigateRingBySwipe(older: Boolean) {
-        if (isReplyMode || currentStage != IslandStage.STAGE3_FULL || notificationRing.size <= 1) return
-        if (ringSwapInFlight) return
+    /**
+     * The live touch decision for one gesture; the rules themselves are Android-free in [IslandGesture]
+     * so CI can hold them to the report. Rebuilt on every DOWN because its thresholds are proportions
+     * of the card, and the card changes width with the stage.
+     */
+    private var islandGesture: IslandGesture? = null
+
+    private fun ensureGesture(): IslandGesture {
+        val cfg = ViewConfiguration.get(this)
+        val cardW = (islandView?.width ?: 0).coerceAtLeast(dpLocal(220f).toInt()).toFloat()
+        return IslandGesture(
+            touchSlopPx = cfg.scaledTouchSlop.toFloat(),
+            minFlingPxPerS = cfg.scaledMinimumFlingVelocity.toFloat(),
+            pageCommitPx = maxOf(dpLocal(26f), cardW * 0.24f),
+            maxDragPx = cardW * 0.45f,
+            maxLiftPx = dpLocal(44f)
+        )
+    }
+
+    /** What a drag moves: the expanded card, or the pill when that is all there is to grab. */
+    private fun draggableView(): View? =
+        if (currentStage == IslandStage.STAGE3_FULL) gridRoot else (pillPreviewRoot ?: islandView)
+
+    /** Finger-follow: the page rides 1:1 while dragging, so the gesture answers before the lift. */
+    private fun showDragOffset(g: IslandGesture) {
+        val v = draggableView() ?: return
+        v.animate().cancel()
+        v.translationX = g.offsetX
+        v.translationY = g.offsetY
+    }
+
+    /** Release without a commit: come back on the same curve the pages settle on, never a jump. */
+    private fun springBackDrag() {
+        val v = draggableView() ?: return
+        v.animate().cancel()
+        v.animate().translationX(0f).translationY(0f)
+            .setDuration(150L).setInterpolator(ghostMagneticInterpolator)
+            .start()
+    }
+
+    private fun clearDragVisuals() {
+        val v = draggableView() ?: return
+        v.animate().cancel()
+        v.translationX = 0f
+        v.translationY = 0f
+    }
+
+    /**
+     * Push Slide Carousel V3 - and it now says whether a page actually changed, so the caller can spring
+     * the card back instead of leaving it hanging at a half-dragged offset.
+     *
+     * V2 (b1325) was a *lift-triggered* animation: nothing moved while the finger travelled, then at
+     * ACTION_UP the live page was teleported to -travel before animating back, and the two layers ran on
+     * different curves (AccelerateInterpolator(1.05) out, morphInterpolator in) at a fixed 110 ms each.
+     * That is the whole reason it read as a jhatka instead of a slide: the content snapped one frame
+     * before it started moving, and the seam between the two pages slid.
+     *
+     * V3 starts from where the finger stopped (fromOffsetPx, already applied to the live view), hands
+     * the frozen page that exact offset, puts the incoming page one card-width away - where a continuing
+     * drag would have put it, so it sits clipped outside the card and nothing pops - and settles both the
+     * same distance, same duration, same curve. The further the drag got, the shorter the settle: a flick
+     * finishes quickly, a slow pull takes its time.
+     */
+    private fun navigateRingBySwipe(older: Boolean, fromOffsetPx: Float = 0f): Boolean {
+        if (isReplyMode || currentStage != IslandStage.STAGE3_FULL || notificationRing.size <= 1) return false
+        if (ringSwapInFlight) return false
 
         val nextIndex = if (older) {
             (currentRingIndex + 1).coerceAtMost(notificationRing.lastIndex)
         } else {
             (currentRingIndex - 1).coerceAtLeast(0)
         }
-        if (nextIndex == currentRingIndex) {
-            playRingEdgeResistance(if (older) -1 else 1)
-            return
-        }
+        if (nextIndex == currentRingIndex) return false // ring edge: the drag was already damped there
 
         val host = gridRoot
         val card = host?.parent as? FrameLayout
         if (host == null || card == null || host.width <= 0 || host.height <= 0) {
             currentRingIndex = nextIndex
             getCurrentRingModel()?.let { updateNotificationContent(it) }
-            return
+            return true
         }
 
         ringSwapInFlight = true
-        val dir = if (older) -1 else 1
-        val travel = (host.width * 0.86f).coerceAtLeast(dp(140).toFloat())
-        val outX = dir * travel
+        val width = host.width.toFloat()
+        val dir = if (older) -1f else 1f
+        // Keep the start inside the range the drag could have produced, so the two layers are never
+        // further apart than one card (a cancelled/abandoned drag can hand us a stale offset).
+        val off = fromOffsetPx.coerceIn(-width * 0.45f, width * 0.45f)
+        val outEnd = dir * width
+        val inStart = off - dir * width
+        val distance = (width - abs(off)).coerceAtLeast(1f)
+        val settleMs = (110L + (120L * (distance / width))).toLong().coerceIn(90L, 240L)
 
         host.animate().cancel()
 
@@ -2341,6 +2419,7 @@ class HyperAccessibilityService : AccessibilityService() {
             ImageView(card.context).apply {
                 setImageBitmap(shot)
                 scaleType = ImageView.ScaleType.FIT_XY
+                translationX = off
                 // No translationZ here on purpose: a child with Z is drawn in the parent's overlay
                 // pass, which escapes clipToOutline. That leaked the frozen page outside the pill
                 // (the "ghost content" seen after a swipe that got cancelled mid-push).
@@ -2353,18 +2432,19 @@ class HyperAccessibilityService : AccessibilityService() {
                 view.bringToFront() // draw last = on top, without opting out of the parent clip
             }
         } catch (_: Throwable) {
-            null // allocation refused — degrade to a slide-in of the new page only
+            null // allocation refused - the live page still slides in on its own
         }
 
         currentRingIndex = nextIndex
         getCurrentRingModel()?.let { updateNotificationContent(it) }
 
         host.alpha = 1f
-        host.translationX = -outX
+        host.translationX = inStart
+        host.translationY = 0f
         layer?.animate()
-            ?.translationX(outX)
-            ?.setDuration(110L)
-            ?.setInterpolator(AccelerateInterpolator(1.05f))
+            ?.translationX(outEnd)
+            ?.setDuration(settleMs)
+            ?.setInterpolator(ghostMagneticInterpolator)
             ?.setListener(object : AnimatorListenerAdapter() {
                 // withEndAction alone is NOT enough: it is skipped when the animation is cancelled
                 // (e.g. the user collapses mid-push), which strands the frozen page on screen.
@@ -2373,30 +2453,18 @@ class HyperAccessibilityService : AccessibilityService() {
             })
             ?.start()
         // Belt and braces: a lost callback can never leave a ghost layer behind.
-        mainHandler.postDelayed({ if (ringPushLayer != null) detachRingPushLayer() }, 420L)
+        mainHandler.postDelayed({ if (ringPushLayer != null) detachRingPushLayer() }, settleMs + 400L)
         host.animate()
             ?.translationX(0f)
-            ?.setDuration(110L)
-            ?.setInterpolator(morphInterpolator)
+            ?.setDuration(settleMs)
+            ?.setInterpolator(ghostMagneticInterpolator)
             ?.withEndAction {
                 host.translationX = 0f
+                host.translationY = 0f
                 ringSwapInFlight = false
             }
             ?.start()
-    }
-
-    private fun playRingEdgeResistance(direction: Int) {
-        val dx = dp(8).toFloat() * direction
-        gridRoot?.animate()?.setListener(null)
-        gridRoot?.animate()?.cancel()
-        gridRoot?.animate()
-            ?.translationX(dx)
-            ?.setDuration(70L)
-            ?.setInterpolator(morphInterpolator)
-            ?.withEndAction {
-                gridRoot?.animate()?.translationX(0f)?.setDuration(120L)?.setInterpolator(collapseInterpolator)?.start()
-            }
-            ?.start()
+        return true
     }
 
     private fun triggerFluidExpansion() {
@@ -2700,40 +2768,75 @@ class HyperAccessibilityService : AccessibilityService() {
         this@HyperAccessibilityService.islandBackground = createIslandBackground(r)
         this@HyperAccessibilityService.islandView = object : FrameLayout(this) {
             override fun dispatchTouchEvent(e: MotionEvent): Boolean {
-                if (e.action == MotionEvent.ACTION_DOWN) {
-                    this@HyperAccessibilityService.touchStartX = e.rawX
-                    this@HyperAccessibilityService.touchStartY = e.rawY
-                }
-
-                // Children first: Reply/action buttons must receive clicks before island gestures consume the touch.
+                val action = e.actionMasked
+                // Children first: reply/action buttons must get the touch before the island claims a gesture.
                 val childHandled = super.dispatchTouchEvent(e)
 
-                if (e.action == MotionEvent.ACTION_UP) {
-                    val dx = e.rawX - this@HyperAccessibilityService.touchStartX
-                    val dy = e.rawY - this@HyperAccessibilityService.touchStartY
-                    when {
-                        dy < -dp(24) && abs(dy) > abs(dx) -> {
-                            postSwipeUpIsland()
-                            return true
-                        }
-                        currentStage == IslandStage.STAGE3_FULL && abs(dx) > dp(36) && abs(dx) > abs(dy) * 1.35f -> {
-                            navigateRingBySwipe(older = dx < 0f)
-                            return true
-                        }
-                        !childHandled && currentStage != IslandStage.STAGE3_FULL && abs(dx) < dp(10) && abs(dy) < dp(10) -> {
-                            postToggleExpanded()
-                            return true
-                        }
-                        // Was missing entirely: STAGE3_FULL had no tap case, so every tap inside the
-                        // expanded card fell through and the island looked dead. Buttons still win,
-                        // because childHandled is checked first.
-                        !childHandled && currentStage == IslandStage.STAGE3_FULL && abs(dx) < dp(10) && abs(dy) < dp(10) -> {
-                            openCurrentNotification()
-                            return true
+                when (action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        // Fresh machine per gesture: the thresholds are proportions of the current card,
+                        // and the card is a different width in every stage.
+                        val g = ensureGesture()
+                        islandGesture = g
+                        g.begin(
+                            x = e.rawX,
+                            y = e.rawY,
+                            timeMs = e.eventTime,
+                            // A press that a button took must never turn into "open this chat".
+                            allowTap = !childHandled,
+                            pagesEnabled = currentStage == IslandStage.STAGE3_FULL && notificationRing.size > 1,
+                            atFirstPage = currentRingIndex == 0,
+                            atLastPage = currentRingIndex >= notificationRing.lastIndex
+                        )
+                    }
+                    MotionEvent.ACTION_POINTER_DOWN -> {
+                        // A second finger is not a swipe; abandon so its movements cannot be misread.
+                        islandGesture?.cancel()
+                        springBackDrag()
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val g = islandGesture
+                        if (g != null && g.move(e.rawX, e.rawY, e.eventTime)) showDragOffset(g)
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        islandGesture?.cancel()
+                        islandGesture = null
+                        springBackDrag()
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val g = islandGesture
+                        islandGesture = null
+                        if (g == null) return childHandled
+                        g.move(e.rawX, e.rawY, e.eventTime)
+                        val offX = g.offsetX
+                        val act = g.end(e.eventTime)
+                        when (act) {
+                            IslandGesture.Action.TAP -> {
+                                clearDragVisuals()
+                                // STAGE3: the card is the thing, so a tap opens it (this case was missing
+                                // once and the island looked dead). Anywhere else a tap opens the card.
+                                if (currentStage == IslandStage.STAGE3_FULL) openCurrentNotification() else postToggleExpanded()
+                            }
+                            IslandGesture.Action.SWIPE_UP -> {
+                                // Snap the offset to zero instead of animating it back: the stage morph
+                                // starts on the same frame and is what the eye is following.
+                                clearDragVisuals()
+                                postSwipeUpIsland()
+                            }
+                            IslandGesture.Action.PAGE_OLDER, IslandGesture.Action.PAGE_NEWER -> {
+                                val committed = navigateRingBySwipe(older = act == IslandGesture.Action.PAGE_OLDER, fromOffsetPx = offX)
+                                if (!committed) springBackDrag()
+                            }
+                            IslandGesture.Action.NONE -> springBackDrag()
                         }
                     }
                 }
-                return childHandled || currentStage != IslandStage.STAGE1_IDLE
+                // Always consume while the island is up. The touchable region is already limited to the
+                // island rect outside the expanded stages, so nothing outside the pill is being stolen -
+                // and returning false for STAGE1 (the old behaviour) starved the gesture of the MOVE
+                // events it needs to follow the finger, which is why a pill swipe was judged by a single
+                // DOWN-to-UP distance and could come out as "tap".
+                return true
             }
         }.apply {
             background = this@HyperAccessibilityService.islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, this@HyperAccessibilityService.outlineRadius) } }
