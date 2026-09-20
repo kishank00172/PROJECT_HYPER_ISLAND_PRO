@@ -89,9 +89,16 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position — updated 2026-09-19 (read me first if you lost the plot)
 
-`main` head carries the **b1333** round (release `ci-333`); `last-good` still points at `ff98959`
+`main` head carries the **b1336** round (release `ci-336`); `last-good` still points at `ff98959`
 (release `ci-314`) on purpose: the morph feel **and** the message-capture behaviour are both waiting for
 an on-device verdict from the only tester we have. When a build is called good, move `last-good` to it.
+
+b1336 = a page push could strand the card content one card-width off the pill (its reset lived in
+`withEndAction`, which `gridRoot?.animate()?.cancel()` skips) — that blank card, and the swipe-ignoring
+`ringSwapInFlight` that followed it, are why `endRingSwap(reason)` now owns that state with an
+uncancellable guard. And there is an in-app trace log (main screen -> TRACE LOG, mirrored to
+`adb logcat -s HIP_TRACE`, persisted so a service kill does not eat it): "kuchh nahi hua" now has to say
+which branch ran instead of being guessed at.
 
 b1333 = touch + swipe feel + the pill counter: `core/IslandGesture.kt` latches drag-vs-tap and the card
 now rides under the finger (commit settles both layers on one curve, no teleport); the ring holds 24
