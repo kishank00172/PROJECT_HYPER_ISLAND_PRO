@@ -89,9 +89,17 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position — updated 2026-09-19 (read me first if you lost the plot)
 
-`main` head carries the **b1325** round (release `ci-325`); `last-good` still points at `ff98959`
+`main` head carries the **b1330** round (release `ci-330`); `last-good` still points at `ff98959`
 (release `ci-314`) on purpose: the morph feel **and** the message-capture behaviour are both waiting for
 an on-device verdict from the only tester we have. When a build is called good, move `last-good` to it.
+
+b1330 = the four symptoms reported on b1325 (own name on a card, headline "Instagram", old messages
+stamped "now", no quick actions). Cause: we printed EXTRA_TITLE (which on Instagram means *last
+sender*) instead of reading `android.conversationTitle` + `android.selfDisplayName` + `Message.time`,
+and a second ingestion path inside the accessibility service kept producing degraded cards. That path is
+**deleted** — notification ingestion is the NotificationListenerService alone; accessibility stays for
+typing replies and touch handling. Display rules live in `core/ChatDisplayPolicy.kt` with 12 JVM tests
+against real capture values (27 tests in CI total).
 
 How we decide things now (this rule exists because two guesses turned out wrong):
 **measure before fixing.** `kishank00172/notification-lab` is a second app that dumps real
