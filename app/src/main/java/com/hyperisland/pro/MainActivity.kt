@@ -16,6 +16,7 @@ import com.hyperisland.pro.services.HyperAccessibilityService
 import com.hyperisland.pro.services.IslandOverlayService
 import com.hyperisland.pro.ui.PermissionDoctorActivity
 import com.hyperisland.pro.ui.SettingsActivity
+import com.hyperisland.pro.ui.TraceLogActivity
 import com.hyperisland.pro.ui.TestLabActivity
 
 class MainActivity : Activity() {
@@ -66,6 +67,9 @@ class MainActivity : Activity() {
 
         findViewById<Button>(R.id.btnPermissionDoctor).setOnClickListener {
             startActivity(Intent(this, PermissionDoctorActivity::class.java))
+        }
+        findViewById<Button>(R.id.btnTraceLog).setOnClickListener {
+            startActivity(Intent(this, TraceLogActivity::class.java))
         }
         findViewById<Button>(R.id.btnTestLab).setOnClickListener {
             startActivity(Intent(this, TestLabActivity::class.java))

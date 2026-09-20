@@ -10,6 +10,7 @@ import android.service.notification.NotificationListenerService.RankingMap
 import android.util.Log
 import android.view.accessibility.AccessibilityManager
 import com.hyperisland.pro.core.AppSettings
+import com.hyperisland.pro.core.TraceLog
 
 class HyperNotificationListenerService : NotificationListenerService() {
 
@@ -202,6 +203,11 @@ class HyperNotificationListenerService : NotificationListenerService() {
             isMessagingStyle = NotificationContentExtractor.looksLikeConversation(notification),
             displayTimeMs = extracted.displayTimeMs
         )
+        TraceLog.ingest(
+            "listener show ${sbn.packageName} key=${extracted.conversationKeySource} " +
+                "title='${extracted.conversationTitle}' unread=${extracted.unreadCount} " +
+                "actions=${notification.actions?.size ?: 0}"
+        )
     }
 
     /**
@@ -250,7 +256,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
     }
 
     private fun drop(reason: String, sbn: StatusBarNotification?, extra: String = "") {
-        Log.i(TRACE_TAG, "DROP $reason pkg=${sbn?.packageName} key=${sbn?.key} $extra")
+        TraceLog.ingest("listener drop $reason pkg=${sbn?.packageName} key=${sbn?.key} $extra")
     }
 
     /**

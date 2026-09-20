@@ -43,6 +43,10 @@
             android:name=".ui.PermissionDoctorActivity"
             android:excludeFromRecents="true"
             android:exported="false" />
+        <activity
+            android:name=".ui.TraceLogActivity"
+            android:excludeFromRecents="true"
+            android:exported="false" />
         
         <activity
             android:name=".MainActivity"
