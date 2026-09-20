@@ -14,6 +14,12 @@ package com.hyperisland.pro.core
  * and the app even hands you the way out, which nothing was reading:
  *   android.selfDisplayName = "Kishan Kumar"
  *
+ * Same object, second lesson, capture seq 335 (`uploads/noti.txt`): a 1:1 with a bot where Instagram wrote
+ * `android.conversationTitle = "kish.ank001"` - *my* handle - while the sender sat in
+ * `android.messages[0].sender = "Meta AI"`. Trusting the thread name printed my own username as the
+ * headline of a message from Meta AI. So the thread name is only trusted for groups, which is exactly
+ * what `android.isGroupConversation` says.
+ *
  * Android-free on purpose: every rule here is a pure function over strings/numbers, so CI verifies
  * it with the real values from that capture instead of a rebuild-by-rebuild guess on a phone.
  */
@@ -31,36 +37,83 @@ object ChatDisplayPolicy {
         return a.isNotBlank() && b.isNotBlank() && a == b
     }
 
-    /**
-     * Picks the bold line.
-     *  - android.conversationTitle (thread name) beats EXTRA_TITLE, because EXTRA_TITLE is per-message
-     *  - a message we sent ourselves never prints our own name; with no thread name it says "You"
-     *  - Instagram prefixes group titles with our own handle — "(kish.ank001) Homieees!!" — the prefix
-     *    is us, not the thread, so it goes
-     *  - the app's name is never a thread name; a card headed "Instagram" carries no information, so an
-     *    empty-string headline is better than a fake one and MESSAGE is the last resort
-     */
+    /** "2 new messages", "2 messages from 2 chats" - the summary-shaped line an app puts in EXTRA_TITLE. */
     private val SUMMARY_TEXT = Regex("^\\d+ (new )?messages?( (from|in) \\d+ .*)?$", RegexOption.IGNORE_CASE)
+
+    /** The headline plus which rule produced it - the rule goes into the trace log, so a wrong name is
+     *  a line in the file instead of a rebuild. */
+    data class TitleChoice(val text: String, val rule: String)
 
     fun displayTitle(
         threadTitle: String,
         extraTitle: String,
         sender: String,
         selfDisplayName: String,
-        appName: String
-    ): String {
-        // A real thread name outranks everything: losing *which* group you spoke in is worse than a
-        // slightly redundant sender line. Only when there is no thread name at all does the card fall
-        // back to "You" - that is the 1:1 case where Instagram put our own display name in EXTRA_TITLE.
+        appName: String,
+        isGroupConversation: Boolean = false,
+        senderIsMe: Boolean = false
+    ): String = titleFor(threadTitle, extraTitle, sender, selfDisplayName, appName, isGroupConversation, senderIsMe).text
+
+    /**
+     * The rule, in one place: **a 1:1 conversation is named by who spoke, a group by which thread**.
+     *
+     * That ordering is what this device's data forces. Instagram put my own handle in
+     * `android.conversationTitle` for a 1:1 with a bot (`seq 335`: conversationTitle='kish.ank001',
+     * isGroupConversation=false) while the actual sender sat in `android.messages[0].sender='Meta AI'`,
+     * with `sender_person.isBot=true`. Preferring the thread title printed "kish.ank001" as the headline
+     * of a message from Meta AI - "mera username aa rha hai Meta AI ke jagah". For a 1:1 the thread title
+     * is *supposed* to be the peer, so when the app fills it with something else, the message's own
+     * sender is the better answer. Groups keep the thread name (that is the only thing that tells chats
+     * apart there), and the sender is recovered from IG's "<thread>: <sender>" title shape when the
+     * messages array carries none.
+     *
+     * `senderIsMe` comes from the caller comparing names *and* Person keys, because a display name can be
+     * anything while `android.messagingUser.key` is the account itself.
+     */
+    fun titleFor(
+        threadTitle: String,
+        extraTitle: String,
+        sender: String,
+        selfDisplayName: String,
+        appName: String,
+        isGroupConversation: Boolean = false,
+        senderIsMe: Boolean = false
+    ): TitleChoice {
         val thread = cleanTitle(threadTitle)
-        if (thread.isNotBlank()) return thread
-        if (isSelf(sender, selfDisplayName)) return YOU
-        val extra = cleanTitle(extraTitle)
-        if (extra.isNotBlank() && !extra.equals(appName.trim(), true)) return extra
-        val senderName = cleanTitle(sender)
-        if (senderName.isNotBlank()) return senderName
+        val declared = cleanTitle(sender)
+        val fromTitle = peerFromIGTitle(extraTitle)
+        val speaker = declared.ifBlank { fromTitle }
+        val me = senderIsMe || isSelf(sender, selfDisplayName)
         val app = cleanTitle(appName)
-        return if (app.isBlank()) MESSAGE else app
+        val extra = cleanTitle(extraTitle)
+
+        if (isGroupConversation) {
+            if (thread.isNotBlank() && !thread.equals(extra, true)) return TitleChoice(thread, "group:thread")
+            if (me) return TitleChoice(YOU, "group:self")
+            if (speaker.isNotBlank() && !speaker.equals(app, true)) return TitleChoice(speaker, "group:speaker")
+            if (thread.isNotBlank()) return TitleChoice(thread, "group:thread")
+            if (extra.isNotBlank() && !extra.equals(app, true)) return TitleChoice(extra, "group:extra")
+            return TitleChoice(if (app.isBlank()) MESSAGE else app, "group:app")
+        }
+        if (me) return TitleChoice(YOU, "1to1:you")
+        if (speaker.isNotBlank() && !speaker.equals(app, true)) return TitleChoice(speaker, "1to1:sender")
+        if (thread.isNotBlank() && !thread.equals(app, true)) return TitleChoice(thread, "1to1:thread")
+        if (extra.isNotBlank() && !extra.equals(app, true)) return TitleChoice(extra, "1to1:extra")
+        return TitleChoice(if (app.isBlank()) MESSAGE else app, "1to1:app")
+    }
+
+    /**
+     * Instagram formats a MessagingStyle EXTRA_TITLE as "<thread>: <sender>" -
+     * 'kish.ank001: Meta AI', 'Homieees!!🐱: Adarsh Kumar Jha'. When the messages array has no sender,
+     * the part after the last ": " still names who spoke.
+     */
+    fun peerFromIGTitle(extraTitle: String): String {
+        val v = ConversationIdentity.normalize(extraTitle)
+        val cut = v.lastIndexOf(": ")
+        if (cut < 2 || cut > v.length - 3) return ""
+        val tail = v.substring(cut + 2).trim()
+        if (tail.length < 2 || SUMMARY_TEXT.matches(tail)) return ""
+        return tail
     }
 
     /**

@@ -36,7 +36,8 @@ class ChatDisplayPolicyTest {
             extraTitle = "Kishan Kumar",
             sender = "Kishan Kumar",
             selfDisplayName = "Kishan Kumar",
-            appName = "WhatsApp"
+            appName = "WhatsApp",
+            isGroupConversation = true
         )
         assertEquals("Chat + Fun Vibes\u2764", title)
     }
@@ -63,7 +64,8 @@ class ChatDisplayPolicyTest {
             extraTitle = "(kish.ank001) Homieees!!🐱: @shikhakumari320",
             sender = "@shikhakumari320",
             selfDisplayName = "Kishan Kumar",
-            appName = "Instagram"
+            appName = "Instagram",
+            isGroupConversation = true
         )
         assertEquals("Homieees!!🐱", title)
     }
@@ -79,6 +81,73 @@ class ChatDisplayPolicyTest {
             appName = "Instagram"
         )
         assertEquals("Adarsh Kumar Jha", title)
+    }
+
+    /**
+     * seq 335 - the report of this round. A 1:1 thread with a bot where Instagram wrote my own handle into
+     * android.conversationTitle, while the sender sat in android.messages[0].sender (sender_person.isBot
+     * = true). In a 1:1 the thread title is *meant* to be the peer, so when the app fills it with
+     * something else, the message's own speaker is the answer.
+     */
+    @Test
+    fun aOneToOneIsNamedByWhoSpokeNotByTheThreadTitle() {
+        val choice = ChatDisplayPolicy.titleFor(
+            threadTitle = "kish.ank001",
+            extraTitle = "kish.ank001: Meta AI",
+            sender = "Meta AI",
+            selfDisplayName = "Kishan Kumar",
+            appName = "Instagram",
+            isGroupConversation = false
+        )
+        assertEquals("Meta AI", choice.text)
+        assertEquals("1to1:sender", choice.rule)
+    }
+
+    /** `android.messagingUser.key` is the account itself, so a key match outranks any display name. */
+    @Test
+    fun myOwnMessageInAOneToOneSaysYou() {
+        val choice = ChatDisplayPolicy.titleFor(
+            threadTitle = "kish.ank001",
+            extraTitle = "kish.ank001: Meta AI",
+            sender = "kish.ank001",
+            selfDisplayName = "Kishan Kumar",
+            appName = "Instagram",
+            isGroupConversation = false,
+            senderIsMe = true
+        )
+        assertEquals("You", choice.text)
+        assertEquals("1to1:you", choice.rule)
+    }
+
+    /** When the messages array has no sender, IG's "<thread>: <sender>" title still names the speaker. */
+    @Test
+    fun speakerIsRecoveredFromTheColonedTitleWhenTheArrayHasNone() {
+        assertEquals("Meta AI", ChatDisplayPolicy.peerFromIGTitle("kish.ank001: Meta AI"))
+        assertEquals("Adarsh Kumar Jha", ChatDisplayPolicy.peerFromIGTitle("Homieees!!🐱: Adarsh Kumar Jha"))
+        assertEquals("", ChatDisplayPolicy.peerFromIGTitle("Meta AI"))
+        assertEquals("", ChatDisplayPolicy.peerFromIGTitle("Telegram: 3 messages from 2 chats"))
+        assertEquals(
+            "Meta AI",
+            ChatDisplayPolicy.titleFor("", "kish.ank001: Meta AI", "", "Kishan Kumar", "Instagram").text
+        )
+    }
+
+    /** A self-chat (notes to self) legitimately keeps the thread title when nobody else is named. */
+    @Test
+    fun aOneToOneWithNoOtherNameKeepsTheThreadTitle() {
+        assertEquals(
+            "kish.ank001",
+            ChatDisplayPolicy.titleFor("kish.ank001", "kish.ank001", "", "", "Instagram").text
+        )
+    }
+
+    /** A group where the sender is the interesting line still cannot print the app name. */
+    @Test
+    fun aGroupWithNoThreadNameFallsToTheSpeaker() {
+        assertEquals(
+            "Adarsh Kumar Jha",
+            ChatDisplayPolicy.titleFor("", "Instagram", "Adarsh Kumar Jha", "Kishan Kumar", "Instagram", true).text
+        )
     }
 
     @Test
@@ -108,7 +177,8 @@ class ChatDisplayPolicyTest {
             extraTitle = "Chat + Fun Vibes❤️ (18 messages): ~گuj",
             sender = "~گuj",
             selfDisplayName = "",
-            appName = "WhatsApp"
+            appName = "WhatsApp",
+            isGroupConversation = true
         )
         assertEquals("Chat + Fun Vibes❤️", title)
     }

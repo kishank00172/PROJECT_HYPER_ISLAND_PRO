@@ -205,7 +205,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         )
         TraceLog.ingest(
             "listener show ${sbn.packageName} key=${extracted.conversationKeySource} " +
-                "title='${extracted.conversationTitle}' unread=${extracted.unreadCount} " +
+                "title='${extracted.conversationTitle}' rule=${extracted.titleRule} unread=${extracted.unreadCount} " +
                 "actions=${notification.actions?.size ?: 0}"
         )
     }

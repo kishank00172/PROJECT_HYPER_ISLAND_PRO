@@ -23,7 +23,9 @@ object NotificationContentExtractor {
         val conversationKey: String,
         val conversationKeySource: String,
         /** What the card is stamped with: the newest message's own time when the app gives one. */
-        val displayTimeMs: Long
+        val displayTimeMs: Long,
+        /** Which [ChatDisplayPolicy] rule produced `conversationTitle`; goes in the trace log. */
+        val titleRule: String
     )
 
     fun extract(context: Context, sbn: StatusBarNotification): ExtractedNotificationContent? {
@@ -41,6 +43,18 @@ object NotificationContentExtractor {
         // message the tester's own AI sent was titled with his own name, because EXTRA_TITLE on
         // Instagram means "last sender", not "conversation"). Nothing used to read it.
         val selfName = (extras.getCharSequence("android.selfDisplayName") ?: "").toString().trim()
+        // Android's own definition: android.messagingUser is the *user of this conversation*, i.e. me. Its
+        // key is the account id (seq 335: key='59789964840' / name='Kishan Kumar'), which is what settles
+        // "did I send this" when a display name is something the app invented.
+        @Suppress("DEPRECATION") val selfKey = personKey(extras.get("android.messagingUser"))
+        // isGroupConversation is the field that says whether a thread name is even meaningful: in a 1:1 the
+        // thread IS the peer, so a 1:1 title filled with my own handle (Instagram does this) must not become
+        // the headline.
+        val isGroup = try {
+            extras.getBoolean("android.isGroupConversation")
+        } catch (_: Exception) {
+            false
+        }
 
         // A group summary is a container, not a message - "WhatsApp / 21 messages from 3 chats". The
         // framework flag that should have caught it was not set by either app on this device (measured:
@@ -64,8 +78,11 @@ object NotificationContentExtractor {
             val newest = ChatDisplayPolicy.newestIndex(times, bodies, fallbackText)
             if (newest >= 0) {
                 val latest = messages[newest]
-                val latestText = bodies[newest].trim()
+                val latestText = oneLine(bodies[newest])
                 val sender = readMessageSender(latest).trim()
+                val senderKey = readSenderPersonKey(latest)
+                val senderIsMe = ChatDisplayPolicy.isSelf(sender, selfName) ||
+                    (senderKey.isNotBlank() && selfKey.isNotBlank() && senderKey == selfKey)
                 val rawConversation = readConversationTitle(extras).ifBlank { fallbackTitle }.ifBlank { sender }.ifBlank { appName }
                 val conversation = stripMessageCountSuffix(rawConversation)
                 // The app's own badge number is the unread count; messages.size is only how much
@@ -73,16 +90,18 @@ object NotificationContentExtractor {
                 // style, so size alone over-reported, while InstaPro's 7/7 agreed by luck).
                 val count = if (notification.number > 0) notification.number else messages.size.coerceAtLeast(1)
                 val identity = buildConversationIdentity(pkg, sbn, notification, conversation, sender, threadTitle)
+                val choice = ChatDisplayPolicy.titleFor(threadTitle, fallbackTitle, sender, selfName, appName, isGroup, senderIsMe)
                 return ExtractedNotificationContent(
                     appName = appName,
-                    conversationTitle = ChatDisplayPolicy.displayTitle(threadTitle, fallbackTitle, sender, selfName, appName),
+                    conversationTitle = choice.text,
                     senderName = sender.ifBlank { conversation },
                     latestMessage = latestText,
                     unreadCount = count,
                     isMessagingStyle = true,
                     conversationKey = identity.first,
                     conversationKeySource = identity.second,
-                    displayTimeMs = ChatDisplayPolicy.displayTimeMs(times[newest], notification.`when`, sbn.postTime, now)
+                    displayTimeMs = ChatDisplayPolicy.displayTimeMs(times[newest], notification.`when`, sbn.postTime, now),
+                    titleRule = choice.rule
                 )
             }
         }
@@ -92,17 +111,45 @@ object NotificationContentExtractor {
         // to look.
         if (fallbackTitle.isBlank() && fallbackText.isBlank() && threadTitle.isBlank()) return null
         val identity = buildConversationIdentity(pkg, sbn, notification, fallbackTitle, fallbackTitle, threadTitle)
+        val choice = ChatDisplayPolicy.titleFor(threadTitle, fallbackTitle, "", selfName, appName, isGroup)
         return ExtractedNotificationContent(
             appName = appName,
-            conversationTitle = ChatDisplayPolicy.displayTitle(threadTitle, fallbackTitle, "", selfName, appName),
+            conversationTitle = choice.text,
             senderName = fallbackTitle,
-            latestMessage = fallbackText,
+            latestMessage = oneLine(fallbackText),
             unreadCount = if (notification.number > 0) notification.number else 1,
             isMessagingStyle = false,
             conversationKey = identity.first,
             conversationKeySource = identity.second,
-            displayTimeMs = ChatDisplayPolicy.displayTimeMs(0L, notification.`when`, sbn.postTime, now)
+            displayTimeMs = ChatDisplayPolicy.displayTimeMs(0L, notification.`when`, sbn.postTime, now),
+            titleRule = choice.rule
         )
+    }
+
+    /**
+     * Chat previews are one paragraph. A message sent as "Hii Kishan! 👋\n\nBolo kya chal raha hai?" with
+     * the card's message line at maxLines=2 + ellipsize used to render as the first line plus a bare "…" -
+     * the blank line ate the second row, and that stray "…" was in three of the tester's screenshots with
+     * no explanation. Folding the breaks costs nothing (the full text is still one sentence long) and the
+     * ellipsis disappears.
+     */
+    private fun oneLine(value: String): String = value.replace(Regex("\\s*\\n+\\s*"), " ").trim()
+
+    /** Person.getKey() without importing android.app.Person - the key is the account, the name is not. */
+    private fun personKey(person: Any?): String = try {
+        person?.javaClass?.methods
+            ?.firstOrNull { it.name == "getKey" && it.parameterCount == 0 }
+            ?.invoke(person)?.toString().orEmpty()
+    } catch (_: Exception) {
+        ""
+    }
+
+    /** The sender Person's key on a MessagingStyle message, when the app filled one in. */
+    private fun readSenderPersonKey(bundle: Bundle): String = try {
+        @Suppress("DEPRECATION")
+        personKey(bundle.get("sender_person"))
+    } catch (_: Exception) {
+        ""
     }
 
     /** MessagingStyle.Message.time, or 0 when the app did not set one. */

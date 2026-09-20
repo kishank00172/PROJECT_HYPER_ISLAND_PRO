@@ -117,8 +117,15 @@ stamped "now", no quick actions). Cause: we printed EXTRA_TITLE (which on Instag
 sender*) instead of reading `android.conversationTitle` + `android.selfDisplayName` + `Message.time`,
 and a second ingestion path inside the accessibility service kept producing degraded cards. That path is
 **deleted** — notification ingestion is the NotificationListenerService alone; accessibility stays for
-typing replies and touch handling. Display rules live in `core/ChatDisplayPolicy.kt` with 12 JVM tests
-against real capture values (27 tests in CI total).
+typing replies and touch handling. Display rules live in `core/ChatDisplayPolicy.kt` with 18 JVM tests
+against real capture values (52 tests in CI total), and the rule is: **a group is named by which thread, a
+1:1 by who spoke** - `android.isGroupConversation` decides which branch runs. That reversal is b1339's fix:
+in a 1:1 with Meta AI,
+Instagram put the owner's own handle in `android.conversationTitle`, and trusting the thread name printed
+`kish.ank001` as the headline of a message from Meta AI. "Me" is now proven by `android.selfDisplayName` *or*
+by matching the message's `sender_person` key against `android.messagingUser`'s key; a card with no sender
+recovers the speaker from IG's `"<thread>: <sender>"` title; a preview is folded onto one line so a blank line
+inside a message stops rendering as a stray ellipsis. The trace log prints which rule fired (`rule=1to1:sender`).
 
 How we decide things now (this rule exists because two guesses turned out wrong):
 **measure before fixing.** `kishank00172/notification-lab` is a second app that dumps real
