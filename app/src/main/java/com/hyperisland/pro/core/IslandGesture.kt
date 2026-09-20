@@ -63,8 +63,8 @@ class IslandGesture(
     private var horizontalAxis = false
 
     /**
-     * @param allowTap false when a child view (an action button, the reply field) took the DOWN — then
-     *   the island must not claim anything, only report NONE at the end.
+     * @param allowTap false when a child view (an action button, the reply field) took the DOWN. That
+     *   child gets the *click* - TAP is unreachable - while a drag is still the island's to recognise.
      * @param pagesEnabled true only in the fully expanded card, where there is a ring to flip through.
      */
     fun begin(
@@ -150,7 +150,10 @@ class IslandGesture(
         offsetX = 0f; offsetY = 0f
 
         if (!wasDragging) return if (allowTap && travelledX <= touchSlopPx && travelledY <= touchSlopPx) Action.TAP else Action.NONE
-        if (!allowTap) return Action.NONE
+        // Deliberately NOT gated on allowTap any more. The action tiles (Like / Reply) are clickable and
+        // sit across the bottom of a short card, so a swipe started there used to be thrown away whole -
+        // "left right kuchh work nahi kiya". A child that took the DOWN owns the *click*; a drag is the
+        // island's business, because the child has no use for it and the user has no other way to page.
 
         return if (horizontal) {
             when {

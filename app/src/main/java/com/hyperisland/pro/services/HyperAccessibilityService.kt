@@ -69,6 +69,7 @@ import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
 import com.hyperisland.pro.core.IslandGesture
+import com.hyperisland.pro.core.TraceLog
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Calendar
@@ -446,7 +447,30 @@ class HyperAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
+        startTracing()
         if (AppSettings.isIslandEnabled(this)) postShowIsland()
+    }
+
+    private val tracePrefs by lazy { getSharedPreferences("hip_trace", MODE_PRIVATE) }
+    private var traceLinesSinceSave = 0
+
+    /**
+     * Every decision the island makes goes into [TraceLog], and TraceLog mirrors it to logcat. That is
+     * the difference between "the swipe did nothing, probably because ..." and a line naming which branch
+     * ran. The buffer is also persisted, because the failures worth catching (an OEM killing the service,
+     * a stranded animation) frequently end the process, and a log that dies with the bug proves nothing.
+     * On the phone: main screen -> TRACE LOG.
+     */
+    private fun startTracing() {
+        TraceLog.restore(tracePrefs.getString("tail", null))
+        TraceLog.sink = { line -> Log.i(TRACE_TAG, line) }
+        TraceLog.onLine = {
+            if (++traceLinesSinceSave >= 20) {
+                traceLinesSinceSave = 0
+                tracePrefs.edit().putString("tail", TraceLog.persisted()).apply()
+            }
+        }
+        TraceLog.line("BOOT", "island service connected (sdk=${Build.VERSION.SDK_INT}, model=${Build.MODEL})")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -695,6 +719,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postNotificationEvent(packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
+            TraceLog.ingest("show $packageName '${display.title}' ${display.message.take(40)}")
             if (isShadeOpen) {
                 // Notification shade is already open; user is looking at notifications.
                 // Do not create/update the pill badge for messages arriving while shade is open.
@@ -705,19 +730,26 @@ class HyperAccessibilityService : AccessibilityService() {
             val display = buildDisplayText(appName, title, message)
             // Safety net: NotificationListener should suppress echoes first, but Accessibility fallback can still duplicate.
             if (ReplyEchoSuppressor.shouldSuppress(packageName, display.title, display.message, null, notificationKey)) {
-                Log.d("HyperIslandPro", "Suppressing reply echo from $packageName")
+                TraceLog.ingest("drop reply-echo from $packageName")
                 return@post
             }
             val fingerprint = "$packageName|${display.title}|${display.message}"
-            if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) { return@post }
+            if (fingerprint == lastIslandFingerprint && now - lastIslandFingerprintTime < 1000L) {
+                TraceLog.ingest("drop duplicate from $packageName (${display.title})")
+                return@post
+            }
             lastIslandFingerprint = fingerprint; lastIslandFingerprintTime = now
-            if (isReplyMode) return@post // while typing/replying, don't build an annoying backlog
+            if (isReplyMode) {
+                TraceLog.ingest("hold while replying: $packageName (${display.title})")
+                return@post
+            }
             val finalConversationKey = conversationKey ?: "$packageName|title|${title.lowercase(Locale.getDefault()).trim()}"
             val finalConversationKeySource = conversationKeySource ?: "serviceFallback"
             val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs)
             addOrUpdateNotificationRing(incomingModel)
             if (currentStage == IslandStage.STAGE3_FULL) {
                 // User is actively reading expanded island; don't auto-shrink/replace it.
+                TraceLog.ingest("expanded already open - ring updated, no morph: $packageName")
                 return@post
             }
             processNextInQueue()
@@ -872,6 +904,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         if (index >= 0) notificationRing.removeAt(index)
         notificationRing.add(0, merged)
+        TraceLog.ring("${if (index >= 0) "merge" else "new page"} ${model.packageName} '${model.title}' unread=${merged.unreadCount} ring=${notificationRing.size}")
         while (notificationRing.size > MAX_RING_ITEMS) {
             // Eviction order matters more than the cap. On this device Snapchat posts eight promo
             // notifications that carry CATEGORY_MESSAGE but no conversation extras; with a plain
@@ -879,7 +912,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // like "my messages disappear". Non-conversations go first, newest real chat survives.
             val junk = notificationRing.indexOfLast { !it.isMessagingStyle }
             val dropped = if (junk >= 0) junk else notificationRing.lastIndex
-            Log.i(TRACE_TAG, "RING over capacity (${notificationRing.size} > $MAX_RING_ITEMS) dropping ${notificationRing[dropped].packageName}")
+            TraceLog.ring("over capacity (${notificationRing.size} > $MAX_RING_ITEMS) dropping ${notificationRing[dropped].packageName}")
             notificationRing.removeAt(dropped)
         }
         currentRingIndex = when {
@@ -917,7 +950,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun dismissConversationFromRing(conversationKey: String) {
         val index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
         if (index < 0) {
-            Log.i(TRACE_TAG, "DISMISS no page for key=$conversationKey ring=${notificationRing.size}")
+            TraceLog.ring("dismiss: no page for key=$conversationKey ring=${notificationRing.size}")
             return
         }
         notificationRing.removeAt(index)
@@ -930,7 +963,8 @@ class HyperAccessibilityService : AccessibilityService() {
         pillChatCount = notificationRing.size
         notificationQueue.clear()
         val current = getCurrentRingModel()
-        Log.i(TRACE_TAG, "DISMISS dropped 1 page remaining=${notificationRing.size} chats=$pillChatCount")
+        endRingSwap("dismiss")
+        TraceLog.ring("dismiss dropped 1 page remaining=${notificationRing.size} chats=$pillChatCount")
         if (current == null) {
             postCollapseIsland()
             return
@@ -968,6 +1002,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun triggerPillPreview() {
         morphAnimator?.cancel()
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
+        endRingSwap("pill preview")
+        clearDragVisuals()
         currentStage = IslandStage.STAGE2_PING
         expandReason = ExpandReason.AUTO_NOTIFICATION
         notificationMode = true
@@ -1066,6 +1102,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun sendCurrentReply() {
+        TraceLog.reply("send tapped: pkg=$currentPackageName text=${replyEditorEditText?.text?.toString()?.take(40).orEmpty()}")
         val replyText = getActiveReplyText()
         if (replyText.isBlank()) {
             setReplySendError("Type something...")
@@ -2293,6 +2330,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
     // Ring carousel state: one push in flight at a time, plus the frozen outgoing page.
     private var ringSwapInFlight = false
+    private var ringSwapStartedAt = 0L
+    private var ringSwapGuard: Runnable? = null
     private var ringPushLayer: ImageView? = null
     private var ringPushBitmap: Bitmap? = null
 
@@ -2301,6 +2340,30 @@ class HyperAccessibilityService : AccessibilityService() {
         ringPushLayer = null
         ringPushBitmap?.recycle()
         ringPushBitmap = null
+    }
+
+    /**
+     * Ends a page push from whichever path gets there first: the settle animation, its guard timeout, a
+     * stage change, a dismiss, or the ring being cleared. Idempotent, and it always puts the live page back
+     * at translationX/Y = 0.
+     *
+     * This exists because of b1333 on a real phone. The settle used to be undone only by `withEndAction`,
+     * which is *skipped* when the animation is cancelled - and triggerPillPreview()/setStageAnimated()
+     * both call `gridRoot?.animate()?.cancel()`. So a message arriving (or a swipe-up) during a push left
+     * the card's content parked a full card-width outside the pill - a blank card with "1/2" still
+     * counting - and left ringSwapInFlight true, which then ignored every swipe after it. The tester's
+     * words: "left right kuchh work nahi kiya" + "jagah khali hai". One owner for the reset, plus a guard
+     * that is a posted Runnable rather than an animation callback, is what stops that recurring.
+     */
+    private fun endRingSwap(reason: String) {
+        ringSwapGuard?.let { mainHandler.removeCallbacks(it) }
+        ringSwapGuard = null
+        if (!ringSwapInFlight && ringPushLayer == null && (gridRoot?.translationX ?: 0f) == 0f) return
+        val wasInFlight = ringSwapInFlight
+        ringSwapInFlight = false
+        detachRingPushLayer()
+        gridRoot?.let { it.animate().cancel(); it.translationX = 0f; it.translationY = 0f }
+        if (wasInFlight) TraceLog.ring("swap ended ($reason)")
     }
 
     /**
@@ -2340,6 +2403,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     /** Finger-follow: the page rides 1:1 while dragging, so the gesture answers before the lift. */
     private fun showDragOffset(g: IslandGesture) {
+        if (ringSwapInFlight) return // the settle owns the transform until it ends
         val v = draggableView() ?: return
         v.animate().cancel()
         v.translationX = g.offsetX
@@ -2380,7 +2444,17 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun navigateRingBySwipe(older: Boolean, fromOffsetPx: Float = 0f): Boolean {
         if (isReplyMode || currentStage != IslandStage.STAGE3_FULL || notificationRing.size <= 1) return false
-        if (ringSwapInFlight) return false
+        if (ringSwapInFlight) {
+            val age = System.currentTimeMillis() - ringSwapStartedAt
+            if (age < 260L) {
+                TraceLog.gesture("swipe ignored: previous push still settling (${age}ms)")
+                return false
+            }
+            // A settle that outlived its own guard means something cancelled it without telling us. End it
+            // here rather than leave the island deaf to swipes for good.
+            TraceLog.ring("swap was stuck for ${age}ms - force ending before this swipe")
+            endRingSwap("stuck")
+        }
 
         val nextIndex = if (older) {
             (currentRingIndex + 1).coerceAtMost(notificationRing.lastIndex)
@@ -2398,6 +2472,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
 
         ringSwapInFlight = true
+        ringSwapStartedAt = System.currentTimeMillis()
         val width = host.width.toFloat()
         val dir = if (older) -1f else 1f
         // Keep the start inside the range the drag could have produced, so the two layers are never
@@ -2407,6 +2482,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val inStart = off - dir * width
         val distance = (width - abs(off)).coerceAtLeast(1f)
         val settleMs = (110L + (120L * (distance / width))).toLong().coerceIn(90L, 240L)
+        TraceLog.ring("push ${if (older) "older" else "newer"} idx=$nextIndex/${notificationRing.size} off=${off.toInt()} settle=${settleMs}ms")
 
         host.animate().cancel()
 
@@ -2452,23 +2528,22 @@ class HyperAccessibilityService : AccessibilityService() {
                 override fun onAnimationCancel(animation: Animator) = detachRingPushLayer()
             })
             ?.start()
-        // Belt and braces: a lost callback can never leave a ghost layer behind.
-        mainHandler.postDelayed({ if (ringPushLayer != null) detachRingPushLayer() }, settleMs + 400L)
+        // Belt and braces: whoever ends this, the state comes back whole.
+        ringSwapGuard?.let { mainHandler.removeCallbacks(it) }
+        ringSwapGuard = Runnable { endRingSwap("guard timeout") }.also { mainHandler.postDelayed(it, settleMs + 350L) }
         host.animate()
             ?.translationX(0f)
             ?.setDuration(settleMs)
             ?.setInterpolator(ghostMagneticInterpolator)
-            ?.withEndAction {
-                host.translationX = 0f
-                host.translationY = 0f
-                ringSwapInFlight = false
-            }
+            ?.withEndAction { endRingSwap("settled") }
             ?.start()
         return true
     }
 
     private fun triggerFluidExpansion() {
         morphAnimator?.cancel()
+        endRingSwap("expand")
+        clearDragVisuals()
         val startW = dp(AppSettings.getIslandWidthDp(this)); val pingW = dp(AppSettings.getIslandStage2WidthDp(this)); val targetW = dp(AppSettings.getIslandExpandedWidthDp(this))
         val startH = dp(AppSettings.getIslandHeightDp(this)); val targetH = dp(AppSettings.getIslandExpandedHeightDp(this))
         val startR = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat(); val targetR = dp(AppSettings.getIslandExpandedCornerRadiusDp(this)).toFloat()
@@ -2510,6 +2585,11 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun setStageAnimated(target: IslandStage, reason: ExpandReason) {
         if (currentStage == target && morphAnimator?.isRunning == true) return
+        TraceLog.stage("$currentStage -> $target ($reason)")
+        // A stage change cancels in-flight view animations; if a page push is mid-settle that skips its
+        // end action, so hand it to the one function that always restores the content position.
+        endRingSwap("stage")
+        clearDragVisuals()
         if (target == IslandStage.STAGE3_FULL && reason == ExpandReason.AUTO_NOTIFICATION) { triggerFluidExpansion(); return }
         morphAnimator?.cancel()
         val curW = this@HyperAccessibilityService.islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this))
@@ -2663,6 +2743,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // It used to be postCollapseIsland(), which hid the expanded view and the pill badge together -
         // every other unread chat vanished unopened, while the chat you had just read stayed in the ring
         // and came back on the next notification.
+        TraceLog.ring("open tapped chat key=$openedKey")
         if (openedKey != null) dismissConversationFromRing(openedKey) else postCollapseIsland()
     }
 
@@ -2778,6 +2859,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         // and the card is a different width in every stage.
                         val g = ensureGesture()
                         islandGesture = g
+                        TraceLog.gesture("down ${e.rawX.toInt()},${e.rawY.toInt()} stage=$currentStage ring=${notificationRing.size}")
                         g.begin(
                             x = e.rawX,
                             y = e.rawY,
@@ -2791,6 +2873,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     }
                     MotionEvent.ACTION_POINTER_DOWN -> {
                         // A second finger is not a swipe; abandon so its movements cannot be misread.
+                        TraceLog.gesture("second pointer - gesture abandoned")
                         islandGesture?.cancel()
                         springBackDrag()
                     }
@@ -2806,10 +2889,14 @@ class HyperAccessibilityService : AccessibilityService() {
                     MotionEvent.ACTION_UP -> {
                         val g = islandGesture
                         islandGesture = null
-                        if (g == null) return childHandled
+                        if (g == null) {
+                            TraceLog.gesture("UP with no gesture (DOWN was not ours) child=$childHandled")
+                            return childHandled
+                        }
                         g.move(e.rawX, e.rawY, e.eventTime)
                         val offX = g.offsetX
                         val act = g.end(e.eventTime)
+                        TraceLog.gesture("up action=$act off=${offX.toInt()} child@down=$childHandled stage=$currentStage ring=${notificationRing.size}")
                         when (act) {
                             IslandGesture.Action.TAP -> {
                                 clearDragVisuals()
@@ -3019,7 +3106,7 @@ class HyperAccessibilityService : AccessibilityService() {
         forceRegionUpdate()
     }
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
-    private fun hideIslandInternal() { detachRingPushLayer(); ringSwapInFlight = false; morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
+    private fun hideIslandInternal() { endRingSwap("hide"); morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {

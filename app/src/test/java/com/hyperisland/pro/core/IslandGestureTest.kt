@@ -138,13 +138,21 @@ class IslandGestureTest {
         assertEquals(IslandGesture.Action.NONE, g.end(40L))
     }
 
-    /** A press that began on a button belongs to the button; the island may not open a chat from it. */
+    /**
+     * A press that began on a button belongs to the button - but the drag still belongs to the island.
+     * b1333 shipped the opposite rule (any child-consumed DOWN threw the whole gesture away), and because
+     * the Like/Reply tiles are clickable and span the bottom of a short card, a swipe started there did
+     * nothing at all: "left right kuchh work nahi kiya".
+     */
     @Test
-    fun touchesConsumedByAChildNeverBecomeIslandTaps() {
-        val g = machine(allowTap = false)
-        assertEquals(IslandGesture.Action.NONE, g.end(30L))
+    fun aPressAChildTookCannotTapButStillPages() {
+        val tapped = machine(allowTap = false)
+        assertEquals(IslandGesture.Action.NONE, tapped.end(30L))
         val dragged = machine(allowTap = false)
         dragged.move(-90f, 0f, 20L)
-        assertEquals(IslandGesture.Action.NONE, dragged.end(30L))
+        assertEquals(IslandGesture.Action.PAGE_OLDER, dragged.end(30L))
+        val lifted = machine(allowTap = false)
+        lifted.move(0f, -120f, 20L)
+        assertEquals(IslandGesture.Action.SWIPE_UP, lifted.end(30L))
     }
 }
