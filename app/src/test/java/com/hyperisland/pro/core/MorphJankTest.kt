@@ -86,4 +86,31 @@ class MorphJankTest {
         assertEquals("+2/30 blocking=+2/43 alloc=3.0MB", b.deltaText(a))
         assertEquals("none", b.deltaText(b))
     }
+
+    @Test
+    fun theLineCarriesOurOwnFrameEvenWhenItIsBuriedUnderTheFramework() {
+        val frames = listOf(
+            StackTraceElement("android.graphics.Paint", "nGetFontMetricsInt", "Paint.java", -2),
+            StackTraceElement("android.text.TextLine", "getMetrics", "TextLine.java", 372),
+            StackTraceElement("com.hyperisland.pro.services.HyperAccessibilityService", "updateNotificationContent", "HyperAccessibilityService.kt", 1184),
+        )
+        val line = stallLine(448L, "RUNNABLE", frames)
+        assertTrue(line, line.contains("| us: updateNotificationContent@HyperAccessibilityService.kt:1184"))
+    }
+
+    @Test
+    fun aBlockThatIsOnlyTheLooperWaitingIsCountedAndNotPrinted() {
+        val poller = listOf(StackTraceElement("android.os.MessageQueue", "nativePollOnce", "MessageQueue.java", -2))
+        assertFalse(stallShouldPrint(40L, poller))
+        assertTrue(stallShouldPrint(900L, poller))
+        assertTrue(stallShouldPrint(40L, listOf(StackTraceElement("a.b", "layout", "L.java", 3))))
+        assertTrue(stallShouldPrint(40L, emptyList()))
+    }
+
+    @Test
+    fun theSampleReachesSixFramesBecauseThreeNeverReachedTheCaller() {
+        val many = (1..9).map { StackTraceElement("a.b", "m$it", "F.java", it) }
+        val line = stallLine(30L, "RUNNABLE", many)
+        assertTrue(line, line.contains("m6@F.java:6") && !line.contains("m7@F.java:7"))
+    }
 }

@@ -81,11 +81,36 @@ class MorphJankMeter(private val budgetMs: Long = 16L) {
  */
 fun stallLine(ms: Long, threadState: String, frames: List<StackTraceElement>): String {
     if (frames.isEmpty()) return "${ms}ms $threadState :: ?"
-    val top = frames.take(3).joinToString(" <- ") { f ->
+    val top = frames.take(6).joinToString(" <- ") { f ->
         val file = (f.fileName ?: "native").substringAfterLast('/')
         "${f.methodName}@$file:${f.lineNumber}"
     }
-    return "${ms}ms $threadState :: $top"
+    val mine = appFrame(frames)
+    return "${ms}ms $threadState :: $top" + (if (mine == null) "" else " | us: $mine")
+}
+
+/**
+ * The frame that is ours, if the block happened inside our code at all. Six frames are not enough to reach it:
+ * the first sample in the tester's export was `nGetFontMetricsInt` with four layers of `Paint`/`MeasuredText`
+ * above it, and the caller - the line that says *what to stop doing* - was further down still.
+ */
+fun appFrame(frames: List<StackTraceElement>): String? =
+    frames.firstOrNull { it.className.startsWith("com.hyperisland.pro.") }?.let { f ->
+        "${f.methodName}@${(f.fileName ?: "native").substringAfterLast('/')}:${f.lineNumber}"
+    }
+
+/**
+ * A sample whose top frame is the looper's own wait is not a block, it is the process being descheduled (the
+ * tester's log had 258 of them for 8.4 s). Worth counting, not worth 258 lines that bury the 60 that name a
+ * culprit. Anything else always prints; a long poller stall still prints, because a 900 ms sleep is its own
+ * story.
+ */
+fun stallShouldPrint(ms: Long, frames: List<StackTraceElement>, pollerMinMs: Long = 150L): Boolean =
+    !isPollerStall(frames) || ms >= pollerMinMs
+
+fun isPollerStall(frames: List<StackTraceElement>): Boolean {
+    val top = frames.firstOrNull()?.methodName ?: return false
+    return top == "nativePollOnce" || top == "pollOnce" || top == "next"
 }
 
 /**

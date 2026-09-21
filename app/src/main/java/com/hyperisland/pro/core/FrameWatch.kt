@@ -58,6 +58,10 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         private set
     var worstStallMs = 0L
         private set
+    var pollerStalls = 0L
+        private set
+    var pollerMs = 0L
+        private set
 
     /** Frames per vsync cadence in this window, e.g. `120:28,60:4`. The rate-flip evidence, per frame. */
     var rateCounts: Map<Int, Int> = emptyMap()
@@ -124,6 +128,8 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         stallCount = 0L
         stallMs = 0L
         worstStallMs = 0L
+        pollerStalls = 0L
+        pollerMs = 0L
         rateBuckets.clear()
         lead.clear()
         drawNanos = 0L
@@ -174,6 +180,12 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
      * `frames=2 avg=225ms` is the whole difference between "our animation is bad" and "someone else held the
      * thread while our animation ran", and the second number is the one that decides what to change.
      */
+    /** The process was descheduled rather than blocked: counted, never printed as if it were our work. */
+    fun notePollerStall(ms: Long) {
+        pollerStalls++
+        pollerMs += ms
+    }
+
     fun noteStall(ms: Long) {
         stallCount++
         stallMs += ms
@@ -218,8 +230,9 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         val leadText = lead.joinToString("/")
         return "frames=$frames hz=$hz gap=${median}ms slow=$slowFrames layouts=$layoutPasses/$midMorphLayouts " +
             "regions=$regionPasses stalls=$stallCount/${stallMs}ms" +
+            (if (pollerStalls == 0L) "" else " descheduled=$pollerStalls/${pollerMs}ms") +
             (if (rates.isEmpty()) "" else " at=$rates") +
-            (if (leadText.isEmpty()) "" else " lead=$leadText") +
+            (if (leadText.isEmpty()) "" else " lead=$leadText ") +
             "draw=${String.format(Locale.US, "%.1f", avgDraw)}ms/$drawSamples worst=${worstGapMs}ms window=${windowMs}ms"
     }
 

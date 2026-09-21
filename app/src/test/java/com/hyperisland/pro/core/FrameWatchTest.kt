@@ -218,4 +218,16 @@ class FrameWatchTest {
         val fresh = w.summary(1_200L)
         assertTrue(fresh, fresh.contains("stalls=0/0ms"))
     }
+
+    @Test
+    fun everySectionIsSeparatedFromTheNextOne() {
+        // His export read `lead=8/8/8draw=0.2ms` - two numbers welded together, which is how a value gets
+        // misread as another one's. Each optional section has to leave a space behind.
+        val w = FrameWatch(hintPeriodMs = 8L)
+        w.noteActivity(0L)
+        for (t in longArrayOf(0L, 8L, 16L, 24L, 32L)) w.frame(t * 1_000_000L, t)
+        val line = w.summary(40L)
+        assertTrue(line, Regex("lead=[0-9/]+ draw=").containsMatchIn(line))
+        assertTrue(line, line.contains("at=120:"))
+    }
 }

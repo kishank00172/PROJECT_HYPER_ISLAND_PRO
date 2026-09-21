@@ -80,6 +80,7 @@ import com.hyperisland.pro.core.MorphFrame
 import com.hyperisland.pro.core.MorphFrameHost
 import com.hyperisland.pro.core.MorphJankMeter
 import com.hyperisland.pro.core.stallLine
+import com.hyperisland.pro.core.stallShouldPrint
 import com.hyperisland.pro.core.TraceLog
 import com.hyperisland.pro.core.UpdateGate
 import java.text.SimpleDateFormat
@@ -3110,11 +3111,15 @@ class HyperAccessibilityService : AccessibilityService() {
                     // otherwise is how a build gets "fixed" for a symptom that never happened.
                     val logged = peakMs
                     if (logged < STALL_FREEZE_MS) {
-                        TraceLog.line("STALL", stallLine(logged, state, frames))
+                        if (stallShouldPrint(logged, frames)) {
+                            TraceLog.line("STALL", stallLine(logged, state, frames))
                         // Counted on the main thread: FrameWatch belongs to it, and a window is only as
                         // trustworthy as its counters being written by one hand. `logged` is a copy on
                         // purpose - peakMs is reset below and a closure would read it after that.
-                        mainHandler.post { frameWatch.noteStall(logged) }
+                            mainHandler.post { frameWatch.noteStall(logged) }
+                        } else {
+                            mainHandler.post { frameWatch.notePollerStall(logged) }
+                        }
                     }
                     peakMs = 0L
                     frames = emptyList()
