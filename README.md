@@ -89,10 +89,25 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1350** round (release `ci-350`, commit `b73d0ec`, 58 JVM tests green);
+`main` head carries the **b1353** round (release `ci-353`, commit `c22dc55`, 65 JVM tests green);
 `last-good` still points at `ff98959` (release `ci-314`) on purpose: the morph feel, the swipe feel and the
 sender-name fix are all waiting for an on-device verdict from the only tester we have. When a build is
 called good, move `last-good` to it.
+
+b1353 = the morph does **no layout per frame at all**. The tester proposed the architecture ("pura screen pe
+overlay karo, jitne pe island draw hoga bas utne ke touch ko island ko denge, baaki peeche bhej denge"); half
+of it already exists (the overlay window is MATCH_PARENT full-screen and the touchable region is shrunk to the
+island rect - via the hidden `touchableRegion` reflection listener, not via `FLAG_NOT_TOUCH_MODAL`, which the
+flag mask does not contain). What was left, and what this round took, is the cost side: the card view used to
+be *resized* every frame. Now `beginMorphPerf` lays it out once at the target size and the card view draws the
+animated box itself (`MorphFrameHost` / `onDraw` + a containment clip on the fading subtree + a `translationY`
+that keeps content centered in what you see). `core/IslandMorphFrame.kt` owns the anchor maths with 7 tests -
+x centered, y hanging from the island's own top, because that asymmetry is what the window placement does and a
+1 px error per frame is the jitter we are trying to delete. `endMorphPerf` hands background/clipToOutline back.
+Step 3 (the other half of his idea - a full-screen `FLAG_NOT_TOUCHABLE` visual window plus an island-sized
+touch window with `NOT_TOUCH_MODAL|WATCH_OUTSIDE_TOUCH`, deleting the reflection hack) is deliberately not in
+this build: it moves reply focus and the ghost-reply morph's coordinates, so it needs its own round and his
+verdict on this one first.
 
 b1350 = the morph's cost per frame. Tapping the pill to expand dropped frames and the card text visibly
 "settled" 2-3 frames before the card was full size. `updateIslandLayout` ran on every frame of every morph
@@ -144,7 +159,7 @@ sender*) instead of reading `android.conversationTitle` + `android.selfDisplayNa
 and a second ingestion path inside the accessibility service kept producing degraded cards. That path is
 **deleted** — notification ingestion is the NotificationListenerService alone; accessibility stays for
 typing replies and touch handling. Display rules live in `core/ChatDisplayPolicy.kt` with 18 JVM tests
-against real capture values (58 tests in CI total: 18 display + 15 identity + 14 gesture + 5 trace log + 6 morph jank), and the rule is: **a group is named by which thread, a
+against real capture values (65 tests in CI total: 18 display + 15 identity + 14 gesture + 5 trace log + 6 morph jank + 7 morph frame), and the rule is: **a group is named by which thread, a
 1:1 by who spoke** - `android.isGroupConversation` decides which branch runs. That reversal is b1343's fix:
 in a 1:1 with Meta AI,
 Instagram put the owner's own handle in `android.conversationTitle`, and trusting the thread name printed
@@ -175,8 +190,12 @@ Any message that vanishes must now say why: `adb logcat -s HIP_TRACE HyperEchoSu
 `DROP <reason>` / `SHOW … identity=<tier>` / `REMOVE reason=…` / `DISMISS dropped 1 page`.
 
 Open, in order of what the data says is worth it: Test Lab should surface the drop reasons
-(`lastDebugMessage` is already written and never shown); P0-3 island-sized window +
-`FLAG_WATCH_OUTSIDE_TOUCH` replacing the reflection inset hack; P0-4 drop
+(`lastDebugMessage` is already written and never shown); **P0-3 = the two-window split** (visual window
+full-screen with `FLAG_NOT_TOUCHABLE`, touch window island-sized with `FLAG_NOT_TOUCH_MODAL +
+FLAG_WATCH_OUTSIDE_TOUCH`), which deletes the reflection inset hack *and* the real hazard found on 2026-09-21:
+if that reflection fails, the catch falls back to a full-screen **touch-modal** window, i.e. the phone stops
+responding to touches while the island is up - and adding `NOT_TOUCH_MODAL` alone cannot fix it, since nothing
+is "outside" a MATCH_PARENT frame; P0-4 drop
 `GLOBAL_ACTION_SHOW_KEYBOARD = 16`; the direct-reply experiment (Instagram's reply action is a **mutable
 broadcast** PendingIntent with `resultKey=DirectNotificationConstants.DirectReply`, so `send()` +
 `RemoteInput.addResultsToIntent` may replace the accessibility typing hack — runtime-only, needs a
