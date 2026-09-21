@@ -2847,20 +2847,29 @@ class HyperAccessibilityService : AccessibilityService() {
                 // One owner of the pill's fade for every stage change, notification or not. It used to be
                 // written here *and* by a separate 140/160ms animator, which is the mid-morph pop.
                 if (target != IslandStage.STAGE2_PING) pillPreviewRoot?.alpha = 1f - t
-                // Morph opacity policy (measured on device, twice — do not "improve" it blind):
+                // Morph opacity policy. The `&& notificationMode` that used to gate each branch is gone, and
+                // his log is why it had to go: a tap-expand runs with notificationMode = false, so **no branch
+                // ran at all** - the expanded content sat at alpha 1.0 through the whole collapse and was
+                // switched to GONE in a single frame at the settle. His export prints the cut: the settle line
+                // of a manual collapse reads `end stage->STAGE1_IDLE ... end-state size=366x104 clip=true
+                // grid=V/1.0 pill=G/0.0` = fully opaque content one frame, nothing the next. "wapas collapse
+                // ek jhatke se hota hai", verbatim. Same on the way out: the fade-in existed only for the
+                // notification path, so a manual expand revealed the text with the moving clip edge instead
+                // of cross-fading it - which is the other half of "masking lag rha hai".
+                // The gate is not a preference: with it, the shape animates and the content does not.
                 // The content column is width-locked (see expandedContentWidthPx) so none of these
                 // fades hide a re-wrap; the fade is not the anti-jitter mechanism, the lock is.
-                if (target == IslandStage.STAGE3_FULL && notificationMode) {
+                if (target == IslandStage.STAGE3_FULL) {
                     // Original feel restored: content fades across the whole morph, exactly as it
                     // did before my changes. (The short 0-35% ramp read as "no animation at all" —
                     // the text was already opaque while the card was still tiny.)
                     gridRoot?.alpha = t
-                } else if (target == IslandStage.STAGE2_PING && notificationMode) {
+                } else if (target == IslandStage.STAGE2_PING) {
                     // Collapse: the expanded page must be GONE by 45% of the shrink. Skipping this
                     // fade is what left expanded text hanging below the pill in the last frames.
                     gridRoot?.alpha = 1f - (t / 0.45f).coerceIn(0f, 1f)
                     pillPreviewRoot?.alpha = 1f
-                } else if (target == IslandStage.STAGE1_IDLE && notificationMode) {
+                } else if (target == IslandStage.STAGE1_IDLE) {
                     gridRoot?.alpha = 1f - (t / 0.4f).coerceIn(0f, 1f)
                 }
                 // Was: islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI)) — a whole-card 4% vertical
