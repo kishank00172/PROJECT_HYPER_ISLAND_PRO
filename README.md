@@ -89,23 +89,10 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1356** round (release `ci-356`, commit `34a6e3e`, 65 JVM tests green);
+`main` head carries the **b1353** round (release `ci-353`, commit `c22dc55`, 65 JVM tests green);
 `last-good` still points at `ff98959` (release `ci-314`) on purpose: the morph feel, the swipe feel and the
 sender-name fix are all waiting for an on-device verdict from the only tester we have. When a build is
 called good, move `last-good` to it.
-
-b1356 = one property, one owner - again, and this time it was my own b1353 code at fault. The content shift
-that keeps the text centered in the drawn box was written onto the card view's **children**, which are already
-owned by `clearDragVisuals()` (zeroes them on any touch event, so the tester's own tap reset it mid-morph) and
-read by `endRingSwap()` as its "was anything moved" test (so a morph could trip the ring state machine). Text
-snapped down, back up, then settled - and note that the frame meter saw nothing: `slow=0` with a visible jump,
-because a property fight is not a cost problem. The shift now moves the card view itself (nobody else writes
-it) and `IslandMorphFrame.compute` compensates the box rect so `top + viewTranslationY == 0`, i.e. the box
-stays on the window's own anchor - pinned by a test over five heights, odd ones included. b1350's content pin
-is deleted (obsolete once the view stopped resizing, and it added two layout passes at the ends of every
-morph), and the begin-of-morph layout defers the region pass itself, because `forceRegionUpdate()` only
-defers while an animator says `isRunning` - at begin it does not, so a `post{requestLayout}` re-measured the
-text one frame into the animation.
 
 b1353 = the morph does **no layout per frame at all**. The tester proposed the architecture ("pura screen pe
 overlay karo, jitne pe island draw hoga bas utne ke touch ko island ko denge, baaki peeche bhej denge"); half
