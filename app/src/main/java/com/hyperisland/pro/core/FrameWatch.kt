@@ -38,6 +38,14 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
     var layoutPasses = 0L
         private set
 
+    /**
+     * Layout passes that landed *inside* an animation. This is the number that separates "the morph is
+     * expensive" from "something re-measured the card while the morph was drawing it" - the second one is
+     * what makes content shift mid-animation without costing any frame time, so no other counter sees it.
+     */
+    var midMorphLayouts = 0L
+        private set
+
     var worstGapMs = 0L
         private set
 
@@ -121,9 +129,13 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         return slow
     }
 
-    /** Every layout pass of the overlay's tree, whoever asked for it. A storm is visible as a big number. */
-    fun noteLayoutPass() {
+    /**
+     * Every layout pass of the overlay's tree, whoever asked for it. A storm is visible as a big number, and
+     * the split says whether it landed while an animation was on screen.
+     */
+    fun noteLayoutPass(midMorph: Boolean = false) {
         layoutPasses++
+        if (midMorph) midMorphLayouts++
     }
 
     /** Nanoseconds the card view spent in `dispatchDraw`, so our own cost is separated from the rest. */
@@ -149,7 +161,7 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         val median = periodMs()
         val hz = snapHertz(median)
         val avgDraw = if (drawSamples == 0L) 0f else drawNanos.toFloat() / 1_000_000f / drawSamples
-        return "frames=$frames hz=$hz gap=${median}ms slow=$slowFrames layouts=$layoutPasses " +
+        return "frames=$frames hz=$hz gap=${median}ms slow=$slowFrames layouts=$layoutPasses/$midMorphLayouts " +
             "draw=${String.format(Locale.US, "%.1f", avgDraw)}ms/$drawSamples worst=${worstGapMs}ms window=${windowMs}ms"
     }
 

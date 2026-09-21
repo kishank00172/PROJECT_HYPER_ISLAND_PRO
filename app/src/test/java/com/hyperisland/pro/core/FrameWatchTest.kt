@@ -104,11 +104,13 @@ class FrameWatchTest {
         val w = FrameWatch()
         w.noteActivity(0L)
         repeat(3) { w.noteLayoutPass() }
+        w.noteLayoutPass(midMorph = true)
         w.noteDrawNanos(0L) // a zero-cost draw is not a sample; counting it would halve the average
         w.noteDrawNanos(2_000_000L)
         w.noteDrawNanos(4_000_000L)
         val line = w.end(10L)
-        assertTrue(line, line.contains("layouts=3"))
+        assertTrue(line, line.contains("layouts=4/1"))
+        assertEquals(1L, w.midMorphLayouts)
         assertTrue(line, line.contains("draw=3.0ms/2"))
         assertTrue(line, line.contains("window=10ms"))
         assertFalse(w.running)

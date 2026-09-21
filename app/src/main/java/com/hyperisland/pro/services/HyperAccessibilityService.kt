@@ -1361,18 +1361,24 @@ class HyperAccessibilityService : AccessibilityService() {
                     }
                     isClickable = true
                     setOnClickListener {
+                        // This used to be: show a tick, wait 500 ms, *then* send the action and collapse the
+                        // card. The tester's log has seven of those - up, then STAGE3_FULL -> STAGE1_IDLE
+                        // 503-537 ms later, every time he pressed a button - so the action landed, the island
+                        // vanished before he could see it, and repeated taps read as "tick tick, nothing
+                        // happening". Send now, mark it now, and leave the card up: if the app cancels the
+                        // notification, the ring's own dismiss path closes the page, which is the honest
+                        // moment to collapse - not a timer we guessed at.
                         val oldT = text
                         text = "✓ $oldT"
                         setTextColor(Color.GREEN)
-                        postDelayed({
-                            try {
-                                action.actionIntent.send()
-                                postCollapseIsland()
-                            } catch (_: Exception) {
-                                text = oldT
-                                setTextColor(Color.WHITE)
-                            }
-                        }, 500)
+                        TraceLog.gesture("action tapped: '$oldT' sent immediately, card stays open")
+                        try {
+                            action.actionIntent.send()
+                        } catch (_: Exception) {
+                            text = oldT
+                            setTextColor(Color.WHITE)
+                            TraceLog.gesture("action send FAILED - label reverted")
+                        }
                     }
                 }
 
@@ -2964,6 +2970,13 @@ class HyperAccessibilityService : AccessibilityService() {
      * is open only while the island is doing something (a touch, a morph, a badge change), so an idle pill
      * costs nothing even on a 120 Hz panel.
      */
+    private fun visName(v: View?): String = when (v?.visibility) {
+        View.VISIBLE -> "V"
+        View.INVISIBLE -> "I"
+        View.GONE -> "G"
+        else -> "-"
+    }
+
     private fun armFrameWatch() {
         if (!frameWatch.noteActivity(nowMs())) return
         val cb = object : Choreographer.FrameCallback {
@@ -3037,7 +3050,16 @@ class HyperAccessibilityService : AccessibilityService() {
         // and the last frames of a morph are the ones a window closed at the start would miss.
         armFrameWatch()
         if (meter != null) TraceLog.morph(
-            "end $label ${meter.summary()} hz=${FrameWatch.snapHertz(frameWatch.periodMs())} layouts=${frameWatch.layoutPasses}"
+            "end $label ${meter.summary()} hz=${FrameWatch.snapHertz(frameWatch.periodMs())} " +
+                "layouts=${frameWatch.layoutPasses}/${frameWatch.midMorphLayouts}"
+        )
+        // The state the card is left in, at the exact moment the drawn box stops clipping. This is the line
+        // that answers "the last frame shows the expanded content": if `clip` is on but `grid` is still
+        // visible at full alpha, what leaks is ours and not the renderer's.
+        TraceLog.morph(
+            "end-state size=${islandLayoutParams?.width}x${islandLayoutParams?.height} " +
+                "clip=${islandView?.clipToOutline} " +
+                "grid=${visName(gridRoot)}/${gridRoot?.alpha} pill=${visName(pillPreviewRoot)}/${pillPreviewRoot?.alpha}"
         )
     }
 
@@ -3504,7 +3526,9 @@ class HyperAccessibilityService : AccessibilityService() {
         visualRoot?.addView(this@HyperAccessibilityService.islandView, this@HyperAccessibilityService.islandLayoutParams); updateOutlineForIsland(w, h, r)
         // Every layout pass of the card counts, whoever asked for it: a relayout storm is invisible to a
         // meter that watches only animations, and it is the failure mode we keep rediscovering.
-        val layoutWatcher = ViewTreeObserver.OnGlobalLayoutListener { frameWatch.noteLayoutPass() }
+        val layoutWatcher = ViewTreeObserver.OnGlobalLayoutListener {
+            frameWatch.noteLayoutPass(midMorph = morphAnimator?.isRunning == true)
+        }
         frameLayoutWatcher = layoutWatcher
         islandView?.viewTreeObserver?.addOnGlobalLayoutListener(layoutWatcher)
         try { windowManager?.addView(visualRoot, visualParams) } catch (_: Exception) { hideIslandInternal() }
