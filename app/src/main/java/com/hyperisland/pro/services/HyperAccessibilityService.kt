@@ -2856,28 +2856,46 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * One hardware layer for the text column while a morph runs, so the cross-fade is a GPU blend of one
-     * cached raster instead of 60 re-renders a second of every TextView, span and emoji in it.
-     *
-     * b1350 also pinned the content columns to their own height here, because they were MATCH_PARENT inside a
-     * box whose height animated and so were re-centred every frame. That is gone: the box no longer resizes the
-     * view at all (see [updateIslandLayoutForMorph]), the columns' measurement is constant by construction,
-     * and keeping the pin meant two extra layout passes at the ends of a morph - each one a chance for the
-     * text to move while the card was still animating, which is the jitter this round is about.
+     * What the morph costs per frame, made explicit. Two things are pinned for the animation and restored
+     * when it lands, both aimed at "text glitch hota hai, tab jake text set hota hai":
+     *  - the content column and the pill content are MATCH_PARENT in a box whose height is animating, so
+     *    they are re-centred on *every* frame: that is the text sliding while it fades in, and it throws
+     *    away the cached text raster each time. Pinned to their own height with a vertical centering
+     *    gravity they sit on the same pixel they would have landed on anyway - the end state is identical,
+     *    the frames in between stop moving.
+     *  - the text column gets a hardware layer, so the cross-fade is a GPU blend of one cached raster
+     *    instead of 60 re-renders a second of every TextView, span and emoji in it.
      */
-    private fun setMorphLayer(on: Boolean) {
-        gridRoot?.setLayerType(if (on) View.LAYER_TYPE_HARDWARE else View.LAYER_TYPE_NONE, null)
+    private fun setContentPinnedForMorph(pinned: Boolean) {
+        val want = if (pinned) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT
+        // Both live directly in islandView, so their parameters are FrameLayout's - the type that carries
+        // gravity. The static type of getLayoutParams() is ViewGroup.LayoutParams, which does not, and
+        // View has no LayoutParams of its own at all (CI: "Unresolved reference 'LayoutParams'").
+        gridRoot?.let { host ->
+            val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return@let
+            if (lp.height != want) {
+                lp.height = want
+                host.layoutParams = lp
+            }
+        }
+        pillPreviewRoot?.let { host ->
+            val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return@let
+            if (lp.height != want) {
+                lp.height = want
+                // The pill used to be stretched to the box and centered inside it; once it is its own height
+                // it has to be centered *in* the box or it jumps to the top edge.
+                lp.gravity = if (pinned) Gravity.CENTER_VERTICAL else Gravity.NO_GRAVITY
+                host.layoutParams = lp
+            }
+        }
     }
 
     private fun beginMorphPerf(label: String, durationMs: Long, fromW: Int, fromH: Int, toW: Int, toH: Int, toR: Float) {
         morphLayoutW = -1; morphLayoutH = -1
         morphFinalW = toW; morphFinalH = toH; morphFinalR = toR
         morphMeter = MorphJankMeter()
-        setMorphLayer(true)
-        // The one layout a morph does (below) must not be answered with a region pass that lands *inside*
-        // the animation: forceRegionUpdate() only defers while an animator is running, and `morphAnimator`
-        // is not marked running yet, so its post{requestLayout} would re-measure the text mid-flight.
-        regionUpdateDeferred = true
+        setContentPinnedForMorph(true)
+        gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         val startR = islandBackground?.cornerRadius ?: toR
         // One layout for the whole morph: the view goes to the size it is about to reach, and the growth is
         // drawn from here on. Starting the drawn box at the *old* size in the same call is what keeps this
@@ -2888,12 +2906,10 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun endMorphPerf(label: String) {
-        setMorphLayer(false)
+        setContentPinnedForMorph(false)
+        gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
         islandMorph?.clearMorphFrame()
         updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
-        // Land the touch region the begin hook deferred, and clear the flag even on the paths whose end
-        // handler calls forceRegionUpdate() directly instead of flushing.
-        flushDeferredRegionUpdate()
         val meter = morphMeter
         morphMeter = null
         if (meter != null) TraceLog.morph("end $label ${meter.summary()}")
@@ -3035,10 +3051,10 @@ class HyperAccessibilityService : AccessibilityService() {
         this@HyperAccessibilityService.islandBackground = createIslandBackground(r)
         this@HyperAccessibilityService.islandView = object : FrameLayout(this), MorphFrameHost {
             // --- the drawn morph box; math lives in core/IslandMorphFrame.kt (tested) -----------------
-            // While a morph runs this view is laid out at its FINAL size and the box you see is drawn here at
-            // the animated rect. No `layoutParams` write per frame, so the screen-sized overlay window is no
-            // longer measured and laid out 60 times a second (the frame drops reported on b1343), and content
-            // centering is a translate on this view rather than a relayout of the tree.
+            // While a morph runs this view is laid out at its FINAL size and the box you see is drawn here
+            // at the animated rect. No `layoutParams` write per frame, so the screen-sized overlay window is
+            // no longer measured and laid out 60 times a second - the frame drops the tester reported on
+            // b1343 - and only the island area is dirtied.
             private var morphFrame: MorphFrame? = null
             private var morphRadius = 0f
             private val morphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
@@ -3054,12 +3070,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 morphRadius = cornerRadius
                 if (background != null) background = null
                 if (clipToOutline) clipToOutline = false
-                // The view itself carries the shift - NOT its children. gridRoot/pillPreviewRoot have three
-                // other owners (clearDragVisuals zeroes their translation on any touch event, endRingSwap
-                // reads them to decide if a drag is pending, the ring push translates them during a swipe),
-                // and writing a property someone else owns is what made the text snap down and back up when
-                // a tap landed mid-morph. The rect in [frame] is already compensated for this translation.
-                translationY = frame.viewTranslationY.toFloat()
+                for (i in 0 until childCount) getChildAt(i).translationY = frame.contentOffsetY.toFloat()
                 val d = IslandMorphFrame.dirtyBounds(previous, frame)
                 invalidate(d[0], d[1], d[2], d[3])
             }
@@ -3069,7 +3080,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 morphFrame = null
                 background = this@HyperAccessibilityService.islandBackground
                 clipToOutline = true
-                translationY = 0f
+                for (i in 0 until childCount) getChildAt(i).translationY = 0f
                 invalidate()
             }
 
