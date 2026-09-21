@@ -89,7 +89,18 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1362** round (release `ci-362`, commit `f26a662`, 74 JVM tests green). It is the
+`main` head carries the **b1364** round (release `ci-364`, commit `0374554`, 74 JVM tests green): the action
+tile no longer fakes its feedback for half a second - it was `show a tick, postDelayed 500 ms, THEN send the
+PendingIntent and collapse the card`, which his export showed firing 503-537 ms after **every** button tap and
+is the whole of "action register nahi ho rahe, tick tick lage jaa rahe hai". It now sends at once, marks at
+once, and leaves the card open (dismissal follows the notification's own removal). The two visual reports his
+log could not explain are instrumented instead of guessed: `layouts=total/midMorph` in every `[MORPH] end`
+line, because a mid-animation re-measure shifts content while costing no frame time, and `[MORPH] end-state
+size=… clip=… grid=…/alpha pill=…/alpha` at the exact frame the drawn box stops clipping. Verdicts b1362 won
+from his own file: `hz=120` in all 124 prints (41 frames per morph instead of 21), zero `frames=0` morphs
+(was 33 in 6.7 s), and `draw=0.1-0.2 ms` per frame, which kills the `clipPath`-offscreen suspicion by number.
+
+Before that, the **b1362** round (release `ci-362`, commit `f26a662`). It is the
 first round decided by numbers instead of by whoever read the code last: the tester's own export showed eleven
 user morphs at `avg=15ms slow=0` - i.e. **at the panel's 60 Hz ceiling, dropping nothing** - while his report
 said the whole island felt sluggish, and it also named the two things that actually cost: a notification flood
