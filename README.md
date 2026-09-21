@@ -89,16 +89,43 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1364** round (release `ci-364`, commit `0374554`, 74 JVM tests green): the action
-tile no longer fakes its feedback for half a second - it was `show a tick, postDelayed 500 ms, THEN send the
-PendingIntent and collapse the card`, which his export showed firing 503-537 ms after **every** button tap and
-is the whole of "action register nahi ho rahe, tick tick lage jaa rahe hai". It now sends at once, marks at
-once, and leaves the card open (dismissal follows the notification's own removal). The two visual reports his
-log could not explain are instrumented instead of guessed: `layouts=total/midMorph` in every `[MORPH] end`
-line, because a mid-animation re-measure shifts content while costing no frame time, and `[MORPH] end-state
-size=… clip=… grid=…/alpha pill=…/alpha` at the exact frame the drawn box stops clipping. Verdicts b1362 won
-from his own file: `hz=120` in all 124 prints (41 frames per morph instead of 21), zero `frames=0` morphs
-(was 33 in 6.7 s), and `draw=0.1-0.2 ms` per frame, which kills the `clipPath`-offscreen suspicion by number.
+`main` head carries the **b1369** round (release `ci-369`, commits `3c9c955`..`d2274e6`, 81 JVM tests green):
+a measurement round, decided by the tester's own export of b1364 and by a question he had asked twice -
+"log mei daalte ho ki ye maapo to sirf wahi sab ka deta hai? Ya saare he process dekhta hai? … aisa na ho
+tumne miss kar diya kuchh". He was right that the log only ever saw the lines I chose to write at the decision
+points I predicted, and his file showed the price of that: our draw was `0.1 ms` a frame while the expand that
+felt like "masking lag rha hai" measured `frames=2 avg=225ms max=448ms` - something else held the main thread
+for 448 ms and no instrument in the app could name it.
+
+So the whole main thread is now watched, from outside my predictions: a daemon thread ticks the main looper
+every 12 ms, and when a tick waits over 24 ms it samples the main thread's stack and logs `[STALL] 448ms
+RUNNABLE :: performLayout@ViewRootImpl.java:2100 <- …`, one line per block, written when the block *ends* so
+the duration is the real one (`MessageQueue.next`/`nativePollOnce` at the top with a `WAITING` thread means
+descheduled, not busy - a different verdict for the same jank; over 15 s is the OEM freezing us and is
+dropped). Each `[FRAME]`/`[MORPH]` window now carries `stalls=N/Xms`, so "our animation is bad" and "someone
+held the thread while it ran" are different numbers. Per morph, `gc=+2/30 blocking=+2/43 alloc=3.0MB` comes
+from `Debug.getRuntimeStat` (blocking GC parks the main thread; identical symptom, opposite cure).
+`DisplayManager.DisplayListener` logs `[DISPLAY] panel rate 60 -> 120 hz (…)` - his log had `hz=120`, `90`,
+`72`, `60` on consecutive morph lines with nothing else changing, i.e. the panel rescales under the animation,
+which costs frames however cheap our draw is. FrameWatch adds per-frame cadence buckets `at=120:28,60:4` and
+the animation's first gaps `lead=16/8/8` (a median of frames spread across 8 and 16 ms snaps to a rate the
+panel never ran), and `regions=N` counts the touchable-region pokes - the number that either justifies the
+two-window split in `STEP3-PLAN.md` or kills the idea. The split itself is still not built.
+
+It also fixes an instrument I shipped wrong in b1364: `midMorphLayouts` was not reset when a window began, so
+his log printed `layouts=1/62` - a mid count larger than the total, a lifetime sum wearing a per-window label.
+Three tests pin the reset, the cadence buckets and the empty-window shape; the stall/GC formatters are pure
+and tested. Two gaps are named rather than papered over: `Looper.setMessageLogging` (the tidier hook) is not
+in the SDK - CI proved it, run 366, unresolved reference - and per-view RenderThread/GPU timing needs
+`View.addFrameMetricsListener`, which is `@hide` in AOSP. Both need adb/perfetto on his phone.
+
+**No animation behaviour changed in b1369, deliberately.** His log had already cleared one of his three
+reports by itself: every `end-state` line at a settle reads `clip=true grid=V/0.0 pill=V/1.0`, so the
+alpha/visibility bookkeeping is right and the last-frame leak is not our state. After three rounds where a
+confident read of this code produced a wrong fix, the next animation change comes from these numbers, not
+from me looking at the file again.
+
+Verdicts the b1364 round won: quick actions accepted ("like and reply working, quick action working"); the animation itself rejected ("expanding, masking lag rha hai, wapas collapse … ek jhatke se"). The tile fix that earned the first half is below, in the b1362/b1364 line of work: it was `show a tick, postDelayed 500 ms, THEN send the PendingIntent and collapse the card`, firing 503-537 ms after **every** tap, which is the whole of "action register nahi ho rahe, tick tick lage jaa rahe hai". It now sends at once, marks at once, and leaves the card open (dismissal follows the notification's own removal).
 
 Before that, the **b1362** round (release `ci-362`, commit `f26a662`). It is the
 first round decided by numbers instead of by whoever read the code last: the tester's own export showed eleven
