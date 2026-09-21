@@ -70,6 +70,9 @@ import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
 import com.hyperisland.pro.core.IslandGesture
+import com.hyperisland.pro.core.IslandMorphFrame
+import com.hyperisland.pro.core.MorphFrame
+import com.hyperisland.pro.core.MorphFrameHost
 import com.hyperisland.pro.core.MorphJankMeter
 import com.hyperisland.pro.core.TraceLog
 import java.text.SimpleDateFormat
@@ -434,6 +437,11 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphMeter: MorphJankMeter? = null
     private var morphLayoutW = -1
     private var morphLayoutH = -1
+    /** The card view, seen as the thing that can draw its own morph box (null = use the old resize path). */
+    private var islandMorph: MorphFrameHost? = null
+    private var morphFinalW = 0
+    private var morphFinalH = 0
+    private var morphFinalR = 0f
     private var currentStage = IslandStage.STAGE1_IDLE
     private var expandReason = ExpandReason.MANUAL_USER
     private var notificationMode = false
@@ -1051,7 +1059,7 @@ class HyperAccessibilityService : AccessibilityService() {
             })
         }
         morphAnimator = anim
-        beginMorphPerf("notify->ping", 360L)
+        beginMorphPerf("notify->ping", 360L, curW, curH, targetW, targetH, targetR)
         anim.start()
     }
 
@@ -2666,7 +2674,7 @@ class HyperAccessibilityService : AccessibilityService() {
             playSequentially(ping, expand)
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationStart(a: Animator) {
-                    beginMorphPerf("notify->full", 720L)
+                    beginMorphPerf("notify->full", 720L, startW, startH, targetW, targetH, targetR)
                 }
 
                 override fun onAnimationEnd(a: Animator) {
@@ -2796,7 +2804,7 @@ class HyperAccessibilityService : AccessibilityService() {
             })
         }
         morphAnimator = anim
-        beginMorphPerf("stage->$target", anim.duration)
+        beginMorphPerf("stage->$target", anim.duration, curW, curH, targetW, targetH, targetR)
         anim.start()
     }
 
@@ -2835,6 +2843,13 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float) {
         islandBackground?.cornerRadius = r
         outlineRadius = r
+        val host = islandMorph
+        if (host != null) {
+            // The card is not resized at all during a morph: this frame is one small invalidate inside the
+            // view, which is why the overlay window stops being laid out 60 times a second.
+            host.applyMorphFrame(IslandMorphFrame.compute(morphFinalW, morphFinalH, w, h), r)
+            return
+        }
         if (w == morphLayoutW && h == morphLayoutH) return
         morphLayoutW = w; morphLayoutH = h
         updateIslandLayout(w, h, r)
@@ -2875,17 +2890,26 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun beginMorphPerf(label: String, durationMs: Long) {
+    private fun beginMorphPerf(label: String, durationMs: Long, fromW: Int, fromH: Int, toW: Int, toH: Int, toR: Float) {
         morphLayoutW = -1; morphLayoutH = -1
+        morphFinalW = toW; morphFinalH = toH; morphFinalR = toR
         morphMeter = MorphJankMeter()
         setContentPinnedForMorph(true)
         gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        TraceLog.morph("start $label dur=${durationMs}ms")
+        val startR = islandBackground?.cornerRadius ?: toR
+        // One layout for the whole morph: the view goes to the size it is about to reach, and the growth is
+        // drawn from here on. Starting the drawn box at the *old* size in the same call is what keeps this
+        // from flashing a full-size black card for a frame.
+        updateIslandLayout(toW, toH, startR)
+        islandMorph?.applyMorphFrame(IslandMorphFrame.compute(toW, toH, fromW, fromH), startR)
+        TraceLog.morph("start $label dur=${durationMs}ms drawn-box=${islandMorph != null}")
     }
 
     private fun endMorphPerf(label: String) {
         setContentPinnedForMorph(false)
         gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
+        islandMorph?.clearMorphFrame()
+        updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
         val meter = morphMeter
         morphMeter = null
         if (meter != null) TraceLog.morph("end $label ${meter.summary()}")
@@ -3025,7 +3049,64 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         
         this@HyperAccessibilityService.islandBackground = createIslandBackground(r)
-        this@HyperAccessibilityService.islandView = object : FrameLayout(this) {
+        this@HyperAccessibilityService.islandView = object : FrameLayout(this), MorphFrameHost {
+            // --- the drawn morph box; math lives in core/IslandMorphFrame.kt (tested) -----------------
+            // While a morph runs this view is laid out at its FINAL size and the box you see is drawn here
+            // at the animated rect. No `layoutParams` write per frame, so the screen-sized overlay window is
+            // no longer measured and laid out 60 times a second - the frame drops the tester reported on
+            // b1343 - and only the island area is dirtied.
+            private var morphFrame: MorphFrame? = null
+            private var morphRadius = 0f
+            private val morphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+            private val morphClipPath = Path()
+
+            init {
+                setWillNotDraw(false)
+            }
+
+            override fun applyMorphFrame(frame: MorphFrame, cornerRadius: Float) {
+                val previous = morphFrame
+                morphFrame = frame
+                morphRadius = cornerRadius
+                if (background != null) background = null
+                if (clipToOutline) clipToOutline = false
+                for (i in 0 until childCount) getChildAt(i).translationY = frame.contentOffsetY.toFloat()
+                val d = IslandMorphFrame.dirtyBounds(previous, frame)
+                invalidate(d[0], d[1], d[2], d[3])
+            }
+
+            override fun clearMorphFrame() {
+                if (morphFrame == null) return
+                morphFrame = null
+                background = this@HyperAccessibilityService.islandBackground
+                clipToOutline = true
+                for (i in 0 until childCount) getChildAt(i).translationY = 0f
+                invalidate()
+            }
+
+            override fun onDraw(canvas: Canvas) {
+                val f = morphFrame ?: run { super.onDraw(canvas); return }
+                canvas.drawRoundRect(
+                    f.left.toFloat(), f.top.toFloat(), f.right.toFloat(), f.bottom.toFloat(),
+                    morphRadius, morphRadius, morphPaint
+                )
+            }
+
+            override fun dispatchDraw(canvas: Canvas) {
+                val f = morphFrame ?: run { super.dispatchDraw(canvas); return }
+                // Content stays inside the drawn box, which is what clipToOutline was doing for us. It is a
+                // containment clip on a subtree that is fading, not a mask that reveals it - the reveal
+                // look that was rejected earlier is a different thing and stays out.
+                morphClipPath.reset()
+                morphClipPath.addRoundRect(
+                    RectF(f.left.toFloat(), f.top.toFloat(), f.right.toFloat(), f.bottom.toFloat()),
+                    morphRadius, morphRadius, Path.Direction.CW
+                )
+                val layer = canvas.save()
+                canvas.clipPath(morphClipPath)
+                super.dispatchDraw(canvas)
+                canvas.restoreToCount(layer)
+            }
             override fun dispatchTouchEvent(e: MotionEvent): Boolean {
                 val action = e.actionMasked
                 // Children first: reply/action buttons must get the touch before the island claims a gesture.
@@ -3130,6 +3211,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }.apply {
             background = this@HyperAccessibilityService.islandBackground; clipToOutline = true; outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, this@HyperAccessibilityService.outlineRadius) } }
+            this@HyperAccessibilityService.islandMorph = this
             this@HyperAccessibilityService.gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(1), dp(1), dp(1), dp(1)); visibility = View.GONE; alpha = 0f; weightSum = 1f
                 val iconSec = FrameLayout(context).apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
