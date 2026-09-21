@@ -56,7 +56,7 @@ class UpdateGateTest {
     fun tilesMatchOnlyWhenEveryActionIsTheSameObject() {
         val x = Any(); val y = Any()
         assertTrue(UpdateGate.sameElements(listOf(x, y), listOf(x, y)))
-        assertTrue(UpdateGate.sameElements(null, null))
+        assertTrue(UpdateGate.sameElements<Any>(null, null)) // explicit T: (null to null) has nothing to infer from
         // Equal content in new instances = a re-posted notification with new PendingIntents. Never skip that.
         val p: Any = StringBuilder("reply"); val q: Any = StringBuilder("reply")
         assertFalse(UpdateGate.sameElements(listOf(p), listOf(q)))
