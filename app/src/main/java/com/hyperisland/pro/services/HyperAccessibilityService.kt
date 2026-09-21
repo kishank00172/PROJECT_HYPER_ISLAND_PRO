@@ -362,6 +362,13 @@ class HyperAccessibilityService : AccessibilityService() {
         /** Same tag the notification listener logs every show/drop under: `adb logcat -s HIP_TRACE`. */
         private const val TRACE_TAG = "HIP_TRACE"
 
+        /**
+         * A main-thread message longer than this is two 120 Hz frames lost, which is the smallest stall a
+         * human reliably calls a jolt. It is a whole message, not a draw: our own draw measured 0.1 ms in the
+         * tester's log while his animation still jumped, so the cost was never in the pixels.
+         */
+        private const val STALL_MS = 24L
+
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
         private const val GLOBAL_ACTION_SHOW_KEYBOARD = 16
 
@@ -455,6 +462,11 @@ class HyperAccessibilityService : AccessibilityService() {
     private val frameWatch = FrameWatch()
     private var frameWatcher: Choreographer.FrameCallback? = null
     private var frameLayoutWatcher: ViewTreeObserver.OnGlobalLayoutListener? = null
+    private var displayWatcher: DisplayManager.DisplayListener? = null
+    private var lastSeenHertz = 0
+    private var stallNanos = 0L
+    private var stallHeader: String? = null
+    private var stallLoggedAtMs = 0L
 
     /** Monotonic: a wall clock that jumps (time zones, NITZ) must not open a 40-hour watch window. */
     private fun nowMs(): Long = SystemClock.elapsedRealtime()
@@ -493,6 +505,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun startTracing() {
         TraceLog.restore(tracePrefs.getString("tail", null))
         TraceLog.sink = { line -> Log.i(TRACE_TAG, line) }
+        startStallWatch()
+        startDisplayWatch()
         TraceLog.onLine = {
             if (++traceLinesSinceSave >= 20) {
                 traceLinesSinceSave = 0
@@ -2970,6 +2984,82 @@ class HyperAccessibilityService : AccessibilityService() {
      * is open only while the island is doing something (a touch, a morph, a badge change), so an idle pill
      * costs nothing even on a 120 Hz panel.
      */
+    /**
+     * The log used to see only what I thought to measure - and that is precisely how the last three rounds of
+     * this went wrong. A per-animation counter can say "no frames were dropped" while the tester watches
+     * content jump, because what hurts is a 448 ms block on the same thread from somewhere else entirely
+     * (a binder reply, a GC, a relayout of the full-screen root), and no callback-gap meter sees that.
+     *
+     * `Looper.setMessageLogging` is the public, framework-level answer: the queue calls us before and after
+     * **every** main-thread message, whatever it is, whoever posted it. So the log now covers the whole
+     * process instead of my predictions, and "who starved the morph" becomes a line instead of a guess.
+     */
+    private fun startStallWatch() {
+        Looper.myQueue().setMessageLogging(android.util.Printer { line ->
+            if (line == null) return@Printer
+            if (line.startsWith(">>>>>")) {
+                stallNanos = System.nanoTime()
+                stallHeader = line
+                return@Printer
+            }
+            val start = stallNanos
+            if (start == 0L) return@Printer
+            stallNanos = 0L
+            val ms = (System.nanoTime() - start) / 1_000_000L
+            if (ms < STALL_MS) return@Printer
+            val now = nowMs()
+            // A flood is one story, not two hundred lines: the buffer is what the tester sends me.
+            if (now - stallLoggedAtMs < 400L) return@Printer
+            stallLoggedAtMs = now
+            TraceLog.line("STALL", "${ms}ms ${describeStall(stallHeader)}")
+        })
+    }
+
+    private fun stopStallWatch() {
+        Looper.myQueue().setMessageLogging(null)
+        stallNanos = 0L
+        stallHeader = null
+    }
+
+    /** `>>>>>> Dispatching to Handler (android.view.ViewRootImpl$ViewRootHandler) {1a2b} 0: android.x.y` -> the half that names the work. */
+    private fun describeStall(line: String?): String {
+        if (line == null) return "?"
+        val handler = line.substringAfter("Handler (", "?").substringBefore(")")
+        val rest = line.substringAfter("} ", line).substringAfter(": ")
+        return "$handler :: ${rest.take(70)}"
+    }
+
+    /**
+     * The other half of the judder story: the panel's rate is not ours to keep. The tester's log carried
+     * `hz=120`, `90`, `72` and `60` on consecutive morph lines with nothing else changing, i.e. the display
+     * was rescaling under the animation - and a mode switch drops a frame or two no matter how cheap our
+     * draw is. Watching the display turns that from an inference into a logged event.
+     */
+    private fun startDisplayWatch() {
+        val dm = getSystemService(DisplayManager::class.java) ?: return
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) = Unit
+            override fun onDisplayRemoved(displayId: Int) = Unit
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId != Display.DEFAULT_DISPLAY) return
+                val rate = try { dm.getDisplay(displayId)?.mode?.refreshRate ?: 0f } catch (_: Exception) { 0f }
+                val snap = if (rate > 0f) FrameWatch.snapHertz((1000f / rate).toLong()) else 0
+                if (snap == lastSeenHertz) return
+                val was = lastSeenHertz
+                lastSeenHertz = snap
+                TraceLog.display("panel rate $was -> $snap hz (${rate}Hz reported by the display)")
+            }
+        }
+        displayWatcher = listener
+        try { dm.registerDisplayListener(listener, mainHandler) } catch (_: Exception) { }
+    }
+
+    private fun stopDisplayWatch() {
+        val l = displayWatcher ?: return
+        displayWatcher = null
+        try { getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(l) } catch (_: Exception) { }
+    }
+
     private fun visName(v: View?): String = when (v?.visibility) {
         View.VISIBLE -> "V"
         View.INVISIBLE -> "I"
@@ -3051,7 +3141,7 @@ class HyperAccessibilityService : AccessibilityService() {
         armFrameWatch()
         if (meter != null) TraceLog.morph(
             "end $label ${meter.summary()} hz=${FrameWatch.snapHertz(frameWatch.periodMs())} " +
-                "layouts=${frameWatch.layoutPasses}/${frameWatch.midMorphLayouts}"
+                "layouts=${frameWatch.layoutPasses}/${frameWatch.midMorphLayouts} regions=${frameWatch.regionPasses}"
         )
         // The state the card is left in, at the exact moment the drawn box stops clipping. This is the line
         // that answers "the last frame shows the expanded content": if `clip` is on but `grid` is still
@@ -3551,6 +3641,7 @@ class HyperAccessibilityService : AccessibilityService() {
             regionUpdateDeferred = true
             return
         }
+        frameWatch.noteRegionPass() // counted, because every one of these is a full-screen layout request
         visualRoot?.post { visualRoot?.requestLayout(); visualRoot?.parent?.requestLayout() }
     }
 
@@ -3799,5 +3890,5 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun lerp(s: Float, e: Float, p: Float) = s + ((e - s) * p)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
-    override fun onDestroy() { hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
+    override fun onDestroy() { stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }

@@ -46,6 +46,21 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
     var midMorphLayouts = 0L
         private set
 
+    /**
+     * Region passes - the touchable-region poke every size change makes. This count is what justifies the
+     * two-window split: 18 call sites in the service, each asking the full-screen root to lay out.
+     */
+    var regionPasses = 0L
+        private set
+
+    /** Frames per vsync cadence in this window, e.g. `120:28,60:4`. The rate-flip evidence, per frame. */
+    var rateCounts: Map<Int, Int> = emptyMap()
+        private set
+
+    /** The window's first three gaps, e.g. `16/8/8`: a refresh-mode switch shows up here and nowhere else. */
+    var leadGaps: List<Long> = emptyList()
+        private set
+
     var worstGapMs = 0L
         private set
 
@@ -70,6 +85,8 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
     private var lastActivityMs = 0L
     private var armedAtMs = 0L
     private val gapSamples = ArrayList<Long>(GAP_SAMPLES)
+    private val rateBuckets = HashMap<Int, Int>()
+    private val lead = ArrayList<Long>(3)
 
     /**
      * Something started moving: opens a watch window, or extends the one already open. Returns true when
@@ -96,6 +113,10 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         layoutPasses = 0L
         worstGapMs = 0L
         gapSumMs = 0L
+        midMorphLayouts = 0L
+        regionPasses = 0L
+        rateBuckets.clear()
+        lead.clear()
         drawNanos = 0L
         drawSamples = 0L
         lastNanos = 0L
@@ -122,11 +143,21 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         if (delta <= 0L || delta > 2_000L) return false
         gapSumMs += delta
         if (delta > worstGapMs) worstGapMs = delta
+        if (lead.size < 3) lead.add(delta)
+        if (delta <= 24L) {
+            val bucket = snapHertz(delta)
+            rateBuckets[bucket] = (rateBuckets[bucket] ?: 0) + 1
+        }
         if (gapSamples.size >= GAP_SAMPLES) gapSamples.removeAt(0)
         gapSamples.add(delta)
         val slow = delta > periodMs() * 3 / 2
         if (slow) slowFrames++
         return slow
+    }
+
+    /** A poke at the touchable region: one more full-screen layout, asked because the island changed. */
+    fun noteRegionPass() {
+        regionPasses++
     }
 
     /**
@@ -161,7 +192,14 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         val median = periodMs()
         val hz = snapHertz(median)
         val avgDraw = if (drawSamples == 0L) 0f else drawNanos.toFloat() / 1_000_000f / drawSamples
+        rateCounts = rateBuckets.toMap()
+        leadGaps = lead.toList()
+        val rates = rateBuckets.entries.sortedByDescending { it.value }.joinToString(",") { "${it.key}:${it.value}" }
+        val leadText = lead.joinToString("/")
         return "frames=$frames hz=$hz gap=${median}ms slow=$slowFrames layouts=$layoutPasses/$midMorphLayouts " +
+            "regions=$regionPasses" +
+            (if (rates.isEmpty()) "" else " at=$rates") +
+            (if (leadText.isEmpty()) "" else " lead=$leadText") +
             "draw=${String.format(Locale.US, "%.1f", avgDraw)}ms/$drawSamples worst=${worstGapMs}ms window=${windowMs}ms"
     }
 

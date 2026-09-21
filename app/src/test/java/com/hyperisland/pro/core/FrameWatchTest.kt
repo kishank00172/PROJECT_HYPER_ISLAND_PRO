@@ -152,4 +152,55 @@ class FrameWatchTest {
         w.frame(2_000_000_000L, 2_000L)
         assertTrue(w.frame(2_016_000_000L, 2_016L))
     }
+
+    /**
+     * The bug b1364 actually shipped: `midMorphLayouts` was never reset with the window, so the log printed
+     * `layouts=1/62` - a mid count larger than the total, i.e. a number that looked like a storm and was
+     * really a lifetime sum. Every counter in this class belongs to one window or it lies.
+     */
+    @Test
+    fun everyWindowStartsFromZero() {
+        val w = FrameWatch()
+        w.noteActivity(0L)
+        w.noteLayoutPass(midMorph = true)
+        w.noteRegionPass()
+        assertEquals(1L, w.midMorphLayouts)
+        assertEquals(1L, w.regionPasses)
+        w.end(10L)
+        w.noteActivity(2_000L)
+        assertEquals(0L, w.midMorphLayouts)
+        assertEquals(0L, w.regionPasses)
+        assertEquals(0L, w.layoutPasses)
+    }
+
+    /**
+     * The tester's panel was reported to judder, and the per-morph numbers proved it without needing his
+     * opinion: `hz=` came back as 120, 90, 72 and 60 across consecutive morphs. A single median hides that
+     * (10 mixed frames at 8 ms and 16 ms average to ~11 ms, which snaps to a rate that never happened), so
+     * the window keeps the per-frame cadence tally and the first gaps of the animation - a refresh-mode
+     * switch lands there, and it is the one thing that can make a cheap 0.1 ms draw still look broken.
+     */
+    @Test
+    fun aRefreshRateFlipInsideOneWindowIsVisibleAsItsOwnNumber() {
+        val w = FrameWatch(hintPeriodMs = 8L)
+        w.noteActivity(0L)
+        for (t in longArrayOf(0L, 8L, 16L, 32L, 40L, 48L)) w.frame(t * 1_000_000L, t)
+        val line = w.end(100L)
+        assertEquals(listOf(8L, 8L, 16L), w.leadGaps)
+        assertEquals(mapOf(120 to 4, 60 to 1), w.rateCounts)
+        assertEquals(1L, w.slowFrames)
+        assertTrue(line, line.contains("at=120:4,60:1"))
+        assertTrue(line, line.contains("lead=8/8/16"))
+    }
+
+    /** A window with nothing in it must not print empty decorations - `at=` and `lead=` disappear. */
+    @Test
+    fun anEmptyWindowDoesNotPrintEmptySections() {
+        val w = FrameWatch()
+        w.noteActivity(0L)
+        val line = w.end(5L)
+        assertFalse(line, line.contains("at="))
+        assertFalse(line, line.contains("lead="))
+        assertTrue(line, line.contains("regions=0"))
+    }
 }
