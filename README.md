@@ -89,7 +89,25 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head is **b1359** (release `ci-359`, commit `1dd02b3`) = the **b1353 code, restored**: `git diff
+`main` head carries the **b1362** round (release `ci-362`, commit `f26a662`, 74 JVM tests green). It is the
+first round decided by numbers instead of by whoever read the code last: the tester's own export showed eleven
+user morphs at `avg=15ms slow=0` - i.e. **at the panel's 60 Hz ceiling, dropping nothing** - while his report
+said the whole island felt sluggish, and it also named the two things that actually cost: a notification flood
+that ran 44 morph setups in 6.7 s to produce **33 morphs with zero frames** (~2 s of main thread for work
+nobody could see), and hitches that all sat at `t=1.0x`, one frame after an animation, growing from 17 ms to
+66-124 ms as the ring filled from 0 to 8 chats. So: the window now *votes* for the panel's own maximum rate
+(`preferredRefreshRate`, verified against AOSP rather than memory, with `[DISPLAY] modes=… vote=…` logging
+what the panel offers), the frame budget is measured rather than hardcoded (a 16 ms "slow" threshold is blind
+at 120 Hz, where 16 ms is two dropped frames), `core/FrameWatch.kt` counts every vsync plus every layout pass
+plus the card's own draw time (`[FRAME] frames= hz= gap= slow= layouts= draw= worst= window=`), a ping
+arriving mid-flood re-pops in place instead of rebuilding the morph, and `updateIslandLayout` returns early
+when size and radius are unchanged - which is exactly the end-of-morph case, since `beginMorphPerf` already
+applied the final size once. Nothing in the drawn box, the clip or the interpolators was touched. The trace
+screen gained EXPORT TO DOWNLOADS (`hip-log-<stamp>.txt`, MediaStore, unique per tap, app-folder fallback),
+the buffer grew to 1500 lines / 600 persisted because the old size lost the evidence that would have answered
+"which build felt slow", and `[BOOT]` prints the installed `versionName` so a report can name its build.
+
+Before that, `main` head is **b1359** (release `ci-359`, commit `1dd02b3`) = the **b1353 code, restored**: `git diff
 c22dc55 HEAD -- app/` is empty. The b1356 attempt at the content-jitter fix was **reverted** on 2026-09-21 on
 the tester's report that it made the whole island slower than b1353 ("pura island he laghu ho gya"), including
 its three coupled changes: the shift moved onto the card view, b1350's content pin deleted, and the deferred
