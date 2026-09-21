@@ -89,7 +89,17 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1353** round (release `ci-353`, commit `c22dc55`, 65 JVM tests green);
+`main` head is **b1359** (release `ci-359`, commit `1dd02b3`) = the **b1353 code, restored**: `git diff
+c22dc55 HEAD -- app/` is empty. The b1356 attempt at the content-jitter fix was **reverted** on 2026-09-21 on
+the tester's report that it made the whole island slower than b1353 ("pura island he laghu ho gya"), including
+its three coupled changes: the shift moved onto the card view, b1350's content pin deleted, and the deferred
+region pass re-owned. Lesson written where it will be read: after a regression the next build may add
+*measurement only*, and never a fix bundled with the revert. The text jitter from b1353 is therefore still
+open, with a clean baseline; the suspects to measure (not assume) are the hardware layer on the text column
+(b1350), `clipToOutline=false` + a non-rectangular `canvas.clipPath` per frame (b1353 - on a hardware canvas a
+clipPath can push the subtree into an offscreen re-raster every frame, which is exactly an "everything got
+slower" signature), and the content pin (b1350).
+The code below is described as of b1353:
 `last-good` still points at `ff98959` (release `ci-314`) on purpose: the morph feel, the swipe feel and the
 sender-name fix are all waiting for an on-device verdict from the only tester we have. When a build is
 called good, move `last-good` to it.
