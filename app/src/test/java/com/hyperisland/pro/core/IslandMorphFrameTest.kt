@@ -95,6 +95,6 @@ class IslandMorphFrameTest {
         // For an expand, max(start, target) is the target, so the fix cannot change that direction's numbers.
         assertEquals(366, IslandMorphFrame.compute(366, 104, 366, 104).width)
         assertEquals(716, IslandMorphFrame.compute(1067, 421, 716, 264).width)
-        assertEquals(716, IslandMorphFrame.compute(1067, 421, 716, 264).height)
+        assertEquals(264, IslandMorphFrame.compute(1067, 421, 716, 264).height)
     }
 }
