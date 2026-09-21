@@ -207,13 +207,15 @@ class FrameWatchTest {
     @Test
     fun aStallIsCountedAgainstTheWindowItBlocked() {
         val w = FrameWatch()
-        w.begin(0L)
+        w.noteActivity(0L)
         w.noteStall(448L)
         w.noteStall(60L)
         val line = w.summary(400L)
         assertTrue(line, line.contains("stalls=2/508ms"))
         // And it belongs to that window only - the b1364 bug was a counter that outlived its window.
-        w.begin(1000L)
-        assertTrue(w.summary(1200L), w.summary(1200L).contains("stalls=0/0ms"))
+        w.end(1_000L)
+        w.noteActivity(1_100L)
+        val fresh = w.summary(1_200L)
+        assertTrue(fresh, fresh.contains("stalls=0/0ms"))
     }
 }
