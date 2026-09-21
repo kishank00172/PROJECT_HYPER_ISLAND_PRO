@@ -80,8 +80,10 @@ class MorphJankMeter(private val budgetMs: Long = 16L) {
  * we can act on.
  */
 fun stallLine(ms: Long, threadState: String, frames: List<StackTraceElement>): String {
-    val top = if (frames.isEmpty()) "?" else frames.take(3).joinToString(" <- ") {
-        "${it.methodName}@${(it.fileName ?: "native").substringAfterLast('/'))}:${it.lineNumber}"
+    if (frames.isEmpty()) return "${ms}ms $threadState :: ?"
+    val top = frames.take(3).joinToString(" <- ") { f ->
+        val file = (f.fileName ?: "native").substringAfterLast('/')
+        "${f.methodName}@$file:${f.lineNumber}"
     }
     return "${ms}ms $threadState :: $top"
 }

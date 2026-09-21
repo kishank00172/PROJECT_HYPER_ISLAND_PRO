@@ -3048,11 +3048,13 @@ class HyperAccessibilityService : AccessibilityService() {
                     // A block this long is not a blocked main thread, it is the process being frozen
                     // (screen off, doze, OEM battery policy). Nothing here explains that, and pretending
                     // otherwise is how a build gets "fixed" for a symptom that never happened.
-                    if (peakMs < STALL_FREEZE_MS) {
-                        TraceLog.line("STALL", stallLine(peakMs, state, frames))
+                    val logged = peakMs
+                    if (logged < STALL_FREEZE_MS) {
+                        TraceLog.line("STALL", stallLine(logged, state, frames))
                         // Counted on the main thread: FrameWatch belongs to it, and a window is only as
-                        // trustworthy as its counters being written by one hand.
-                        mainHandler.post { frameWatch.noteStall(peakMs) }
+                        // trustworthy as its counters being written by one hand. `logged` is a copy on
+                        // purpose - peakMs is reset below and a closure would read it after that.
+                        mainHandler.post { frameWatch.noteStall(logged) }
                     }
                     peakMs = 0L
                     frames = emptyList()
