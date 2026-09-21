@@ -81,6 +81,7 @@ import com.hyperisland.pro.core.MorphFrameHost
 import com.hyperisland.pro.core.MorphJankMeter
 import com.hyperisland.pro.core.stallLine
 import com.hyperisland.pro.core.TraceLog
+import com.hyperisland.pro.core.UpdateGate
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Calendar
@@ -476,6 +477,27 @@ class HyperAccessibilityService : AccessibilityService() {
     private var frameWatcher: Choreographer.FrameCallback? = null
     private var frameLayoutWatcher: ViewTreeObserver.OnGlobalLayoutListener? = null
     private var displayWatcher: DisplayManager.DisplayListener? = null
+    /**
+     * What the live TextViews actually hold, plus the icon package and the tile list. The content update runs
+     * from nine places (queue, ring swap, swipe-back, drag-undo, reply exit...) and each one used to re-measure
+     * every string and re-ask PackageManager for the icon - the log named that as the cost, not the drawing.
+     * Rebuilding the view tree clears this, so a stale cache can only cause an extra update, never a missed one.
+     */
+    private var lastIconPkg: String? = null
+    private var lastAppNameShown: CharSequence? = null
+    private var lastStampShown: CharSequence? = null
+    private var lastTitleShown: CharSequence? = null
+    private var lastUnreadShown = -1
+    private var lastTitleWasHidden = false
+    private var lastMessageShown: CharSequence? = null
+    private var lastMessageWasHidden = false
+    private var lastTiles: List<Notification.Action>? = null
+
+    private fun invalidateContentCache() {
+        lastIconPkg = null; lastAppNameShown = null; lastStampShown = null
+        lastTitleShown = null; lastMessageShown = null; lastTiles = null
+    }
+
     private var lastSeenHertz = 0
     private var stallThread: Thread? = null
     @Volatile private var stallRunning = false
@@ -1177,15 +1199,41 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateNotificationContent(model: NotificationModel) {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName; currentNotificationKey = model.notificationKey; currentReplyAction = null
-        this@HyperAccessibilityService.appIconView?.setImageDrawable(loadAppIcon(model.packageName))
-        this@HyperAccessibilityService.appNameText?.text = model.appName
+        // `getApplicationIcon` is a binder round trip; it used to run on every one of these calls, and the
+        // stall sampler caught the main thread sitting in `transactNative` 93 times for 23.3 s total.
+        if (model.packageName != lastIconPkg) {
+            lastIconPkg = model.packageName
+            appIconView?.setImageDrawable(loadAppIcon(model.packageName))
+        }
+        if (UpdateGate.textChanged(lastAppNameShown, model.appName)) {
+            lastAppNameShown = model.appName
+            appNameText?.text = model.appName
+        }
         val ringIndicator = if (notificationRing.size > 1) " · ${currentRingIndex + 1}/${notificationRing.size}" else ""
-        this@HyperAccessibilityService.timeStampText?.text = "${timeLabelFor(model)}$ringIndicator"
-        this@HyperAccessibilityService.titleText?.text = buildTitleWithUnreadCount(model.title, model.unreadCount)
-        this@HyperAccessibilityService.messageText?.text = model.message
-        this@HyperAccessibilityService.titleText?.visibility = if (model.title.isBlank()) View.GONE else View.VISIBLE
-        this@HyperAccessibilityService.messageText?.visibility = if (model.message.isBlank()) View.GONE else View.VISIBLE
-        setupActionTiles(model.actions); forceRegionUpdate()
+        val stamp = "${timeLabelFor(model)}$ringIndicator"
+        if (UpdateGate.textChanged(lastStampShown, stamp)) {
+            lastStampShown = stamp
+            timeStampText?.text = stamp
+        }
+        // The spanned title is the expensive one: three spans, so every setText rebuilt the MeasuredText
+        // (nAddStyleRun/nBuildMeasuredText in his log). It is only rebuilt when title or count really moved.
+        if (UpdateGate.textChanged(lastTitleShown, model.title) || model.unreadCount != lastUnreadShown) {
+            lastTitleShown = model.title; lastUnreadShown = model.unreadCount
+            titleText?.text = buildTitleWithUnreadCount(model.title, model.unreadCount)
+            val hidden = model.title.isBlank()
+            if (hidden != lastTitleWasHidden) { lastTitleWasHidden = hidden; titleText?.visibility = if (hidden) View.GONE else View.VISIBLE }
+        }
+        if (UpdateGate.textChanged(lastMessageShown, model.message)) {
+            lastMessageShown = model.message
+            messageText?.text = model.message
+            val hidden = model.message.isBlank()
+            if (hidden != lastMessageWasHidden) { lastMessageWasHidden = hidden; messageText?.visibility = if (hidden) View.GONE else View.VISIBLE }
+        }
+        if (!UpdateGate.sameElements(lastTiles, model.actions)) {
+            lastTiles = model.actions
+            setupActionTiles(model.actions)
+        }
+        forceRegionUpdate()
     }
 
     private fun getActiveReplyText(): String {
@@ -1247,6 +1295,7 @@ class HyperAccessibilityService : AccessibilityService() {
             replyMorphEditText?.setText("")
             replyEditText?.setText("")
             titleText?.text = "Reply sent"
+        lastTitleShown = null; lastUnreadShown = -1 // the gate must not conclude the title is already right
             messageText?.text = replyText
             exitReplyMode()
             mainHandler.postDelayed({ postCollapseIsland() }, 420)
@@ -3257,6 +3306,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun showIslandInternal() {
+        invalidateContentCache() // the live views are new, so what they hold is unknown until the first update
         hideIslandInternal()
         val h = dp(AppSettings.getIslandHeightDp(this)); val w = dp(AppSettings.getIslandWidthDp(this)); val r = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
         val rateVote = refreshRateVote()
@@ -3959,5 +4009,5 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun lerp(s: Float, e: Float, p: Float) = s + ((e - s) * p)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
-    override fun onDestroy() { stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
+    override fun onDestroy() { invalidateContentCache(); stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }
