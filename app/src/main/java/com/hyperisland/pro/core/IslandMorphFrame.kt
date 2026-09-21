@@ -34,15 +34,22 @@ data class MorphFrame(
 object IslandMorphFrame {
 
     /**
-     * Box for a card that will end up [finalW] x [finalH] but is currently [w] x [h]. Sizes are clamped into
-     * the final bounds: a frame outside them would make the drawn box spill past the view that is supposed
-     * to contain it, and the tester would see a black edge over the wallpaper.
+     * Box for a card drawn inside a view of [boundW] x [boundH], currently [w] x [h]. The clamp keeps the box
+     * inside that view - outside it there is no surface, and the tester would see a black edge over the
+     * wallpaper - but the bound is the **view**, which during a morph is the larger of start and target.
+     *
+     * That distinction is the whole of "collapse first step se final step pe ja raha hai". Clamping to the
+     * target is harmless while growing, because every intermediate is smaller than the target, and it destroys
+     * a shrink completely: with the pill as the bound, a card-sized frame at t=0 clamps down to the pill, and
+     * so does every frame after it. His b1373 export shows the consequence in full - `frames=39 avg=7ms
+     * hz=120`, i.e. thirty-nine perfectly delivered frames drawing the *same* box. The animation was not
+     * slow; the shape was never asked for.
      */
-    fun compute(finalW: Int, finalH: Int, w: Int, h: Int): MorphFrame {
-        val boxW = w.coerceIn(0, finalW.coerceAtLeast(0))
-        val boxH = h.coerceIn(0, finalH.coerceAtLeast(0))
-        val left = (finalW - boxW) / 2
-        return MorphFrame(left, 0, left + boxW, boxH, (boxH - finalH) / 2)
+    fun compute(boundW: Int, boundH: Int, w: Int, h: Int): MorphFrame {
+        val boxW = w.coerceIn(0, boundW.coerceAtLeast(0))
+        val boxH = h.coerceIn(0, boundH.coerceAtLeast(0))
+        val left = (boundW - boxW) / 2
+        return MorphFrame(left, 0, left + boxW, boxH, (boxH - boundH) / 2)
     }
 
     /** The dirty area a frame change needs: the union of the two boxes, not the whole screen. */

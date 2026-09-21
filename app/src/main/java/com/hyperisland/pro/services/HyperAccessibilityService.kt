@@ -465,6 +465,9 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphLayoutH = -1
     /** The card view, seen as the thing that can draw its own morph box (null = use the old resize path). */
     private var islandMorph: MorphFrameHost? = null
+    /** The size the view is pinned to for this morph: start and target, per axis, whichever is larger. */
+    private var morphPinW: Int? = null
+    private var morphPinH: Int? = null
     private var morphFinalW = 0
     private var morphFinalH = 0
     private var morphFinalR = 0f
@@ -3004,6 +3007,10 @@ class HyperAccessibilityService : AccessibilityService() {
      *  - `visualRoot.invalidateOutline()` is gone from the path above as well: the outline belongs to the
      *    card, and invalidating the root's was asking RenderThread to redo the whole overlay per frame.
      */
+    /** The pinned bound, falling back to the target for any frame that arrives outside a morph. */
+    private fun morphPinW(): Int = morphPinW ?: morphFinalW
+    private fun morphPinH(): Int = morphPinH ?: morphFinalH
+
     private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float) {
         islandBackground?.cornerRadius = r
         outlineRadius = r
@@ -3011,7 +3018,7 @@ class HyperAccessibilityService : AccessibilityService() {
         if (host != null) {
             // The card is not resized at all during a morph: this frame is one small invalidate inside the
             // view, which is why the overlay window stops being laid out 60 times a second.
-            host.applyMorphFrame(IslandMorphFrame.compute(morphFinalW, morphFinalH, w, h), r)
+            host.applyMorphFrame(IslandMorphFrame.compute(morphPinW(), morphPinH(), w, h), r)
             return
         }
         if (w == morphLayoutW && h == morphLayoutH) return
@@ -3242,11 +3249,14 @@ class HyperAccessibilityService : AccessibilityService() {
         setContentPinnedForMorph(true)
         gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         val startR = islandBackground?.cornerRadius ?: toR
-        // One layout for the whole morph: the view goes to the size it is about to reach, and the growth is
-        // drawn from here on. Starting the drawn box at the *old* size in the same call is what keeps this
-        // from flashing a full-size black card for a frame.
-        updateIslandLayout(toW, toH, startR)
-        islandMorph?.applyMorphFrame(IslandMorphFrame.compute(toW, toH, fromW, fromH), startR)
+        // One layout for the whole morph, and the growth or shrink is drawn from here on. Starting the box
+        // at the *old* size in the same call is what keeps this from flashing a full-size black card for a frame.
+        // One layout for the whole morph, at the size the drawn box has to be able to reach - which on a
+        // shrink is the card we are leaving, not the pill we are heading to. Pinning to the target instead is
+        // what made every collapse frame clamp to the final size, so the shape never moved at all.
+        morphPinW = maxOf(fromW, toW); morphPinH = maxOf(fromH, toH)
+        updateIslandLayout(morphPinW!!, morphPinH!!, startR)
+        islandMorph?.applyMorphFrame(IslandMorphFrame.compute(morphPinW!!, morphPinH!!, fromW, fromH), startR)
         morphGcStart = gcSnapshot()
         TraceLog.morph("start $label dur=${durationMs}ms drawn-box=${islandMorph != null}")
     }
@@ -3254,8 +3264,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun endMorphPerf(label: String) {
         setContentPinnedForMorph(false)
         gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
-        islandMorph?.clearMorphFrame()
+        // Size first, then release the drawn box - same message, one traversal after both. On a collapse the
+        // pinned view is still card-sized at this instant, so clearing the frame before the resize would
+        // paint a full-size black card for exactly one frame: a new ghost bought by fixing the old one.
         updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
+        islandMorph?.clearMorphFrame()
+        morphPinW = null; morphPinH = null
         val meter = morphMeter
         morphMeter = null
         // Armed again on purpose: the settle is where the teardown lands and where the reported jumps sit,
