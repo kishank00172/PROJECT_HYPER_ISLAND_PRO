@@ -69,3 +69,46 @@ class MorphJankMeter(private val budgetMs: Long = 16L) {
         return "frames=$frameCount avg=${avg}ms max=${worstMs}ms@t=${String.format(Locale.US, "%.2f", worstAtProgress)} slow=$slowCount"
     }
 }
+
+/**
+ * One main-thread block, phrased for the log. Kept out of the service so CI can prove the formatting: this
+ * is the line that has to answer "who starved the morph", and a round of this project was already wasted
+ * reading a stall signal that named nothing.
+ *
+ * [frames] is the stack the main thread was caught inside, topmost first. `nativePollOnce` at the top means
+ * the thread was not executing our code at all (the panel or the scheduler held it); anything else is a name
+ * we can act on.
+ */
+fun stallLine(ms: Long, threadState: String, frames: List<StackTraceElement>): String {
+    val top = if (frames.isEmpty()) "?" else frames.take(3).joinToString(" <- ") {
+        "${it.methodName}@${(it.fileName ?: "native").substringAfterLast('/'))}:${it.lineNumber}"
+    }
+    return "${ms}ms $threadState :: $top"
+}
+
+/**
+ * The runtime's own GC counters, read once per morph window. A blocking GC parks the main thread, which is
+ * the same symptom as a slow draw with a completely different cure, and until now the log could not tell
+ * them apart. Units as the platform documents them: counts and milliseconds.
+ */
+data class GcSnapshot(
+    val gcCount: Long,
+    val gcMs: Long,
+    val blockingCount: Long,
+    val blockingMs: Long,
+    val allocated: Long,
+) {
+    fun deltaText(from: GcSnapshot): String {
+        val gc = gcCount - from.gcCount
+        val gms = gcMs - from.gcMs
+        val bc = blockingCount - from.blockingCount
+        val bms = blockingMs - from.blockingMs
+        val alloc = allocated - from.allocated
+        if (gc <= 0L && bc <= 0L && alloc <= 0L) return "none"
+        return "+$gc/$gms" + (if (bc > 0L) " blocking=+$bc/$bms" else "") + " alloc=${mb(alloc)}"
+    }
+
+    private fun mb(bytes: Long): String =
+        if (bytes >= 1_048_576L) String.format(Locale.US, "%.1fMB", bytes / 1_048_576f)
+        else "${bytes / 1024L}KB"
+}

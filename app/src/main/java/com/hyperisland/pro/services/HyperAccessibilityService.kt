@@ -73,11 +73,13 @@ import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
 import com.hyperisland.pro.core.FrameWatch
+import com.hyperisland.pro.core.GcSnapshot
 import com.hyperisland.pro.core.IslandGesture
 import com.hyperisland.pro.core.IslandMorphFrame
 import com.hyperisland.pro.core.MorphFrame
 import com.hyperisland.pro.core.MorphFrameHost
 import com.hyperisland.pro.core.MorphJankMeter
+import com.hyperisland.pro.core.stallLine
 import com.hyperisland.pro.core.TraceLog
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
@@ -363,11 +365,22 @@ class HyperAccessibilityService : AccessibilityService() {
         private const val TRACE_TAG = "HIP_TRACE"
 
         /**
-         * A main-thread message longer than this is two 120 Hz frames lost, which is the smallest stall a
-         * human reliably calls a jolt. It is a whole message, not a draw: our own draw measured 0.1 ms in the
-         * tester's log while his animation still jumped, so the cost was never in the pixels.
+         * The main thread being this long without completing a tick is two 120 Hz frames lost, which is the
+         * smallest block a human reliably calls a jolt. It is the whole thread, not our draw: the tester's
+         * log shows our draw at 0.1 ms a frame while his animation still jumped, so the cost was never in
+         * the pixels we produce.
          */
         private const val STALL_MS = 24L
+
+        /**
+         * The tick cadence. It must stay well under [STALL_MS] or a free main thread reads as a stall: what is
+         * measured is the time since the last tick completed, and a queue that is doing nothing still waits
+         * one cadence before the next look.
+         */
+        private const val STALL_POLL_MS = 12L
+
+        /** Above this the process was frozen rather than blocked; a different problem we cannot name. */
+        private const val STALL_FREEZE_MS = 15_000L
 
         private const val WINDOW_FLAGS_MASTER = 16777216 or 8 or 512 or 256 or 65536 or 131072 or 4096
         private const val GLOBAL_ACTION_SHOW_KEYBOARD = 16
@@ -464,9 +477,10 @@ class HyperAccessibilityService : AccessibilityService() {
     private var frameLayoutWatcher: ViewTreeObserver.OnGlobalLayoutListener? = null
     private var displayWatcher: DisplayManager.DisplayListener? = null
     private var lastSeenHertz = 0
-    private var stallNanos = 0L
-    private var stallHeader: String? = null
-    private var stallLoggedAtMs = 0L
+    private var stallThread: Thread? = null
+    @Volatile private var stallRunning = false
+    private val stallSeenNs = java.util.concurrent.atomic.AtomicLong(0L)
+    private var morphGcStart: GcSnapshot? = null
 
     /** Monotonic: a wall clock that jumps (time zones, NITZ) must not open a 40-hour watch window. */
     private fun nowMs(): Long = SystemClock.elapsedRealtime()
@@ -2986,47 +3000,72 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     /**
      * The log used to see only what I thought to measure - and that is precisely how the last three rounds of
-     * this went wrong. A per-animation counter can say "no frames were dropped" while the tester watches
-     * content jump, because what hurts is a 448 ms block on the same thread from somewhere else entirely
-     * (a binder reply, a GC, a relayout of the full-screen root), and no callback-gap meter sees that.
+     * this went wrong. A per-animation counter can honestly report "no frames were dropped" while the tester
+     * watches content jump, because what hurts is a 448 ms block on the same thread from somewhere else: a
+     * binder reply, a blocking GC, a relayout of the full-screen root. No callback-gap meter can see that,
+     * since it only ever sees the frames it is handed.
      *
-     * `Looper.setMessageLogging` is the public, framework-level answer: the queue calls us before and after
-     * **every** main-thread message, whatever it is, whoever posted it. So the log now covers the whole
-     * process instead of my predictions, and "who starved the morph" becomes a line instead of a guess.
+     * So while the service lives, a second thread watches the main thread as a whole. Every
+     * [STALL_POLL_MS] it posts a tick to the main looper and measures how long that tick waits. If it waits longer than [STALL_MS], the
+     * main thread is inside something - and we ask it what, by reading its stack. That is attribution without
+     * me predicting the culprit, and it is all public API: `Looper.setMessageLogging`, which would have been
+     * the tidier way, is not in the SDK (CI proved it: unresolved reference), and RenderThread/GPU timings
+     * need `View.addFrameMetricsListener`, which is @hide. adb/perfetto is the only way past this line.
      */
     private fun startStallWatch() {
-        Looper.myQueue().setMessageLogging(android.util.Printer { line ->
-            if (line == null) return@Printer
-            if (line.startsWith(">>>>>")) {
-                stallNanos = System.nanoTime()
-                stallHeader = line
-                return@Printer
+        if (stallRunning) return
+        stallRunning = true
+        stallSeenNs.set(System.nanoTime())
+        val main = Handler(Looper.getMainLooper())
+        val victim = Looper.getMainLooper().thread
+        stallThread = Thread {
+            // State lives in the loop: a stall is only worth one line, and the line is worth writing when
+            // the block ends, because that is when we know how long it actually was.
+            var inStall = false
+            var peakMs = 0L
+            var frames: List<StackTraceElement> = emptyList()
+            var state = "?"
+            while (stallRunning) {
+                main.post { stallSeenNs.set(System.nanoTime()) }
+                try {
+                    Thread.sleep(STALL_POLL_MS)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                // How long the main thread has gone without completing one of our ticks. If it is inside
+                // anything - our relayout, a binder reply, a GC, the OEM's input pipeline - the tick waits.
+                val stuckMs = (System.nanoTime() - stallSeenNs.get()) / 1_000_000L
+                if (!inStall) {
+                    if (stuckMs < STALL_MS) continue
+                    inStall = true
+                    peakMs = stuckMs
+                    state = victim.state.name
+                    frames = try { victim.stackTrace.toList() } catch (_: Exception) { emptyList() }
+                } else if (stuckMs >= STALL_MS) {
+                    peakMs = stuckMs
+                } else {
+                    inStall = false
+                    // A block this long is not a blocked main thread, it is the process being frozen
+                    // (screen off, doze, OEM battery policy). Nothing here explains that, and pretending
+                    // otherwise is how a build gets "fixed" for a symptom that never happened.
+                    if (peakMs < STALL_FREEZE_MS) {
+                        TraceLog.line("STALL", stallLine(peakMs, state, frames))
+                        // Counted on the main thread: FrameWatch belongs to it, and a window is only as
+                        // trustworthy as its counters being written by one hand.
+                        mainHandler.post { frameWatch.noteStall(peakMs) }
+                    }
+                    peakMs = 0L
+                    frames = emptyList()
+                }
             }
-            val start = stallNanos
-            if (start == 0L) return@Printer
-            stallNanos = 0L
-            val ms = (System.nanoTime() - start) / 1_000_000L
-            if (ms < STALL_MS) return@Printer
-            val now = nowMs()
-            // A flood is one story, not two hundred lines: the buffer is what the tester sends me.
-            if (now - stallLoggedAtMs < 400L) return@Printer
-            stallLoggedAtMs = now
-            TraceLog.line("STALL", "${ms}ms ${describeStall(stallHeader)}")
-        })
+            stallRunning = false
+        }.also { it.isDaemon = true; it.start() }
     }
 
     private fun stopStallWatch() {
-        Looper.myQueue().setMessageLogging(null)
-        stallNanos = 0L
-        stallHeader = null
-    }
-
-    /** `>>>>>> Dispatching to Handler (android.view.ViewRootImpl$ViewRootHandler) {1a2b} 0: android.x.y` -> the half that names the work. */
-    private fun describeStall(line: String?): String {
-        if (line == null) return "?"
-        val handler = line.substringAfter("Handler (", "?").substringBefore(")")
-        val rest = line.substringAfter("} ", line).substringAfter(": ")
-        return "$handler :: ${rest.take(70)}"
+        stallRunning = false
+        stallThread?.interrupt()
+        stallThread = null
     }
 
     /**
@@ -3058,6 +3097,21 @@ class HyperAccessibilityService : AccessibilityService() {
         val l = displayWatcher ?: return
         displayWatcher = null
         try { getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(l) } catch (_: Exception) { }
+    }
+
+    /** The runtime's GC counters. Public API, and the one stall source we can name without a stack sample. */
+    private fun gcSnapshot(): GcSnapshot = GcSnapshot(
+        gcStat("art.gc.gc-count"),
+        gcStat("art.gc.gc-time"),
+        gcStat("art.gc.blocking-gc-count"),
+        gcStat("art.gc.blocking-gc-time"),
+        gcStat("art.gc.bytes-allocated"),
+    )
+
+    private fun gcStat(name: String): Long = try {
+        android.os.Debug.getRuntimeStat(name)?.toLongOrNull() ?: 0L
+    } catch (_: Exception) {
+        0L
     }
 
     private fun visName(v: View?): String = when (v?.visibility) {
@@ -3126,6 +3180,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // from flashing a full-size black card for a frame.
         updateIslandLayout(toW, toH, startR)
         islandMorph?.applyMorphFrame(IslandMorphFrame.compute(toW, toH, fromW, fromH), startR)
+        morphGcStart = gcSnapshot()
         TraceLog.morph("start $label dur=${durationMs}ms drawn-box=${islandMorph != null}")
     }
 
@@ -3141,7 +3196,8 @@ class HyperAccessibilityService : AccessibilityService() {
         armFrameWatch()
         if (meter != null) TraceLog.morph(
             "end $label ${meter.summary()} hz=${FrameWatch.snapHertz(frameWatch.periodMs())} " +
-                "layouts=${frameWatch.layoutPasses}/${frameWatch.midMorphLayouts} regions=${frameWatch.regionPasses}"
+                "layouts=${frameWatch.layoutPasses}/${frameWatch.midMorphLayouts} regions=${frameWatch.regionPasses} " +
+                "gc=${morphGcStart?.let { gcSnapshot().deltaText(it) } ?: "off"}"
         )
         // The state the card is left in, at the exact moment the drawn box stops clipping. This is the line
         // that answers "the last frame shows the expanded content": if `clip` is on but `grid` is still

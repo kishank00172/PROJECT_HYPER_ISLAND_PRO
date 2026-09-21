@@ -63,4 +63,27 @@ class MorphJankTest {
         m.frame(24_000_000L, 0.2f)
         assertTrue(m.frame(24_000_000L + 25_000_000L, 0.3f))
     }
+
+    @Test
+    fun aStallLineNamesTheCodeTheMainThreadWasCaughtIn() {
+        val frames = listOf(
+            StackTraceElement("a.b.ViewRootImpl", "performLayout", "ViewRootImpl.java", 2100),
+            StackTraceElement("android.os.Handler", "handleMessage", "Handler.java", 100),
+        )
+        val line = stallLine(448L, "RUNNABLE", frames)
+        assertTrue(line, line.startsWith("448ms RUNNABLE :: performLayout@ViewRootImpl.java:2100 <- handleMessage@Handler.java:100"))
+    }
+
+    @Test
+    fun anEmptyStackStillPrintsSomethingUseful() {
+        assertEquals("12ms BLOCKED :: ?", stallLine(12L, "BLOCKED", emptyList()))
+    }
+
+    @Test
+    fun gcDeltaSeparatesABlockingCollectionFromQuietWork() {
+        val a = GcSnapshot(gcCount = 40, gcMs = 900, blockingCount = 1, blockingMs = 12, allocated = 5_000_000)
+        val b = GcSnapshot(gcCount = 42, gcMs = 930, blockingCount = 3, blockingMs = 55, allocated = 5_000_000 + 3_145_728)
+        assertEquals("+2/30 blocking=+2/43 alloc=3.0MB", b.deltaText(a))
+        assertEquals("none", b.deltaText(b))
+    }
 }

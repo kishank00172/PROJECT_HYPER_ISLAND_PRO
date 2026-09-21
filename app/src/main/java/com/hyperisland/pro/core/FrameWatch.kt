@@ -52,6 +52,12 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
      */
     var regionPasses = 0L
         private set
+    var stallCount = 0L
+        private set
+    var stallMs = 0L
+        private set
+    var worstStallMs = 0L
+        private set
 
     /** Frames per vsync cadence in this window, e.g. `120:28,60:4`. The rate-flip evidence, per frame. */
     var rateCounts: Map<Int, Int> = emptyMap()
@@ -115,6 +121,9 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         gapSumMs = 0L
         midMorphLayouts = 0L
         regionPasses = 0L
+        stallCount = 0L
+        stallMs = 0L
+        worstStallMs = 0L
         rateBuckets.clear()
         lead.clear()
         drawNanos = 0L
@@ -161,6 +170,17 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
     }
 
     /**
+     * A main-thread block the watchdog caught. Counted per window on purpose: `stalls=1/448ms` next to
+     * `frames=2 avg=225ms` is the whole difference between "our animation is bad" and "someone else held the
+     * thread while our animation ran", and the second number is the one that decides what to change.
+     */
+    fun noteStall(ms: Long) {
+        stallCount++
+        stallMs += ms
+        if (ms > worstStallMs) worstStallMs = ms
+    }
+
+    /**
      * Every layout pass of the overlay's tree, whoever asked for it. A storm is visible as a big number, and
      * the split says whether it landed while an animation was on screen.
      */
@@ -197,7 +217,7 @@ class FrameWatch(private var hintPeriodMs: Long = 16L) {
         val rates = rateBuckets.entries.sortedByDescending { it.value }.joinToString(",") { "${it.key}:${it.value}" }
         val leadText = lead.joinToString("/")
         return "frames=$frames hz=$hz gap=${median}ms slow=$slowFrames layouts=$layoutPasses/$midMorphLayouts " +
-            "regions=$regionPasses" +
+            "regions=$regionPasses stalls=$stallCount/${stallMs}ms" +
             (if (rates.isEmpty()) "" else " at=$rates") +
             (if (leadText.isEmpty()) "" else " lead=$leadText") +
             "draw=${String.format(Locale.US, "%.1f", avgDraw)}ms/$drawSamples worst=${worstGapMs}ms window=${windowMs}ms"
