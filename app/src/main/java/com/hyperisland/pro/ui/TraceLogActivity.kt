@@ -134,7 +134,7 @@ class TraceLogActivity : Activity() {
                     type = "text/plain"
                     putExtra(Intent.EXTRA_SUBJECT, "Hyper Island trace")
                     // A full 600-line log is bigger than some receivers expect; the tail is what matters.
-                    putExtra(Intent.EXTRA_TEXT, TraceLog.tail(300))
+                    putExtra(Intent.EXTRA_TEXT, TraceLog.tail(TraceLog.PERSISTED_LINES)) // same slice the file gets
                 }, "Send trace log"))
             }
         }, lp())

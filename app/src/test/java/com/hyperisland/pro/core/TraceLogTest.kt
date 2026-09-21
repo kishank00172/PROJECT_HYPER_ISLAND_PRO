@@ -54,11 +54,16 @@ class TraceLogTest {
 
     @Test
     fun persistedTailIsBoundedAndKeepsTheNewest() {
-        repeat(TraceLog.PERSISTED_LINES + 40) { TraceLog.line("STAGE", "s$it") }
+        val total = TraceLog.PERSISTED_LINES + 40
+        repeat(total) { TraceLog.line("STAGE", "s$it") }
         val saved = TraceLog.persisted()
         assertEquals(TraceLog.PERSISTED_LINES, saved.lines().size)
-        assertTrue(saved, !saved.contains("s39"))
-        assertTrue(saved, saved.endsWith("s${TraceLog.PERSISTED_LINES + 39}"))
+        // The boundary, not the absence of a substring: this used to assert the tail did not contain "s39",
+        // which passed only while the numbers stayed under three digits - once the persisted window grew,
+        // the tail legitimately holds s390 through s399 and the substring is there. Saying "the first kept
+        // line is the 41st written" states the actual rule and cannot rot when the constants change.
+        assertEquals("s40", saved.lines().first().substringAfter("[STAGE] "))
+        assertTrue(saved, saved.endsWith("s${total - 1}"))
     }
 
     @Test
