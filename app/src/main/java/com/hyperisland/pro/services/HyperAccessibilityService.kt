@@ -2755,7 +2755,7 @@ class HyperAccessibilityService : AccessibilityService() {
         //  - no islandView scaleY squash (that scaled the TEXT, which is what read as jitter)
         val expand = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 360L
-            interpolator = expandInterpolator
+            interpolator = morphInterpolator // same reason as setStageAnimated: overshoot is eaten by the clamp
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
@@ -2832,7 +2832,14 @@ class HyperAccessibilityService : AccessibilityService() {
         val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = when (target) { IslandStage.STAGE1_IDLE -> 320L; IslandStage.STAGE2_PING -> 340L; else -> 380L }
-            interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
+            // Was: expandInterpolator out (0.34,1.56,0.64,1) and collapse in (0.55,0,0.1,1). Both were wrong
+            // for the *drawn* box, and the arithmetic is in the commit: the expand curve overshoots past 1.0,
+            // IslandMorphFrame.compute clamps it to the final size, and 29 of 46 frames at 120 Hz moved the
+            // box by exactly 0.0% - the shape was finished in ~57 ms and the rest of the animation was content
+            // fading inside a static box, which is the "masking lag raha hai" he keeps describing. The collapse
+            // curve spent its first 4 frames on 0.1/0.3/0.5/0.7% of the distance and then covered 10.1% in one
+            // frame: nothing, nothing, jhatka. One house curve both ways = 4-5% every frame, no dead frames.
+            interpolator = morphInterpolator
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
@@ -2841,11 +2848,6 @@ class HyperAccessibilityService : AccessibilityService() {
                 // written here *and* by a separate 140/160ms animator, which is the mid-morph pop.
                 if (target != IslandStage.STAGE2_PING) pillPreviewRoot?.alpha = 1f - t
                 // Morph opacity policy (measured on device, twice — do not "improve" it blind):
-                //  - expand: linear cross-fade over the whole morph. A fast ramp (alpha in by ~35%)
-                //    was tried and reads as "no animation, content just appears".
-                //  - collapse to pill: expanded page must be fully faded by ~45% of the shrink, or
-                //    it hangs below the shrunken card (the ghost text in the screenshot).
-                //  - collapse to idle: out by ~40%.
                 // The content column is width-locked (see expandedContentWidthPx) so none of these
                 // fades hide a re-wrap; the fade is not the anti-jitter mechanism, the lock is.
                 if (target == IslandStage.STAGE3_FULL && notificationMode) {
