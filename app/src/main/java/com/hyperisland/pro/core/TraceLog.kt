@@ -20,11 +20,16 @@ import java.util.Locale
  */
 object TraceLog {
 
-    /** Newest at the end, like a terminal. Beyond this the oldest lines fall off. */
-    const val MAX_LINES = 600
+    /**
+     * Newest at the end, like a terminal. Beyond this the oldest lines fall off. It used to be 600, which
+     * was fine for decisions and hopeless for a flood: a promo blast pushes ~5 lines per notification, and
+     * the tester lost the evidence he needed to say *which* build felt slow. 1500 lines is still a few
+     * hundred KB of string, and the whole buffer now goes to a file on demand.
+     */
+    const val MAX_LINES = 1500
 
     /** How much of the tail survives a process kill (SharedPreferences is not a database; keep it small). */
-    const val PERSISTED_LINES = 300
+    const val PERSISTED_LINES = 600
 
     private val lock = Any()
     private val lines = ArrayDeque<String>()
@@ -56,6 +61,12 @@ object TraceLog {
     fun ingest(message: String) = line("INGEST", message)
     fun reply(message: String) = line("REPLY", message)
     fun morph(message: String) = line("MORPH", message)
+
+    /** The whole-window frame watcher: what every frame cost, whoever asked for it. */
+    fun frame(message: String) = line("FRAME", message)
+
+    /** What the panel can do and what we asked it for - so "120 fps" is never an assumption. */
+    fun display(message: String) = line("DISPLAY", message)
 
     fun snapshot(): String = synchronized(lock) { lines.joinToString("\n") }
 

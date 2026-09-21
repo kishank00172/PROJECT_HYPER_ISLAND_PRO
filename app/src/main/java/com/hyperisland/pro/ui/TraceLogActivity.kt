@@ -1,13 +1,17 @@
 package com.hyperisland.pro.ui
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
@@ -19,6 +23,11 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.hyperisland.pro.core.TraceLog
+import java.io.File
+import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * The trace, on screen. Built in code rather than XML because it is a debug surface: one TextView in a
@@ -140,6 +149,14 @@ class TraceLogActivity : Activity() {
         }, lp())
         root.addView(row2)
 
+        val row3 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4f), 0, 0) }
+        row3.addView(Button(this).apply {
+            text = "EXPORT TO DOWNLOADS"; setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(16, 44, 30))
+            isAllCaps = false
+            setOnClickListener { export() }
+        }, LinearLayout.LayoutParams(-1, dp(48f)))
+        root.addView(row3)
+
         setContentView(root)
         startedAtLines = TraceLog.size()
     }
@@ -152,6 +169,55 @@ class TraceLogActivity : Activity() {
     override fun onPause() {
         super.onPause()
         ticker.removeCallbacks(tick)
+    }
+
+    /**
+     * Writes the whole buffer to `Downloads/hip-log-<stamp>.txt`, with a fresh timestamp in the name every
+     * time so two captures can never overwrite each other or be told apart.
+     *
+     * Why a file when COPY and SHARE exist: pasting 1500 lines into a chat truncates the head (the flood),
+     * re-wraps every line, and drops the build stamp we need to know *which* APK a report describes. The
+     * trace screen is also the one place that can write the log to itself, so the file is proof of what
+     * was on the screen at that moment. No storage permission is needed: this is MediaStore's Downloads
+     * collection on API 29+, and the app-private folder is the fallback if an OEM still refuses.
+     */
+    private fun export() {
+        val text = TraceLog.snapshot()
+        if (text.isBlank()) { toast("Nothing logged yet"); return }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val name = "hip-log-$stamp.txt"
+        val header = "# Hyper Island Pro trace - $name - ${TraceLog.size()} lines of ${TraceLog.MAX_LINES}\n" +
+            "# model ${Build.MODEL}, android ${Build.VERSION.SDK_INT}, built from the device's own clock\n\n"
+        try {
+            val resolver = contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IOException("MediaStore refused the insert")
+            resolver.openOutputStream(uri)?.use { it.write((header + text).toByteArray()) }
+                ?: throw IOException("no output stream for $uri")
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            TraceLog.line("TRACE", "exported ${TraceLog.size()} lines to Downloads/$name")
+            toast("Downloads/$name")
+        } catch (first: Throwable) {
+            try {
+                val dir = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir, "trace")
+                dir.mkdirs()
+                val file = File(dir, name)
+                file.writeText(header + text)
+                TraceLog.line("TRACE", "exported to app folder ${file.absolutePath} (MediaStore said: $first)")
+                toast("saved ${file.absolutePath}")
+            } catch (second: Throwable) {
+                TraceLog.line("TRACE", "export FAILED mediaStore=$first appFolder=$second")
+                toast("export failed: $second")
+            }
+        }
     }
 
     private fun render() {

@@ -1,6 +1,7 @@
 package com.hyperisland.pro.services
 
 import android.accessibilityservice.AccessibilityService
+import android.hardware.display.DisplayManager
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
@@ -46,6 +47,8 @@ import android.transition.Transition
 import android.transition.TransitionManager
 import android.transition.TransitionSet
 import android.util.Log
+import android.view.Choreographer
+import android.view.Display
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -69,6 +72,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
+import com.hyperisland.pro.core.FrameWatch
 import com.hyperisland.pro.core.IslandGesture
 import com.hyperisland.pro.core.IslandMorphFrame
 import com.hyperisland.pro.core.MorphFrame
@@ -442,6 +446,18 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphFinalW = 0
     private var morphFinalH = 0
     private var morphFinalR = 0f
+    /**
+     * Whole-window frame watcher. The morph meter only knows about the frames it is handed, and a report of
+     * "the whole island is sluggish" once arrived while every single morph line said the frames were fine -
+     * so the window gets watched from the vsync callback itself, plus a layout-pass counter and the card's
+     * own draw time. See [FrameWatch].
+     */
+    private val frameWatch = FrameWatch()
+    private var frameWatcher: Choreographer.FrameCallback? = null
+    private var frameLayoutWatcher: ViewTreeObserver.OnGlobalLayoutListener? = null
+
+    /** Monotonic: a wall clock that jumps (time zones, NITZ) must not open a 40-hour watch window. */
+    private fun nowMs(): Long = SystemClock.elapsedRealtime()
     private var currentStage = IslandStage.STAGE1_IDLE
     private var expandReason = ExpandReason.MANUAL_USER
     private var notificationMode = false
@@ -483,7 +499,10 @@ class HyperAccessibilityService : AccessibilityService() {
                 tracePrefs.edit().putString("tail", TraceLog.persisted()).apply()
             }
         }
-        TraceLog.line("BOOT", "island service connected (sdk=${Build.VERSION.SDK_INT}, model=${Build.MODEL})")
+        // The version belongs in the log because a trace that cannot say which build it came from is how
+        // one round of this got argued about instead of measured.
+        val build = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
+        TraceLog.line("BOOT", "island service connected (build=$build, sdk=${Build.VERSION.SDK_INT}, model=${Build.MODEL})")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -1004,6 +1023,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updatePillBadge(model: NotificationModel) {
+        armFrameWatch() // a badge change redraws the island with no animation to watch it under
         pillPreviewIcon?.background = null
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
@@ -1013,6 +1033,27 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun triggerPillPreview() {
+        // Flood rule, straight off the trace: a notification arriving while the pill is already popping used
+        // to cancel that pop, tear the layout and layer down, and start again - 44 setups in 6.7 s of a
+        // Telegram blast, 33 of them not producing a single frame, ~2 s of main thread burned on nothing
+        // the user could see. The callers have already written the new content and badge by the time this
+        // runs, so a pill that is already the right size needs a nudge, not a rebuild.
+        val pillW = dp(getTargetWidth(IslandStage.STAGE2_PING))
+        val pillH = dp(getTargetHeight(IslandStage.STAGE2_PING))
+        if (visualRoot != null && currentStage == IslandStage.STAGE2_PING &&
+            islandLayoutParams?.width == pillW && islandLayoutParams?.height == pillH) {
+            isProcessingQueue = false // the caller armed it; the morph that will not run is what clears it
+            when {
+                ringSwapInFlight || dragMode != DRAG_NONE -> TraceLog.morph("ping skipped: swipe owns the island")
+                morphAnimator?.isRunning == true -> TraceLog.morph("ping skipped: pop already running")
+                else -> {
+                    TraceLog.morph("ping re-pop (no layout, no layer)")
+                    popPillOnly()
+                }
+            }
+            armFrameWatch()
+            return
+        }
         morphAnimator?.cancel()
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         endRingSwap("pill preview")
@@ -1061,6 +1102,25 @@ class HyperAccessibilityService : AccessibilityService() {
         morphAnimator = anim
         beginMorphPerf("notify->ping", 360L, curW, curH, targetW, targetH, targetR)
         anim.start()
+    }
+
+    /**
+     * The pill's pop at the size the pill already is: alpha and scale on a drawable, no layout pass, no
+     * hardware layer churn. Same gesture the morph performs, minus the machinery that cannot be seen.
+     */
+    private fun popPillOnly() {
+        pillPreviewRoot?.let { v ->
+            v.animate().cancel()
+            v.visibility = View.VISIBLE
+            v.alpha = 0.5f
+            v.scaleX = 0.96f
+            v.scaleY = 0.96f
+            v.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(150L)
+                .setInterpolator(DecelerateInterpolator(2f)).start()
+        }
+        gridRoot?.animate()?.cancel()
+        gridRoot?.visibility = View.GONE
+        gridRoot?.alpha = 0f
     }
 
     private fun playFluidTransitionAnimation(next: NotificationModel) {
@@ -2827,6 +2887,15 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
+        val lp = islandLayoutParams
+        if (lp != null && lp.width == w && lp.height == h && outlineRadius == r) {
+            // Nothing changed, and "calling it anyway" is not free: a layoutParams write requests a layout
+            // of the whole card. That is what the settle cost - the tester's own trace put every hitch at
+            // t=1.0x, i.e. one frame after the animation, and grew it from 17 ms to 66-124 ms as the ring
+            // filled from 0 to 8 chats. During a morph the size is already the final one (it was applied
+            // once in beginMorphPerf), so the end of a morph takes this branch and does no layout at all.
+            return
+        }
         islandLayoutParams?.width = w; islandLayoutParams?.height = h; islandBackground?.cornerRadius = r
         outlineRadius = r; islandView?.layoutParams = islandLayoutParams; islandView?.invalidateOutline(); forceRegionUpdate()
     }
@@ -2890,10 +2959,62 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Opens or extends a frame-watch window. Cheap: while it is open we spend one lambda per vsync, and it
+     * is open only while the island is doing something (a touch, a morph, a badge change), so an idle pill
+     * costs nothing even on a 120 Hz panel.
+     */
+    private fun armFrameWatch() {
+        if (!frameWatch.noteActivity(nowMs())) return
+        val cb = object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                val now = nowMs()
+                frameWatch.frame(System.nanoTime(), now)
+                if (frameWatch.expired(now)) closeFrameWatch(now) else Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+        frameWatcher = cb
+        Choreographer.getInstance().postFrameCallback(cb)
+    }
+
+    private fun closeFrameWatch(now: Long) {
+        frameWatcher?.let { Choreographer.getInstance().removeFrameCallback(it) }
+        frameWatcher = null
+        if (!frameWatch.running) return
+        TraceLog.frame(frameWatch.end(now))
+    }
+
+    private fun detachFrameWatchers() {
+        closeFrameWatch(nowMs())
+        val w = frameLayoutWatcher
+        frameLayoutWatcher = null
+        if (w != null) islandView?.viewTreeObserver?.let { if (it.isAlive) it.removeOnGlobalLayoutListener(w) }
+    }
+
+    /**
+     * What this panel can run at, and what we ask it for. `preferredRefreshRate` is the public vote a window
+     * makes; without it an overlay is free to be held at 60 Hz by the platform's policy and no amount of
+     * in-app tuning changes that. It has to be one of the panel's own rates before API 34, so we hand over
+     * the maximum. The trace line is what makes `hz=` readable as a fact instead of a hope.
+     */
+    private fun refreshRateVote(): Float = try {
+        val display = getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+        val rates = display?.supportedModes?.map { it.refreshRate }?.distinct()?.sorted() ?: emptyList()
+        val current = display?.mode?.refreshRate ?: 0f
+        TraceLog.display("modes=${rates.joinToString("/")} current=${current} vote=${rates.lastOrNull() ?: 0f}")
+        rates.lastOrNull() ?: 0f
+    } catch (t: Throwable) {
+        TraceLog.display("panel rates unreadable: $t")
+        0f
+    }
+
     private fun beginMorphPerf(label: String, durationMs: Long, fromW: Int, fromH: Int, toW: Int, toH: Int, toR: Float) {
         morphLayoutW = -1; morphLayoutH = -1
         morphFinalW = toW; morphFinalH = toH; morphFinalR = toR
-        morphMeter = MorphJankMeter()
+        armFrameWatch()
+        // The budget is the period this panel is actually running at, not a hardcoded 16: at 120 Hz a 16 ms
+        // gap is two dropped frames and the old constant would have called that clean.
+        morphMeter = MorphJankMeter(frameWatch.periodMs())
         setContentPinnedForMorph(true)
         gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         val startR = islandBackground?.cornerRadius ?: toR
@@ -2912,7 +3033,12 @@ class HyperAccessibilityService : AccessibilityService() {
         updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
         val meter = morphMeter
         morphMeter = null
-        if (meter != null) TraceLog.morph("end $label ${meter.summary()}")
+        // Armed again on purpose: the settle is where the teardown lands and where the reported jumps sit,
+        // and the last frames of a morph are the ones a window closed at the start would miss.
+        armFrameWatch()
+        if (meter != null) TraceLog.morph(
+            "end $label ${meter.summary()} hz=${FrameWatch.snapHertz(frameWatch.periodMs())} layouts=${frameWatch.layoutPasses}"
+        )
     }
 
     private fun getPillBadgeWidthDp(): Int {
@@ -2952,7 +3078,10 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun showIslandInternal() {
         hideIslandInternal()
         val h = dp(AppSettings.getIslandHeightDp(this)); val w = dp(AppSettings.getIslandWidthDp(this)); val r = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
-        visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; windowAnimations = 0; title = "HyperIslandProVisual" }
+        val rateVote = refreshRateVote()
+        // Seed the frame budget from the vote, so a 120 Hz panel is not judged on an assumed 16 ms frame.
+        if (rateVote > 1f) frameWatch.notePanelPeriod((1000f / rateVote).toLong())
+        visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; windowAnimations = 0; title = "HyperIslandProVisual"; if (rateVote > 0f) preferredRefreshRate = rateVote }
         
         // THE INTERCEPTOR: Detects touches based on Reply State
         // Phase 3.5 Fluid — Off-Switch + Reflection Hack (compile-safe)
@@ -3093,7 +3222,12 @@ class HyperAccessibilityService : AccessibilityService() {
             }
 
             override fun dispatchDraw(canvas: Canvas) {
-                val f = morphFrame ?: run { super.dispatchDraw(canvas); return }
+                val t0 = if (frameWatch.measuring) System.nanoTime() else 0L
+                val f = morphFrame ?: run {
+                    super.dispatchDraw(canvas) // timed after the draw, so the number includes it
+                    if (t0 != 0L) frameWatch.noteDrawNanos(System.nanoTime() - t0)
+                    return
+                }
                 // Content stays inside the drawn box, which is what clipToOutline was doing for us. It is a
                 // containment clip on a subtree that is fading, not a mask that reveals it - the reveal
                 // look that was rejected earlier is a different thing and stays out.
@@ -3106,9 +3240,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 canvas.clipPath(morphClipPath)
                 super.dispatchDraw(canvas)
                 canvas.restoreToCount(layer)
+                // Only our own slice of the frame, so "the renderer was busy" and "we were slow" stop being
+                // the same number. The RenderThread's side is still invisible to us - said so in the log.
+                if (t0 != 0L) frameWatch.noteDrawNanos(System.nanoTime() - t0)
             }
             override fun dispatchTouchEvent(e: MotionEvent): Boolean {
                 val action = e.actionMasked
+                // A drag is animation too: it is the case the morph meter never saw, and the one the
+                // "everything is laggy" report was about as often as the morph.
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) armFrameWatch()
                 // Children first: reply/action buttons must get the touch before the island claims a gesture.
                 val childHandled = super.dispatchTouchEvent(e)
 
@@ -3362,6 +3502,11 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         this@HyperAccessibilityService.islandLayoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
         visualRoot?.addView(this@HyperAccessibilityService.islandView, this@HyperAccessibilityService.islandLayoutParams); updateOutlineForIsland(w, h, r)
+        // Every layout pass of the card counts, whoever asked for it: a relayout storm is invisible to a
+        // meter that watches only animations, and it is the failure mode we keep rediscovering.
+        val layoutWatcher = ViewTreeObserver.OnGlobalLayoutListener { frameWatch.noteLayoutPass() }
+        frameLayoutWatcher = layoutWatcher
+        islandView?.viewTreeObserver?.addOnGlobalLayoutListener(layoutWatcher)
         try { windowManager?.addView(visualRoot, visualParams) } catch (_: Exception) { hideIslandInternal() }
     }
 
@@ -3391,7 +3536,7 @@ class HyperAccessibilityService : AccessibilityService() {
         forceRegionUpdate()
     }
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
-    private fun hideIslandInternal() { endRingSwap("hide"); morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
+    private fun hideIslandInternal() { detachFrameWatchers(); endRingSwap("hide"); morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
