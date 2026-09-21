@@ -50,6 +50,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewConfiguration
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
@@ -2851,20 +2852,25 @@ class HyperAccessibilityService : AccessibilityService() {
      *    instead of 60 re-renders a second of every TextView, span and emoji in it.
      */
     private fun setContentPinnedForMorph(pinned: Boolean) {
-        val want = if (pinned) View.LayoutParams.WRAP_CONTENT else View.LayoutParams.MATCH_PARENT
-        gridRoot?.layoutParams?.let { lp ->
+        val want = if (pinned) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT
+        // Both live directly in islandView, so their parameters are FrameLayout's - the type that carries
+        // gravity. The static type of getLayoutParams() is ViewGroup.LayoutParams, which does not, and
+        // View has no LayoutParams of its own at all (CI: "Unresolved reference 'LayoutParams'").
+        gridRoot?.let { host ->
+            val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return@let
             if (lp.height != want) {
                 lp.height = want
-                gridRoot?.layoutParams = lp
+                host.layoutParams = lp
             }
         }
-        pillPreviewRoot?.layoutParams?.let { lp ->
+        pillPreviewRoot?.let { host ->
+            val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return@let
             if (lp.height != want) {
                 lp.height = want
-                // The pill used to be stretched to the box and centered inside it; once it is its own
-                // height it has to be centered *in* the box or it jumps to the top edge.
+                // The pill used to be stretched to the box and centered inside it; once it is its own height
+                // it has to be centered *in* the box or it jumps to the top edge.
                 lp.gravity = if (pinned) Gravity.CENTER_VERTICAL else Gravity.NO_GRAVITY
-                pillPreviewRoot?.layoutParams = lp
+                host.layoutParams = lp
             }
         }
     }
