@@ -31,6 +31,11 @@ class MorphJankMeter(private val budgetMs: Long = 16L) {
     private var totalMs = 0L
     private var lastNanos = 0L
 
+    // A flag, not "lastNanos == 0L": nanoTime legitimately starts at 0 in a test (and an animator's first
+    // callback can be at any absolute value), and a zero sentinel silently swallowed the second frame.
+    // CI caught it as "expected frames=2, got frames=1".
+    private var armed = false
+
     /**
      * Record one animation frame at [nowNanos] and [progress] (0..1 of the morph). Returns true when the
      * frame was slow enough that the renderer had nothing new to show. The first call only arms the clock,
@@ -38,7 +43,8 @@ class MorphJankMeter(private val budgetMs: Long = 16L) {
      * 4000 ms drop on the first morph after the screen comes back on.
      */
     fun frame(nowNanos: Long, progress: Float): Boolean {
-        if (lastNanos == 0L) {
+        if (!armed) {
+            armed = true
             lastNanos = nowNanos
             return false
         }
