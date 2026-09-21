@@ -37,8 +37,9 @@ class UpdateGateTest {
     @Test
     fun sameLengthDifferentContentIsStillAChange() {
         assertTrue(UpdateGate.textChanged("Hey", "Hoy"))
-        assertTrue(UpdateGate.textChanged("Hey", "Hey "))
-        assertFalse(UpdateGate.textChanged("Hey ", "Hey"))
+        assertTrue("a trailing space is a change: the whole line gets re-measured", UpdateGate.textChanged("Hey", "Hey "))
+        assertTrue(UpdateGate.textChanged("Hey ", "Hey"))
+        assertFalse(UpdateGate.textChanged("Hey", "Hey")) // and the case the gate exists for
     }
 
     @Test
