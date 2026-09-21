@@ -87,12 +87,27 @@ whole history and every fix so far went straight to `main`; branches only added 
 - `ci-<run>` tags accumulate; delete the old ones you no longer need (keep the one pointed at by
   `last-good`).
 
-## Current position - updated 2026-09-20 (read me first if you lost the plot)
+## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1343** round (release `ci-343`, commit `2fd52ba`, 52 JVM tests green);
+`main` head carries the **b1350** round (release `ci-350`, commit `b73d0ec`, 58 JVM tests green);
 `last-good` still points at `ff98959` (release `ci-314`) on purpose: the morph feel, the swipe feel and the
 sender-name fix are all waiting for an on-device verdict from the only tester we have. When a build is
 called good, move `last-good` to it.
+
+b1350 = the morph's cost per frame. Tapping the pill to expand dropped frames and the card text visibly
+"settled" 2-3 frames before the card was full size. `updateIslandLayout` ran on every frame of every morph
+and (a) assigned `layoutParams` even when `lerpEven` had produced the *same* size, i.e. a redundant
+requestLayout traversal of a screen-sized overlay exactly in the slow-out tail, (b) invalidated the root's
+outline instead of the card's, and (c) left `gridRoot`/`pillPreviewRoot` at MATCH_PARENT in a box whose
+height is animating, so the text was re-centred every frame - that is the slide he called a glitch. Morph
+frames now go through `updateIslandLayoutForMorph` (radius always, size only when it moved), the outline
+belongs to the card, and for the duration of a morph the two columns are pinned to their own height with a
+centering gravity plus a hardware layer on the text column. Separately, `setStageAnimated` had a **second**
+animator on `pillPreviewRoot.alpha` racing the morph's own per-frame `1f - t` - the pop at 140 ms.
+`core/MorphJank.kt` times every frame and the trace log prints
+`[MORPH] end stage->STAGE3_FULL frames=21 avg=17ms max=48ms@t=0.92 slow=3`, so the next "lagdu lagta hai" is
+a number and the remaining suspect (`clipToOutline` + animated radius rebuilding the clip mask per frame,
+fixable only by the P0-3 full-size-window change) gets proved or cleared before anyone rewrites it.
 
 b1343 = what the card is *headed with*. In a 1:1 the name comes from the newest message's sender, not from
 `android.conversationTitle`: Instagram writes the owner's own handle into that field for a 1:1, so his
@@ -129,7 +144,7 @@ sender*) instead of reading `android.conversationTitle` + `android.selfDisplayNa
 and a second ingestion path inside the accessibility service kept producing degraded cards. That path is
 **deleted** — notification ingestion is the NotificationListenerService alone; accessibility stays for
 typing replies and touch handling. Display rules live in `core/ChatDisplayPolicy.kt` with 18 JVM tests
-against real capture values (52 tests in CI total), and the rule is: **a group is named by which thread, a
+against real capture values (58 tests in CI total: 18 display + 15 identity + 14 gesture + 5 trace log + 6 morph jank), and the rule is: **a group is named by which thread, a
 1:1 by who spoke** - `android.isGroupConversation` decides which branch runs. That reversal is b1343's fix:
 in a 1:1 with Meta AI,
 Instagram put the owner's own handle in `android.conversationTitle`, and trusting the thread name printed
