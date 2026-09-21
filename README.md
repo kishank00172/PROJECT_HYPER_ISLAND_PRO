@@ -89,7 +89,21 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1373** round (release `ci-373`, commits `c20cfb9`..`33d3f01`, 90 JVM tests green).
+`main` head carries the **b1376** round (release `ci-376`, commits `b751a6d`..`34bf2ea`, 92 JVM tests green).
+His verdict on b1373 - "collapse abhi bhi first step to final step pe ja rha hai" - plus `frames=39 hz=120` on
+that same collapse is the whole story: the frames were being delivered, and every one of them drew the same
+box, because a morph pins the view at its **target** size and `IslandMorphFrame.compute` clamps each frame into
+the target's bounds. Harmless when growing (every intermediate is smaller), fatal when shrinking (every
+intermediate is larger, so all of them clamp to the pill). The bound is now the surface being drawn on,
+`max(start, target)` per axis, with the true final size applied at the settle; `IslandMorphFrameTest` keeps the
+wrong bound in the test on purpose, asserting that it collapses every width onto one number, so the clamp can
+never again be "simplified" back into charge of the animation. Same round also stopped the tooling from eating
+what it measures: 91 of 277 stall samples in his export were the trace screen's own `render()` pushing 1500
+lines into a TextView every 700 ms (now a 220-line tail on screen, whole buffer in the export), and the label
+lookup was two binder calls per notification in two different classes (now memoised per package, failures not
+cached). `last-good` stays `ff98959`; the text-jitter report stays open.
+
+Before that, the **b1373** round (release `ci-373`, commits `c20cfb9`..`33d3f01`, 90 JVM tests green).
 It is the round the b1369 sampler was built for, and his export decided every part of it:
 
 - **What his file proved:** 14 of 16 windows read `hz=120 gap=8ms` (the panel delivered), 6 of 21 morphs still
