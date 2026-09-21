@@ -43,6 +43,9 @@ class TraceLogActivity : Activity() {
     private lateinit var body: TextView
     private lateinit var status: TextView
     private var followTail = true
+
+    /** How many lines the on-screen tail shows. The export file is always the whole buffer. */
+    private companion object { const val VISIBLE_LINES = 220 }
     private var auto = true
     private var scroll: ScrollView? = null
     private var startedAtLines = 0
@@ -220,11 +223,18 @@ class TraceLogActivity : Activity() {
         }
     }
 
+    /**
+     * The screen used to hand all 1500 lines to one TextView every 700 ms. That is a StaticLayout build of a
+     * hundred-odd kilobytes on the main thread, and it was the single biggest block in the session it produced:
+     * 91 of 277 stall samples in the b1373 export were this function, while the tester was judging whether the
+     * island is smooth. A tool that eats the frames it is measuring is not a tool, so the screen keeps a tail
+     * and the export keeps everything.
+     */
     private fun render() {
         val n = TraceLog.size()
-        val text = TraceLog.snapshot()
+        val text = TraceLog.tail(VISIBLE_LINES)
         if (text != body.text.toString()) body.text = text
-        status.text = "$n lines kept · $n - ${maxOf(0, n - startedAtLines)} added since this screen opened" +
+        status.text = "showing last ${minOf(n, VISIBLE_LINES)} of $n lines · EXPORT writes all of them · $n - ${maxOf(0, n - startedAtLines)} added since this screen opened" +
             if (n >= TraceLog.MAX_LINES) " · older lines rolled off" else ""
         if (followTail) scrollBottom()
     }

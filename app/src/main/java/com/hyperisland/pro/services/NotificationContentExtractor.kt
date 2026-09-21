@@ -264,8 +264,17 @@ object NotificationContentExtractor {
 
     private fun stripMessageCountSuffix(value: String): String = ConversationIdentity.stripMessageCountSuffix(value)
 
-    private fun getAppName(context: Context, pkg: String): String = try {
+    /**
+     * Two binder round trips per notification, on whatever thread the notification arrived, for a string that
+     * cannot change while the process lives. The service's own log caught the main-thread version of this cost;
+     * this copy is the same call from the extractor, so it is cached the same way - failures included as
+     * non-cacheable, so a lookup that misses once does not pin the package name onto every later card.
+     */
+    private val appNamesByPkg = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun getAppName(context: Context, pkg: String): String = appNamesByPkg[pkg] ?: try {
         context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString()
+            .also { appNamesByPkg[pkg] = it }
     } catch (_: Exception) {
         pkg
     }

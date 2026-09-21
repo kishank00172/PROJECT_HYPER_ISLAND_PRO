@@ -4000,7 +4000,20 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     } catch (_: Exception) { null }
 
-    private fun getAppName(pkg: String) = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
+    /**
+     * `getApplicationInfo` + `getApplicationLabel` are two binder round trips, and they used to run for every
+     * notification of every app: his export put 10 stalls of >=24 ms inside them while the island was open.
+     * A label does not change under a running process, so one lookup per package, and a failure is not cached
+     * (a transient `NameNotFound` must not freeze the package name onto the card).
+     */
+    private val appNamesByPkg = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun getAppName(pkg: String): String = appNamesByPkg[pkg] ?: try {
+        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+            .also { appNamesByPkg[pkg] = it }
+    } catch (_: Exception) {
+        pkg
+    }
     /**
      * Stamps a card with the *message's* instant when the app published one. The old one-liner used
      * postTime only, and Instagram pushes a thread's whole backlog in one go (capture seq 85: message
