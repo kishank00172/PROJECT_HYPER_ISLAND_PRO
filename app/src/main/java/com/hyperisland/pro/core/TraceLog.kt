@@ -55,6 +55,7 @@ object TraceLog {
     fun stage(message: String) = line("STAGE", message)
     fun ingest(message: String) = line("INGEST", message)
     fun reply(message: String) = line("REPLY", message)
+    fun morph(message: String) = line("MORPH", message)
 
     fun snapshot(): String = synchronized(lock) { lines.joinToString("\n") }
 

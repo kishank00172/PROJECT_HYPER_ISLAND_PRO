@@ -69,6 +69,7 @@ import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
 import com.hyperisland.pro.core.IslandGesture
+import com.hyperisland.pro.core.MorphJankMeter
 import com.hyperisland.pro.core.TraceLog
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
@@ -429,6 +430,9 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private var outsideWatcherView: FrameLayout? = null
     private var morphAnimator: Animator? = null
+    private var morphMeter: MorphJankMeter? = null
+    private var morphLayoutW = -1
+    private var morphLayoutH = -1
     private var currentStage = IslandStage.STAGE1_IDLE
     private var expandReason = ExpandReason.MANUAL_USER
     private var notificationMode = false
@@ -1028,13 +1032,15 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = morphInterpolator
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                morphMeter?.frame(System.nanoTime(), t)
                 pillPreviewRoot?.alpha = t
                 pillPreviewRoot?.scaleX = 0.92f + 0.08f * t
                 pillPreviewRoot?.scaleY = 0.92f + 0.08f * t
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    endMorphPerf("notify->ping")
                     pillPreviewRoot?.alpha = 1f
                     pillPreviewRoot?.scaleX = 1f
                     pillPreviewRoot?.scaleY = 1f
@@ -1044,6 +1050,7 @@ class HyperAccessibilityService : AccessibilityService() {
             })
         }
         morphAnimator = anim
+        beginMorphPerf("notify->ping", 360L)
         anim.start()
     }
 
@@ -2633,7 +2640,11 @@ class HyperAccessibilityService : AccessibilityService() {
         currentStage = IslandStage.STAGE3_FULL; expandReason = ExpandReason.AUTO_NOTIFICATION
         val ping = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 120L
-            addUpdateListener { updateIslandLayout(lerpEven(startW, pingW, it.animatedValue as Float), startH, startR) }
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                updateIslandLayoutForMorph(lerpEven(startW, pingW, t), startH, startR)
+                morphMeter?.frame(System.nanoTime(), t)
+            }
         }
         // Auto-notification expand, cleaned up for the mask approach:
         //  - 650 -> 360ms, so a defect can't hide inside a slow morph
@@ -2644,7 +2655,8 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = expandInterpolator
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayout(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
+                updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
+                morphMeter?.frame(System.nanoTime(), t)
                 gridRoot?.visibility = View.VISIBLE
                 gridRoot?.alpha = t
             }
@@ -2652,7 +2664,12 @@ class HyperAccessibilityService : AccessibilityService() {
         val set = AnimatorSet().apply {
             playSequentially(ping, expand)
             addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationStart(a: Animator) {
+                    beginMorphPerf("notify->full", 720L)
+                }
+
                 override fun onAnimationEnd(a: Animator) {
+                    endMorphPerf("notify->full")
                     gridRoot?.alpha = 1f
                     gridRoot?.translationY = 0f
                     islandView?.scaleX = 1f; islandView?.scaleY = 1f
@@ -2682,10 +2699,11 @@ class HyperAccessibilityService : AccessibilityService() {
         expandReason = reason
 
         if (target == IslandStage.STAGE3_FULL) {
+            // Cancel only - never start a second animator on pillPreviewRoot.alpha. There was one here
+            // (to 0f over 140ms) while this same morph's update listener wrote `1f - t` to the very same
+            // property, so which one landed on a given frame was a race, and the 140ms run finishing hid
+            // the pill content with a pop mid-morph. One property, one owner per frame.
             pillPreviewRoot?.animate()?.cancel()
-            pillPreviewRoot?.animate()?.alpha(0f)?.setDuration(140L)?.setInterpolator(collapseInterpolator)?.withEndAction {
-                pillPreviewRoot?.visibility = View.GONE
-            }?.start()
             gridRoot?.visibility = View.VISIBLE
             // Kept fully opaque so the mask reveal, not a fade, is what you see.
             gridRoot?.alpha = 1f
@@ -2701,10 +2719,9 @@ class HyperAccessibilityService : AccessibilityService() {
             gridRoot?.animate()?.cancel()
             gridRoot?.visibility = View.VISIBLE
         } else if (target == IslandStage.STAGE1_IDLE) {
+            // Same double-owner fix as STAGE3_FULL: the frame loop owns pillPreviewRoot.alpha, the end of
+            // the morph owns its visibility.
             pillPreviewRoot?.animate()?.cancel()
-            pillPreviewRoot?.animate()?.alpha(0f)?.setDuration(160L)?.withEndAction {
-                pillPreviewRoot?.visibility = View.GONE
-            }?.start()
         }
 
         val targetW = dp(getTargetWidth(target))
@@ -2715,7 +2732,11 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = if (target == IslandStage.STAGE1_IDLE) collapseInterpolator else expandInterpolator
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayout(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                morphMeter?.frame(System.nanoTime(), t)
+                // One owner of the pill's fade for every stage change, notification or not. It used to be
+                // written here *and* by a separate 140/160ms animator, which is the mid-morph pop.
+                if (target != IslandStage.STAGE2_PING) pillPreviewRoot?.alpha = 1f - t
                 // Morph opacity policy (measured on device, twice — do not "improve" it blind):
                 //  - expand: linear cross-fade over the whole morph. A fast ramp (alpha in by ~35%)
                 //    was tried and reads as "no animation, content just appears".
@@ -2729,7 +2750,6 @@ class HyperAccessibilityService : AccessibilityService() {
                     // did before my changes. (The short 0-35% ramp read as "no animation at all" —
                     // the text was already opaque while the card was still tiny.)
                     gridRoot?.alpha = t
-                    pillPreviewRoot?.alpha = 1f - t
                 } else if (target == IslandStage.STAGE2_PING && notificationMode) {
                     // Collapse: the expanded page must be GONE by 45% of the shrink. Skipping this
                     // fade is what left expanded text hanging below the pill in the last frames.
@@ -2737,7 +2757,6 @@ class HyperAccessibilityService : AccessibilityService() {
                     pillPreviewRoot?.alpha = 1f
                 } else if (target == IslandStage.STAGE1_IDLE && notificationMode) {
                     gridRoot?.alpha = 1f - (t / 0.4f).coerceIn(0f, 1f)
-                    pillPreviewRoot?.alpha = 1f - t
                 }
                 // Was: islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI)) — a whole-card 4% vertical
                 // squash on every morph. Scaling the card scales the TEXT, so it blurred and "breathed"
@@ -2745,9 +2764,15 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
+                    endMorphPerf("stage->$target")
                     gridRoot?.translationY = 0f
                     syncContentWidth()
                     flushDeferredRegionUpdate()
+                    if (target == IslandStage.STAGE3_FULL) {
+                        // Where the deleted pill animator left it, minus the mid-morph pop.
+                        pillPreviewRoot?.alpha = 0f
+                        pillPreviewRoot?.visibility = View.GONE
+                    }
                     if (target == IslandStage.STAGE1_IDLE) {
                         gridRoot?.visibility = View.GONE
                         pillPreviewRoot?.visibility = View.GONE
@@ -2770,6 +2795,7 @@ class HyperAccessibilityService : AccessibilityService() {
             })
         }
         morphAnimator = anim
+        beginMorphPerf("stage->$target", anim.duration)
         anim.start()
     }
 
@@ -2792,8 +2818,71 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
-        this@HyperAccessibilityService.islandLayoutParams?.width = w; this@HyperAccessibilityService.islandLayoutParams?.height = h; this@HyperAccessibilityService.islandBackground?.cornerRadius = r
-        this@HyperAccessibilityService.outlineRadius = r; this@HyperAccessibilityService.islandView?.layoutParams = this@HyperAccessibilityService.islandLayoutParams; visualRoot?.invalidateOutline(); forceRegionUpdate()
+        islandLayoutParams?.width = w; islandLayoutParams?.height = h; islandBackground?.cornerRadius = r
+        outlineRadius = r; islandView?.layoutParams = islandLayoutParams; islandView?.invalidateOutline(); forceRegionUpdate()
+    }
+
+    /**
+     * The per-frame entry point while a morph runs, and it is *not* the same as [updateIslandLayout]:
+     *  - the eased curve lands on the same even-pixel size for its last frames, and every redundant
+     *    `layoutParams` assignment is a fresh requestLayout traversal of a screen-sized overlay window.
+     *    Those tail frames are where the tester saw the text finally "set" after the glitch, so when the
+     *    size did not change only the radius moves.
+     *  - `visualRoot.invalidateOutline()` is gone from the path above as well: the outline belongs to the
+     *    card, and invalidating the root's was asking RenderThread to redo the whole overlay per frame.
+     */
+    private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float) {
+        islandBackground?.cornerRadius = r
+        outlineRadius = r
+        if (w == morphLayoutW && h == morphLayoutH) return
+        morphLayoutW = w; morphLayoutH = h
+        updateIslandLayout(w, h, r)
+    }
+
+    /**
+     * What the morph costs per frame, made explicit. Two things are pinned for the animation and restored
+     * when it lands, both aimed at "text glitch hota hai, tab jake text set hota hai":
+     *  - the content column and the pill content are MATCH_PARENT in a box whose height is animating, so
+     *    they are re-centred on *every* frame: that is the text sliding while it fades in, and it throws
+     *    away the cached text raster each time. Pinned to their own height with a vertical centering
+     *    gravity they sit on the same pixel they would have landed on anyway - the end state is identical,
+     *    the frames in between stop moving.
+     *  - the text column gets a hardware layer, so the cross-fade is a GPU blend of one cached raster
+     *    instead of 60 re-renders a second of every TextView, span and emoji in it.
+     */
+    private fun setContentPinnedForMorph(pinned: Boolean) {
+        val want = if (pinned) View.LayoutParams.WRAP_CONTENT else View.LayoutParams.MATCH_PARENT
+        gridRoot?.layoutParams?.let { lp ->
+            if (lp.height != want) {
+                lp.height = want
+                gridRoot?.layoutParams = lp
+            }
+        }
+        pillPreviewRoot?.layoutParams?.let { lp ->
+            if (lp.height != want) {
+                lp.height = want
+                // The pill used to be stretched to the box and centered inside it; once it is its own
+                // height it has to be centered *in* the box or it jumps to the top edge.
+                lp.gravity = if (pinned) Gravity.CENTER_VERTICAL else Gravity.NO_GRAVITY
+                pillPreviewRoot?.layoutParams = lp
+            }
+        }
+    }
+
+    private fun beginMorphPerf(label: String, durationMs: Long) {
+        morphLayoutW = -1; morphLayoutH = -1
+        morphMeter = MorphJankMeter()
+        setContentPinnedForMorph(true)
+        gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        TraceLog.morph("start $label dur=${durationMs}ms")
+    }
+
+    private fun endMorphPerf(label: String) {
+        setContentPinnedForMorph(false)
+        gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
+        val meter = morphMeter
+        morphMeter = null
+        if (meter != null) TraceLog.morph("end $label ${meter.summary()}")
     }
 
     private fun getPillBadgeWidthDp(): Int {
