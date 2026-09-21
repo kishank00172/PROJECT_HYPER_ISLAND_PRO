@@ -89,7 +89,28 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1369** round (release `ci-369`, commits `3c9c955`..`d2274e6`, 81 JVM tests green):
+`main` head carries the **b1373** round (release `ci-373`, commits `c20cfb9`..`33d3f01`, 90 JVM tests green).
+It is the round the b1369 sampler was built for, and his export decided every part of it:
+
+- **What his file proved:** 14 of 16 windows read `hz=120 gap=8ms` (the panel delivered), 6 of 21 morphs still
+  starved to `frames=4 avg=95ms`; `gc=+0/0` on 20 of 21 (GC theory dead); one `[DISPLAY]` line (rate-flip theory
+  dead for that session). 904 sampled main-thread blocks, 154.7 s in 21.7 min, headed by `transactNative`
+  23.3 s (an uncached `getApplicationIcon` per update), `nGetFontMetricsInt` 16.7 s and `nBuildMeasuredText`
+  12.0 s (the 3-span title re-measured on every update) - against `draw=0.2ms`. The frames were available; we
+  were busy with text. So: `UpdateGate` skips the work when nothing changed (icon per package, text by length
+  then content, tiles only when the `Action` *instances* differ) and the stall line now prints the first frame
+  that is ours (`| us: updateNotificationContent@…:1184`) so the next round has a call site, not a theory.
+- **What his words proved about the motion**, both fixed as separate revertable commits: every fade branch was
+  gated `&& notificationMode`, so a tap-expand ran **no fade at all** - his settle line reads
+  `end-state size=366x104 clip=true grid=V/1.0`, opaque content and then `GONE` one frame later, i.e.
+  "ek jhatke se sidha pill"; and the size curves wasted their frames (overshoot deleted by `IslandMorphFrame`'s
+  clamp = 29 of 46 frames moving 0.0% = "masking"; collapse dwell 0.1-0.7% then one 10.1% lurch). Both
+  directions now move 4-5% of the distance on **every** frame at 120 Hz, durations untouched - his
+  "120 fps matlab 120 chhote frames, 60 ko double karke 2x chalana nahi" said it better than my log did.
+- **Dropped on evidence:** the two-window split in `STEP3-PLAN.md`. `regions=` across 21 morphs is 1-7 pokes,
+  not a storm, so it would have been a rewrite for nothing. `last-good` stays `ff98959`.
+
+Before that, the **b1369** round (release `ci-369`, commits `3c9c955`..`d2274e6`, 81 JVM tests green):
 a measurement round, decided by the tester's own export of b1364 and by a question he had asked twice -
 "log mei daalte ho ki ye maapo to sirf wahi sab ka deta hai? Ya saare he process dekhta hai? … aisa na ho
 tumne miss kar diya kuchh". He was right that the log only ever saw the lines I chose to write at the decision
