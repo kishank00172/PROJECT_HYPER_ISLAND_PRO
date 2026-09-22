@@ -68,7 +68,6 @@ object MorphCarry {
      */
     fun pillIconHidden(rowAlpha: Float, rowShown: Boolean): Boolean = rowShown && rowAlpha > 0.02f
 
-    /** The card content's own scale: it opens with the island instead of standing still inside it. */
     /**
      * The card content's own scale: it opens with the island instead of standing still inside it.
      *
