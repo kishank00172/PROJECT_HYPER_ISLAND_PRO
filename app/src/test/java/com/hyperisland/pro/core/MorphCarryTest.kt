@@ -60,3 +60,60 @@ class MorphCarryTest {
         })
     }
 }
+
+    // The content morphs too, not only the shape: "Island ke andar jo content hota hai use bhi morph karo
+    // scale and opacity morph". These are the functions the service reads per frame, so the whole policy
+    // is testable here instead of inside a listener callback CI cannot reach.
+    @Test fun `shape progress reads the box, not the clock`() {
+        // bound 1080: a 480 pill sits at left 300, the 1080 card at 0, and halfway is 780 wide.
+        assertEquals(0f, MorphCarry.shapeProgress(boxLeft = 300, fromW = 480, toW = 1080, boundW = 1080), 1e-6f)
+        assertEquals(1f, MorphCarry.shapeProgress(boxLeft = 0, fromW = 480, toW = 1080, boundW = 1080), 1e-6f)
+        assertEquals(0.5f, MorphCarry.shapeProgress(boxLeft = 150, fromW = 480, toW = 1080, boundW = 1080), 1e-6f)
+        // A collapse uses the same numbers backwards and still runs 0 to 1.
+        assertEquals(0f, MorphCarry.shapeProgress(boxLeft = 0, fromW = 1080, toW = 480, boundW = 1080), 1e-6f)
+        assertEquals(1f, MorphCarry.shapeProgress(boxLeft = 300, fromW = 1080, toW = 480, boundW = 1080), 1e-6f)
+        // A box clamped wider than its target must not read as past the end.
+        assertEquals(1f, MorphCarry.shapeProgress(boxLeft = -20, fromW = 480, toW = 1080, boundW = 1080), 1e-6f)
+    }
+
+    @Test fun `content grows into the card and shrinks back into the pill`() {
+        assertEquals(0.88f, MorphCarry.contentScale(progress = 0f, from = 0.88f), 1e-6f)
+        assertEquals(0.94f, MorphCarry.contentScale(progress = 0.5f, from = 0.88f), 1e-6f)
+        assertEquals(1f, MorphCarry.contentScale(progress = 1f, from = 0.88f), 1e-6f)
+        // from = 1 is the switch being off: the size must not move at all.
+        assertEquals(1f, MorphCarry.contentScale(progress = 0f, from = 1f), 1e-6f)
+    }
+
+    @Test fun `opacity has one ramp per direction and never overshoots`() {
+        // Expanding with the shape: invisible at the pill, solid at the card.
+        assertEquals(0f, MorphCarry.contentAlpha(t = 0f, progress = 0f, growing = true, followShape = true), 1e-6f)
+        assertEquals(1f, MorphCarry.contentAlpha(t = 1f, progress = 1f, growing = true, followShape = true), 1e-6f)
+        // Expanding on the clock is the b1378 style: the ramp ignores the box entirely.
+        assertEquals(0.3f, MorphCarry.contentAlpha(t = 0.3f, progress = 0.9f, growing = true, followShape = false), 1e-6f)
+        // Collapsing, gone by 40% of the shrink - and exactly zero there, not merely small, because a
+        // half-faded row hanging under the pill is a bug this file has already been written about.
+        assertEquals(0.5f, MorphCarry.contentAlpha(t = 0.2f, progress = 1f, growing = false, followShape = false, outBy = 0.4f), 1e-6f)
+        assertEquals(0f, MorphCarry.contentAlpha(t = 0.4f, progress = 1f, growing = false, followShape = false, outBy = 0.4f), 1e-6f)
+        assertEquals(0f, MorphCarry.contentAlpha(t = 0.9f, progress = 1f, growing = false, followShape = false, outBy = 0.4f), 1e-6f)
+        // Collapsing with the shape: progress runs 1 -> 0, so 1 - progress is the fade clock.
+        assertEquals(1f, MorphCarry.contentAlpha(t = 0f, progress = 1f, growing = false, followShape = true, outBy = 0.4f), 1e-6f)
+        assertEquals(0f, MorphCarry.contentAlpha(t = 0f, progress = 0.5f, growing = false, followShape = true, outBy = 0.4f), 1e-6f)
+        for (i in 0..100) {
+            val p = i / 100f
+            for (growing in booleanArrayOf(true, false)) {
+                for (follow in booleanArrayOf(true, false)) {
+                    val a = MorphCarry.contentAlpha(p, p, growing, follow)
+                    assertTrue("alpha out of range: $a", a in 0f..1f)
+                }
+            }
+        }
+    }
+
+    @Test fun `swap point is honoured in both directions`() {
+        // He can move the swap in TestLab; the rule stays one glyph on the way in and its mirror on the way
+        // out, which is the direction bug this file exists to remember.
+        assertTrue(MorphCarry.showsPillGlyph(t = 0.7f, growing = true, swapAt = 0.8f))
+        assertFalse(MorphCarry.showsPillGlyph(t = 0.9f, growing = true, swapAt = 0.8f))
+        assertTrue(MorphCarry.showsPillGlyph(t = 0.2f, growing = false, swapAt = 0.8f))
+        assertFalse(MorphCarry.showsPillGlyph(t = 0.05f, growing = false, swapAt = 0.8f))
+    }

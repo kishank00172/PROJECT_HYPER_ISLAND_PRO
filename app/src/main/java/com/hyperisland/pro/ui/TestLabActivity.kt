@@ -20,6 +20,7 @@ class TestLabActivity : Activity() {
 
         bindReplyAnimationLab()
         bindLiquidCalibration()
+        bindMorphLab()
         bindPillIconLab()
         bindShadePullLab()
 
@@ -144,6 +145,77 @@ class TestLabActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
+    }
+
+    private fun bindMorphLab() {
+        // He asked for options to choose from rather than another single opinion from me, and for them
+        // to live where he can feel them without waiting on a build.
+        val group = findViewById<RadioGroup>(R.id.radioMorphStyle)
+        group.check(idForMorphStyle(AppSettings.getMorphStyle(this)))
+        group.setOnCheckedChangeListener { _, checkedId ->
+            AppSettings.setMorphStyle(this, morphStyleForId(checkedId))
+            Toast.makeText(this, "Morph: " + AppSettings.getMorphStyleName(this), Toast.LENGTH_SHORT).show()
+        }
+        bindMorphSeek(
+            R.id.seekMorphScale, R.id.tvMorphScaleLabel, "content starts", 0, 45,
+            { AppSettings.getMorphContentScalePct(it) }, { c, v -> AppSettings.setMorphContentScalePct(c, v) }
+        )
+        bindMorphSeek(
+            R.id.seekMorphSwap, R.id.tvMorphSwapLabel, "icon becomes the app badge at", 10, 90,
+            { AppSettings.getMorphGlyphSwapPct(it) }, { c, v -> AppSettings.setMorphGlyphSwapPct(c, v) }
+        )
+        findViewById<Button>(R.id.btnReplayMorph).setOnClickListener {
+            // Both directions on one press: "opens nicely, closes wrong" is a real answer he could not
+            // otherwise give me without timing two taps against a 320 ms morph.
+            HyperAccessibilityService.toggleExpandFromApp(this)
+            findViewById<Button>(R.id.btnReplayMorph).postDelayed({
+                if (!isFinishing) HyperAccessibilityService.toggleExpandFromApp(this)
+            }, 950L)
+        }
+    }
+
+    private fun bindMorphSeek(
+        seekId: Int,
+        labelId: Int,
+        label: String,
+        min: Int,
+        max: Int,
+        get: (android.content.Context) -> Int,
+        set: (android.content.Context, Int) -> Unit,
+    ) {
+        val seekBar = findViewById<SeekBar>(seekId)
+        val labelView = findViewById<TextView>(labelId)
+        fun show(v: Int) { labelView.text = "$label: $v%" }
+        seekBar.max = max - min
+        val initial = get(this).coerceIn(min, max)
+        seekBar.progress = initial - min
+        show(initial)
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                val value = min + progress
+                show(value)
+                // Writing on every tick is what the other labs do, and the morph reads the setting at its
+                // own start, so a drag costs nothing and applies to the very next replay.
+                if (fromUser) set(this@TestLabActivity, value)
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar?) = Unit
+            override fun onStopTrackingTouch(sb: SeekBar?) = Unit
+        })
+    }
+
+    private fun idForMorphStyle(style: Int): Int = when (style) {
+        AppSettings.MORPH_STYLE_CARRY -> R.id.radioMorphCarry
+        AppSettings.MORPH_STYLE_SHAPE_ONLY -> R.id.radioMorphScaleOnly
+        AppSettings.MORPH_STYLE_REVEAL -> R.id.radioMorphReveal
+        else -> R.id.radioMorphBalanced
+    }
+
+    private fun morphStyleForId(id: Int): Int = when (id) {
+        R.id.radioMorphCarry -> AppSettings.MORPH_STYLE_CARRY
+        R.id.radioMorphScaleOnly -> AppSettings.MORPH_STYLE_SHAPE_ONLY
+        R.id.radioMorphReveal -> AppSettings.MORPH_STYLE_REVEAL
+        else -> AppSettings.MORPH_STYLE_BALANCED
     }
 
     private fun bindPillIconLab() {

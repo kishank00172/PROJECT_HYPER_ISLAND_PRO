@@ -191,7 +191,100 @@
         </RadioGroup>
 
 
+                <!-- The morph feel is his to choose, not mine to guess: the style swaps here and the island replays
+             it live, so "thoda aur" costs one drag instead of one APK. -->
         <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Island Morph Lab (content inside the island)"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:textSize="18sp" />
+
+        <RadioGroup
+            android:id="@+id/radioMorphStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <RadioButton
+                android:id="@+id/radioMorphBalanced"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Balanced - content rides the shape, scales, and fades with the shape"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioMorphCarry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ride only - content travels, size fixed, fade on the clock (b1378)"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioMorphScaleOnly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Scale + fade only - content morphs in place, it does not travel"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioMorphReveal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Reveal (old) - nothing moves, the island grows over still content"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tvMorphScaleLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="content starts: 12%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMorphScale"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="45" />
+
+        <TextView
+            android:id="@+id/tvMorphSwapLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="icon becomes the app badge at: 50%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMorphSwap"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="80" />
+
+        <Button
+            android:id="@+id/btnReplayMorph"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="14dp"
+            android:text="REPLAY MORPH (open then close)"
+            android:textColor="@color/text_primary" />
+
+<TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"

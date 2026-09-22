@@ -13,6 +13,9 @@ object AppSettings {
     private const val KEY_ISLAND_HEIGHT_DP = "island_height_dp"
     private const val KEY_ISLAND_Y_DP = "island_y_dp"
     private const val KEY_ISLAND_X_DP = "island_x_dp"
+    private const val KEY_MORPH_STYLE = "morph_style"
+    private const val KEY_MORPH_CONTENT_SCALE = "morph_content_scale_pct"
+    private const val KEY_MORPH_GLYPH_SWAP = "morph_glyph_swap_pct"
     private const val KEY_ISLAND_CORNER_RADIUS_DP = "island_corner_radius_dp"
 
     private const val KEY_ISLAND_STAGE2_WIDTH_DP = "island_stage2_width_dp"
@@ -68,6 +71,20 @@ object AppSettings {
     const val DEFAULT_ISLAND_HEIGHT_DP = 38
     const val DEFAULT_ISLAND_Y_DP = 1
     const val DEFAULT_ISLAND_X_DP = 0
+
+    /**
+     * Which morph the island plays. It is a setting and not a build because he asked to choose the feel
+     * himself: "kya koi aur animation idea hai? TestLab mei he daalna options choose karne ke liye". A
+     * taste cannot be settled by me shipping one opinion per APK, and one rebuild per option would eat an
+     * evening of his patience; TestLab flips it live and TOGGLE replays the morph on the spot.
+     */
+    const val MORPH_STYLE_BALANCED = 0     // rides the shape, scales, opacity follows the shape
+    const val MORPH_STYLE_CARRY = 1        // rides the shape only (what b1378 shipped)
+    const val MORPH_STYLE_REVEAL = 2       // neither: the old clip-reveal, kept as an A/B control
+    const val MORPH_STYLE_SHAPE_ONLY = 3   // scales and fades with the shape, no travel
+    const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
+    const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
+    const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
     const val DEFAULT_ISLAND_CORNER_RADIUS_DP = 19
     const val DEFAULT_ISLAND_STAGE2_WIDTH_DP = 180
     const val DEFAULT_ISLAND_EXPANDED_WIDTH_DP = 390
@@ -114,6 +131,29 @@ object AppSettings {
     fun setIslandYDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_Y_DP, v).apply()
     fun getIslandXDp(context: Context) = prefs(context).getInt(KEY_ISLAND_X_DP, DEFAULT_ISLAND_X_DP)
     fun setIslandXDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_X_DP, v).apply()
+
+    fun getMorphStyle(context: Context) =
+        prefs(context).getInt(KEY_MORPH_STYLE, DEFAULT_MORPH_STYLE).coerceIn(MORPH_STYLE_BALANCED, MORPH_STYLE_SHAPE_ONLY)
+
+    fun setMorphStyle(context: Context, v: Int) = prefs(context).edit()
+        .putInt(KEY_MORPH_STYLE, v.coerceIn(MORPH_STYLE_BALANCED, MORPH_STYLE_SHAPE_ONLY)).apply()
+
+    fun getMorphStyleName(context: Context): String = when (getMorphStyle(context)) {
+        MORPH_STYLE_CARRY -> "ride only (b1378)"
+        MORPH_STYLE_REVEAL -> "reveal (old)"
+        MORPH_STYLE_SHAPE_ONLY -> "scale + fade only"
+        else -> "balanced"
+    }
+
+    /** How much smaller the card content starts, as a percent: 12 means it opens at 88% and grows in. */
+    fun getMorphContentScalePct(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_SCALE, DEFAULT_MORPH_CONTENT_SCALE_PCT)
+    fun setMorphContentScalePct(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_MORPH_CONTENT_SCALE, v.coerceIn(0, 45)).apply()
+
+    /** Where along the morph the travelling icon puts on the launcher badge instead of the pill glyph. */
+    fun getMorphGlyphSwapPct(context: Context) = prefs(context).getInt(KEY_MORPH_GLYPH_SWAP, DEFAULT_MORPH_GLYPH_SWAP_PCT)
+    fun setMorphGlyphSwapPct(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_MORPH_GLYPH_SWAP, v.coerceIn(10, 90)).apply()
 
     fun getIslandStage2WidthDp(context: Context) = prefs(context).getInt(KEY_ISLAND_STAGE2_WIDTH_DP, DEFAULT_ISLAND_STAGE2_WIDTH_DP)
     fun setIslandStage2WidthDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_STAGE2_WIDTH_DP, v).apply()
