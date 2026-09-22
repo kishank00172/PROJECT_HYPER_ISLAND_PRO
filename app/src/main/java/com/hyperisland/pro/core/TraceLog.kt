@@ -53,7 +53,7 @@ object TraceLog {
         // explicitly instead of arithmetically. A backwards jump (an NTP correction) re-reads as well.
         if (clockOffsetAt == Long.MIN_VALUE || tms < clockOffsetAt || tms - clockOffsetAt > 60_000L) {
             clockOffsetAt = tms
-            clockOffsetMs = java.util.TimeZone.getDefault().getOffset(tms)
+            clockOffsetMs = java.util.TimeZone.getDefault().getOffset(tms).toLong() // getOffset returns Int
         }
         var rest = (tms + clockOffsetMs) / 1000L
         val ms = (tms + clockOffsetMs) % 1000L

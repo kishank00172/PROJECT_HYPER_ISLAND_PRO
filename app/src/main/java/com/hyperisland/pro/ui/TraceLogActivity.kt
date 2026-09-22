@@ -99,9 +99,11 @@ class TraceLogActivity : Activity() {
         scroll = ScrollView(this).apply {
             // He should not have to press TOP to stop being dragged around: the moment the view is
             // anywhere but at the bottom, the user is reading, and the tail stops pulling.
-            setOnScrollChangeListener { v, _, y, _, _ ->
-                val child = v.getChildAt(0)
-                if (child != null) followTail = y + v.height >= child.bottom - 8
+            setOnScrollChangeListener { _, _, y, _, _ ->
+                // The listener hands out a View, which has no children; the ScrollView itself is the apply
+                // receiver here, so read the one child off that.
+                val child = getChildAt(0)
+                if (child != null) followTail = y + height >= child.bottom - 8
             }
             addView(body, LinearLayout.LayoutParams(-1, -2))
             isVerticalScrollBarEnabled = true
