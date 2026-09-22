@@ -89,7 +89,18 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-21 (read me first if you lost the plot)
 
-`main` head carries the **b1376** round (release `ci-376`, commits `b751a6d`..`34bf2ea`, 92 JVM tests green).
+`main` head carries the **b1378** round (release `ci-378`, commit `5d54874`, 96 JVM tests green), which is what
+he had been describing since round 16 and I kept reading as a curve problem: with the pinned-view design the card
+is laid out once at its FINAL size, so the row parks at the left edge of the final box while the drawn box starts
+pill-sized and centred - opening the island was literally a mask widening over a still picture. Now the row is
+pinned to the box's left inner edge every frame (`gridRoot.translationX = boxLeft`, self-cancelling at full
+width, render transform only, so the width lock that ended the text jitter still holds), and the icon is one
+travelling element: pill slot to card slot, 32dp to 38dp, and it wears the pill's glyph until half-way, then the
+launcher badge - in direction order, so a collapse never flashes a monochrome dot. `[MORPH] start` now logs
+`carry=on/off iconRide=on|n/a`, because three rounds in a row have ended with me having assumed a thing was
+armed. `MorphCarryTest` caught one real bug (collapse glyph on the wrong half) before it shipped.
+
+Before that, the **b1376** round (release `ci-376`, commits `b751a6d`..`34bf2ea`, 92 JVM tests green).
 His verdict on b1373 - "collapse abhi bhi first step to final step pe ja rha hai" - plus `frames=39 hz=120` on
 that same collapse is the whole story: the frames were being delivered, and every one of them drew the same
 box, because a morph pins the view at its **target** size and `IslandMorphFrame.compute` clamps each frame into
