@@ -59,7 +59,6 @@ class MorphCarryTest {
             MorphCarry.showsPillGlyph(a, false) != MorphCarry.showsPillGlyph(b, false)
         })
     }
-}
 
     // The content morphs too, not only the shape: "Island ke andar jo content hota hai use bhi morph karo
     // scale and opacity morph". These are the functions the service reads per frame, so the whole policy
@@ -114,6 +113,12 @@ class MorphCarryTest {
         // out, which is the direction bug this file exists to remember.
         assertTrue(MorphCarry.showsPillGlyph(t = 0.7f, growing = true, swapAt = 0.8f))
         assertFalse(MorphCarry.showsPillGlyph(t = 0.9f, growing = true, swapAt = 0.8f))
-        assertTrue(MorphCarry.showsPillGlyph(t = 0.2f, growing = false, swapAt = 0.8f))
+        // Off the knife-edge on purpose: 1f - 0.8f is 0.19999999 in binary, so a t of exactly 0.2f would
+        // pass by rounding rather than by the rule.
+        assertTrue(MorphCarry.showsPillGlyph(t = 0.3f, growing = false, swapAt = 0.8f))
         assertFalse(MorphCarry.showsPillGlyph(t = 0.05f, growing = false, swapAt = 0.8f))
+        // An early swap (20%) is the collapse's own 80%: the card keeps the app badge almost all the way in.
+        assertFalse(MorphCarry.showsPillGlyph(t = 0.7f, growing = false, swapAt = 0.2f))
+        assertTrue(MorphCarry.showsPillGlyph(t = 0.9f, growing = false, swapAt = 0.2f))
     }
+}
