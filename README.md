@@ -89,7 +89,15 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-22 (read me first if you lost the plot)
 
-`main` head carries the **b1379** round (release `ci-379`, commits `c8fec1e`..`854319c`, 100 JVM tests green).
+`main` head carries the **b1382** round (release `ci-382`, code commits `c8fec1e`..`854319c`, 100 JVM tests green; this README's own commit lands after the APK, docs-only).
+The APK is 2 815 310 B, sha256 `a859e952385883f46ae17dba9062dc9e91f6840dc933779f3273ce03593658a3`.
+
+**Handover rule, learned the hard way just now:** the `ci-<N>` tag is GitHub's `run_number`, which counts *every*
+push including docs, so it is NOT the round number I keep in my head. I quoted `ci-379` to him for a build whose
+code was still `924f64a` (b1378) - the sizes were 4 bytes apart and both looked plausible. Before a link goes
+out: fetch the release, read `target_commitish`, and grep the downloaded APK for a string that only this round's
+code contains (`Island Morph Lab` here) - a sha that round-trips proves the copy, not the content. Note that
+`ci-379` (2 798 418 B) and `ci-378` (2 798 422 B) were 4 bytes apart, so size alone never identifies a build.
 The round began with the first visual change he has ever accepted - "wo icon morph jo tha kaafi mast hai, ekdum
 badhiya feel deta hai" - and the same message named what was still missing: "Island ke andar jo content hota hai
 use bhi morph karo scale and opacity morph". So the row now scales and fades on the same progress number that
