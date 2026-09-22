@@ -218,9 +218,9 @@ class TestLabActivity : Activity() {
         label: String,
         min: Int,
         max: Int,
-        unit: String = "%",
         get: (android.content.Context) -> Int,
         set: (android.content.Context, Int) -> Unit,
+        unit: String = "%",
     ) {
         val seekBar = findViewById<SeekBar>(seekId)
         val labelView = findViewById<TextView>(labelId)
