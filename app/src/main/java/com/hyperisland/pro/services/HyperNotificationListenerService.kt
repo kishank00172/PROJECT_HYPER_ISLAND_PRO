@@ -224,10 +224,14 @@ class HyperNotificationListenerService : NotificationListenerService() {
         if (reason == REASON_CANCEL_ALL || reason == REASON_APP_CANCEL_ALL) {
             // Clearing the whole shelf is already owned by the shade-open path in the island, which
             // marks everything seen; doing it twice would fight over the same state.
-            Log.i(TRACE_TAG, "IGNORE removal reason=$reason pkg=$pkg (bulk: shade owns this)")
+            TraceLog.count("ignored removal reason=${removalReasonName(reason)} pkg=$pkg (bulk: shade owns this)")
             return
         }
         if (reason != REASON_CANCEL && reason != REASON_APP_CANCEL && reason != REASON_TIMEOUT) {
+            // These are the lines that answer "who took the notification back": a group-summary tear-down
+            // or a re-post must NOT cost a page, and a refusal that is invisible in the log reads exactly
+            // like a page that vanished. Same words go to logcat for anyone attached with adb.
+            TraceLog.count("ignored removal reason=${removalReasonName(reason)} pkg=$pkg (not a read: page kept)")
             Log.i(TRACE_TAG, "IGNORE removal reason=$reason pkg=$pkg")
             return
         }
@@ -242,12 +246,21 @@ class HyperNotificationListenerService : NotificationListenerService() {
             pendingRemovals.remove(key)
             pendingRemovals.remove(notificationKey)
             Log.i(TRACE_TAG, "REMOVE reason=$reason pkg=$pkg thread=\"${extracted.conversationTitle}\"")
-            HyperAccessibilityService.dismissConversationFromApp(this, key)
+            HyperAccessibilityService.dismissConversationFromApp(this, key, reason)
         }
         pendingRemovals[key]?.let { mainHandler.removeCallbacks(it) }
         pendingRemovals[key] = task
         notificationKey?.let { pendingRemovals[it] = task }
         mainHandler.postDelayed(task, REMOVAL_GRACE_MS)
+    }
+
+    /** Same names as the island logs, so one word means one thing in both places. */
+    private fun removalReasonName(reason: Int): String = when (reason) {
+        REASON_CANCEL -> "he-swiped-it-away"
+        REASON_APP_CANCEL -> "app-cancelled-it-itself"
+        REASON_CANCEL_ALL -> "he-cleared-the-shelf"
+        REASON_GROUP_SUMMARY_CANCELED -> "group-summary-torn-down"
+        else -> "reason=$reason"
     }
 
     private fun cancelPendingRemoval(key: String?) {

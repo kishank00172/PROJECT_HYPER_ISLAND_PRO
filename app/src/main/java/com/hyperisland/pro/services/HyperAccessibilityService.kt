@@ -398,9 +398,13 @@ class HyperAccessibilityService : AccessibilityService() {
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
         fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) =
             instance?.run { postNotificationEvent(packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs); true } ?: false
-        /** Drop exactly one conversation from the ring (used by the listener's removal callback). */
-        fun dismissConversationFromApp(context: Context, conversationKey: String) =
-            instance?.run { mainHandler.post { dismissConversationFromRing(conversationKey) }; true } ?: false
+        /**
+         * Drop exactly one conversation from the ring (the listener's removal callback and the island's own
+         * tap-to-open both use it). [reason] is the removal code, carried so every drop in the log can say who
+         * did it: "counting badh ghat kaise raha hai" only has an answer if a drop is attributable.
+         */
+        fun dismissConversationFromApp(context: Context, conversationKey: String, reason: Int = -1) =
+            instance?.run { mainHandler.post { dismissConversationFromRing(conversationKey, reason) }; true } ?: false
         fun previewReplyAnimationFromApp(context: Context, replySecond: Boolean) =
             instance?.run { postPreviewReplyAnimation(replySecond); true } ?: false
         fun previewPillIconFromApp(context: Context, packageName: String, count: Int) =
@@ -1011,7 +1015,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         if (index >= 0) notificationRing.removeAt(index)
         notificationRing.add(0, merged)
-        TraceLog.ring("${if (index >= 0) "merge" else "new page"} ${model.packageName} '${model.title}' unread=${merged.unreadCount} ring=${notificationRing.size}")
+        ringEvent("${if (index >= 0) "merge" else "new page"} ${model.packageName} '${model.title}' unread=${merged.unreadCount} ring=${notificationRing.size}")
         while (notificationRing.size > MAX_RING_ITEMS) {
             // Eviction order matters more than the cap. On this device Snapchat posts eight promo
             // notifications that carry CATEGORY_MESSAGE but no conversation extras; with a plain
@@ -1019,7 +1023,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // like "my messages disappear". Non-conversations go first, newest real chat survives.
             val junk = notificationRing.indexOfLast { !it.isMessagingStyle }
             val dropped = if (junk >= 0) junk else notificationRing.lastIndex
-            TraceLog.ring("over capacity (${notificationRing.size} > $MAX_RING_ITEMS) dropping ${notificationRing[dropped].packageName}")
+            ringEvent("over capacity (${notificationRing.size} > $MAX_RING_ITEMS) dropping ${notificationRing[dropped].packageName}")
             notificationRing.removeAt(dropped)
         }
         currentRingIndex = when {
@@ -1054,12 +1058,13 @@ class HyperAccessibilityService : AccessibilityService() {
      * went completely unnoticed - so the read chat came back with the next message and the unread
      * badge only ever went up.
      */
-    private fun dismissConversationFromRing(conversationKey: String) {
+    private fun dismissConversationFromRing(conversationKey: String, reason: Int = -1) {
         val index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
         if (index < 0) {
-            TraceLog.ring("dismiss: no page for key=$conversationKey ring=${notificationRing.size}")
+            ringEvent("dismiss: no page for key=$conversationKey ring=${notificationRing.size}")
             return
         }
+        val gone = notificationRing[index].title
         notificationRing.removeAt(index)
         if (ringSwapInFlight) {
             // A swipe push owns a frozen snapshot of the page that was just deleted.
@@ -1071,7 +1076,10 @@ class HyperAccessibilityService : AccessibilityService() {
         notificationQueue.clear()
         val current = getCurrentRingModel()
         endRingSwap("dismiss")
-        TraceLog.ring("dismiss dropped 1 page remaining=${notificationRing.size} chats=$pillChatCount")
+        ringEvent(
+            "dismiss dropped 1 page remaining=${notificationRing.size} chats=$pillChatCount " +
+                "gone='$gone' because=${removalReasonName(reason)}"
+        )
         if (current == null) {
             postCollapseIsland()
             return
@@ -1097,14 +1105,51 @@ class HyperAccessibilityService : AccessibilityService() {
         triggerPillPreview()
     }
 
+    /**
+     * Every ring mutation is announced through here so the badge can say *why* it moved. Without a cause
+     * the count going down reads as the app taking notifications back - "counting badh ghat kaise raha
+     * hai ... ye wapas ghar kaise ja rha hai? Notification telegram wapas le rha hai kya" - and from
+     * inside the phone a correct drop and a lost page are otherwise indistinguishable.
+     */
+    private fun ringEvent(message: String) {
+        lastRingOp = message.substringBefore(' ')
+        TraceLog.ring(message)
+    }
+
+    /**
+     * Names, not numbers: he reads this on a phone screen. The numeric codes are only printed when nothing
+     * matches, because guessing that a constant equals 12 without compiling against it would be worse than
+     * saying "reason=12".
+     */
+    private fun removalReasonName(reason: Int): String = when (reason) {
+        0 -> "opened-from-island"
+        android.service.notification.NotificationListenerService.REASON_CANCEL -> "he-swiped-it-away"
+        android.service.notification.NotificationListenerService.REASON_APP_CANCEL -> "app-cancelled-it-itself"
+        else -> "reason=$reason"
+    }
+
     private fun updatePillBadge(model: NotificationModel) {
         armFrameWatch() // a badge change redraws the island with no animation to watch it under
         pillPreviewIcon?.background = null
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(loadPillNotificationIcon(model.packageName, model.smallIcon))
-        pillPreviewCount?.text = if (pillChatCount <= 1) "" else pillChatCount.toString()
+        // Blank below two, a digit from two up, nothing in between: the badge is only worth its frame of
+        // attention when there is a stack to count (his rule).
+        val prevShown = pillPreviewCount?.text?.toString() ?: ""
+        val badge = if (pillChatCount <= 1) "" else pillChatCount.toString()
+        pillPreviewCount?.text = badge
         pillPreviewCount?.visibility = if (pillChatCount <= 1) View.GONE else View.VISIBLE
+        val page = if (notificationRing.isEmpty()) 0 else currentRingIndex + 1
+        val sig = "$pillChatCount/$page/${model.unreadCount}/$badge"
+        if (sig != lastCountBadge) {
+            val moved = if (prevShown != badge) " badge \"$prevShown\"->\"$badge\"" else ""
+            lastCountBadge = sig
+            TraceLog.count(
+                "chats=$pillChatCount page=$page/${notificationRing.size} " +
+                    "unread=${model.unreadCount}$moved cause=$lastRingOp"
+            )
+        }
     }
 
     private fun triggerPillPreview() {
@@ -2562,7 +2607,7 @@ class HyperAccessibilityService : AccessibilityService() {
         detachRingPushLayer()
         gridRoot?.let { it.animate().cancel(); it.translationX = 0f; it.translationY = 0f }
         pillPreviewRoot?.let { it.animate().cancel(); it.translationX = 0f; it.translationY = 0f }
-        if (busy) TraceLog.ring("swap ended ($reason)")
+        if (busy) ringEvent("swap ended ($reason)")
     }
 
     /**
@@ -2726,7 +2771,7 @@ class HyperAccessibilityService : AccessibilityService() {
             dragPrevModel = null
             currentRingIndex = prevIndex
             getCurrentRingModel()?.let { updateNotificationContent(it) }
-            TraceLog.ring("push refused: snapshot unavailable")
+            ringEvent("push refused: snapshot unavailable")
             return false
         }
 
@@ -2738,7 +2783,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // off is 0 at this instant, so the live neighbour sits exactly one card-width from where the
         // frozen page will be when the finger reaches it.
         host.translationX = -dir * width
-        TraceLog.ring("push started ${if (older) "older" else "newer"} -> page ${currentRingIndex + 1}/${notificationRing.size}")
+        ringEvent("push started ${if (older) "older" else "newer"} -> page ${currentRingIndex + 1}/${notificationRing.size}")
         return true
     }
 
@@ -2763,7 +2808,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         ringSwapInFlight = true
         ringSwapStartedAt = System.currentTimeMillis()
-        TraceLog.ring("settle ${if (commit) "commit" else "spring back"} off=${off.toInt()} ${settleMs}ms")
+        ringEvent("settle ${if (commit) "commit" else "spring back"} off=${off.toInt()} ${settleMs}ms")
 
         host.animate().cancel()
         layer?.animate()?.cancel()
@@ -3458,8 +3503,8 @@ class HyperAccessibilityService : AccessibilityService() {
         // It used to be postCollapseIsland(), which hid the expanded view and the pill badge together -
         // every other unread chat vanished unopened, while the chat you had just read stayed in the ring
         // and came back on the next notification.
-        TraceLog.ring("open tapped chat key=$openedKey")
-        if (openedKey != null) dismissConversationFromRing(openedKey) else postCollapseIsland()
+        ringEvent("open tapped chat key=$openedKey")
+        if (openedKey != null) dismissConversationFromRing(openedKey, reason = 0) else postCollapseIsland()
     }
 
     private fun showIslandInternal() {

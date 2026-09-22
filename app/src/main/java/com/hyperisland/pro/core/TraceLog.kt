@@ -57,6 +57,13 @@ object TraceLog {
     /** Short form for the hot paths; tag first so `grep` on logcat still reads the same. */
     fun gesture(message: String) = line("TOUCH", message)
     fun ring(message: String) = line("RING", message)
+
+    /**
+     * Every change to the number he sees, with what caused it. The count going down looked like the app
+     * taking notifications back ("ye wapas ghar kaise ja rha hai? Notification telegram wapas le rha hai
+     * kya"), and from inside a phone a correct drop and a lost page are indistinguishable without this.
+     */
+    fun count(message: String) = line("COUNT", message)
     fun stage(message: String) = line("STAGE", message)
     fun ingest(message: String) = line("INGEST", message)
     fun reply(message: String) = line("REPLY", message)
