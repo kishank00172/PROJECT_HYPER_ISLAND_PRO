@@ -87,9 +87,46 @@ whole history and every fix so far went straight to `main`; branches only added 
 - `ci-<run>` tags accumulate; delete the old ones you no longer need (keep the one pointed at by
   `last-good`).
 
-## Current position - updated 2026-09-21 (read me first if you lost the plot)
+## Current position - updated 2026-09-22 (read me first if you lost the plot)
 
-`main` head carries the **b1378** round (release `ci-378`, commit `5d54874`, 96 JVM tests green), which is what
+`main` head carries the **b1379** round (release `ci-379`, commits `c8fec1e`..`854319c`, 100 JVM tests green).
+The round began with the first visual change he has ever accepted - "wo icon morph jo tha kaafi mast hai, ekdum
+badhiya feel deta hai" - and the same message named what was still missing: "Island ke andar jo content hota hai
+use bhi morph karo scale and opacity morph". So the row now scales and fades on the same progress number that
+carries it, and that number is derived from the **drawn box** (`MorphCarry.shapeProgress`, from `left` and the
+pinned bound) rather than from the animation clock, so the content's size belongs to the shape instead of being
+timed next to it. Pivot on the leading edge: it grows rightward and downward the way the box does, so the first
+glyph stays where the eye already found it. One owner per property, still the rule - the per-stage fade branches
+and the fluid expand's own `gridRoot.alpha = t` are shut while the carry drives opacity, and `outBy` became a
+parameter of `beginMorphPerf` (0.45 ping / 0.40 idle) instead of being duplicated in three branches.
+
+Feel is now his to choose, not mine to guess, because he asked: "kya koi aur animation idea hai? Testlab mei he
+daalna options choose karne ke liye". TestLab has a **Morph Lab**: four styles (balanced = ride + scale + fade;
+ride only = exactly b1378; scale + fade only; and the old reveal kept as an A/B control), two sliders (how small
+the content starts, where the travelling icon puts on the launcher badge) and a REPLAY button that plays
+open-then-close on one press, so "thoda aur" costs a drag and a tap instead of an APK and an evening. The
+service reads the settings at the start of each morph, and `[MORPH] start` prints the style it used, so his
+verdict and my log agree on what he felt.
+
+Two more of his six items were about the instrument, and both were my bugs. "notification counting badh ghat
+kaise raha hai ... telegram wapas le rha hai kya" - answered from his own export: 12 ups and 7 downs, and every
+down had a dismiss line beside it (Telegram cancels on open, we drop the page correctly); what was missing was
+the *explanation*, which lived only in logcat. Now every ring mutation goes through `ringEvent()`, the badge
+writes a `[COUNT]` line with `cause=`, and the removal code is carried through the grace-period closure so a drop
+reads `because=he-swiped-it-away` / `app-cancelled-it-itself` / `opened-from-island`, while the bulk reasons that must
+not cost a page log as `ignored removal`. And "kya sirf max 1500 lines hi trace karta hai ya export?" - yes, and
+silently: his file held 1500 of 4186 lines. The buffer is 4000 with a `droppedLines` counter printed in the
+export header, and the trace window itself got the fix his "log window glitch karta hai, kabhi starting pe kabhi
+ending pe teleport" described: identical text is no longer handed to the TextView (204 of 464 stall samples in one
+session were `render@TraceLogActivity.kt:236`), the scroll offset is captured and restored across a swap, only the
+tail view follows, dragging up unfollows by itself, and `TraceLog` stopped constructing a `SimpleDateFormat` per
+line.
+
+`last-good` moved forward to `5d54874` (`ci-378`): the icon ride in it is the first change he has called good.
+Still open from this round's measurement: the text-layout cost on main (`nComputeLineBreaks` 67 samples / 7232 ms
+in his export) is now the biggest single owner of his frame drops, and it is not the morph.
+
+Before that, the **b1378** round (release `ci-378`, commit `5d54874`, 96 JVM tests green), which is what
 he had been describing since round 16 and I kept reading as a curve problem: with the pinned-view design the card
 is laid out once at its FINAL size, so the row parks at the left edge of the final box while the drawn box starts
 pill-sized and centred - opening the island was literally a mask widening over a still picture. Now the row is
@@ -112,7 +149,7 @@ never again be "simplified" back into charge of the animation. Same round also s
 what it measures: 91 of 277 stall samples in his export were the trace screen's own `render()` pushing 1500
 lines into a TextView every 700 ms (now a 220-line tail on screen, whole buffer in the export), and the label
 lookup was two binder calls per notification in two different classes (now memoised per package, failures not
-cached). `last-good` stays `ff98959`; the text-jitter report stays open.
+cached). `last-good` was still `ff98959` at that point; the text-jitter report stays open.
 
 Before that, the **b1373** round (release `ci-373`, commits `c20cfb9`..`33d3f01`, 90 JVM tests green).
 It is the round the b1369 sampler was built for, and his export decided every part of it:
