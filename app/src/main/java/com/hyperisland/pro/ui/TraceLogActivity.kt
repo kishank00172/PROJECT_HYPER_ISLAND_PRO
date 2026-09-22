@@ -44,8 +44,15 @@ class TraceLogActivity : Activity() {
     private lateinit var status: TextView
     private var followTail = true
 
-    /** How many lines the on-screen tail shows. The export file is always the whole buffer. */
-    private companion object { const val VISIBLE_LINES = 220 }
+    /** The last tail handed to the TextView; identical text must not touch the view again. */
+    private var renderedTail = ""
+
+    /**
+     * How many lines the on-screen tail shows, and it is a viewport choice, not a data cap: the buffer and the
+     * export carry everything, TOP reads the front. 140 because a TextView rebuild costs about a millisecond a
+     * line and this screen sits on top of the thing it is measuring.
+     */
+    private companion object { const val VISIBLE_LINES = 140 }
     private var auto = true
     private var scroll: ScrollView? = null
     private var startedAtLines = 0
@@ -90,6 +97,12 @@ class TraceLogActivity : Activity() {
         // Horizontal scroll off, wrapping on: a dropped-swipe reason is a sentence, and sideways
         // scrolling through 600 lines is how a log stops being read.
         scroll = ScrollView(this).apply {
+            // He should not have to press TOP to stop being dragged around: the moment the view is
+            // anywhere but at the bottom, the user is reading, and the tail stops pulling.
+            setOnScrollChangeListener { v, _, y, _, _ ->
+                val child = v.getChildAt(0)
+                if (child != null) followTail = y + v.height >= child.bottom - 8
+            }
             addView(body, LinearLayout.LayoutParams(-1, -2))
             isVerticalScrollBarEnabled = true
         }
@@ -189,7 +202,9 @@ class TraceLogActivity : Activity() {
         if (text.isBlank()) { toast("Nothing logged yet"); return }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val name = "hip-log-$stamp.txt"
-        val header = "# Hyper Island Pro trace - $name - ${TraceLog.size()} lines of ${TraceLog.MAX_LINES}\n" +
+        val lost = TraceLog.droppedLines
+        val roll = if (lost > 0L) " ($lost rolled off the front: this file starts at line ${lost + 1})" else " (nothing lost)"
+        val header = "# Hyper Island Pro trace - $name - ${TraceLog.size()} lines of ${TraceLog.MAX_LINES}$roll\n" +
             "# model ${Build.MODEL}, android ${Build.VERSION.SDK_INT}, built from the device's own clock\n\n"
         try {
             val resolver = contentResolver
@@ -233,10 +248,24 @@ class TraceLogActivity : Activity() {
     private fun render() {
         val n = TraceLog.size()
         val text = TraceLog.tail(VISIBLE_LINES)
-        if (text != body.text.toString()) body.text = text
-        status.text = "showing last ${minOf(n, VISIBLE_LINES)} of $n lines · EXPORT writes all of them · $n - ${maxOf(0, n - startedAtLines)} added since this screen opened" +
-            if (n >= TraceLog.MAX_LINES) " · older lines rolled off" else ""
-        if (followTail) scrollBottom()
+        // Nothing new, so do not touch the TextView. Re-assigning identical text rebuilt a StaticLayout every
+        // 700 ms and his sampler caught that 204 times in one session: the log screen was the single biggest
+        // main-thread cost in a session whose whole point was to find main-thread costs. The status line still
+        // refreshes, because an empty buffer on the first frame is the "glitch at the start" he saw.
+        if (text != renderedTail) {
+            renderedTail = text
+            val keep = scroll?.scrollY ?: 0
+            body.text = text
+            // A text swap re-lays the child out and ScrollView clamps its offset to the new height, which is
+            // the teleport he reported: reading the middle, thrown to the top, or yanked to the bottom. Only
+            // the tail view is allowed to follow the newest line; everything else keeps the offset it had.
+            scroll?.post {
+                if (followTail) scroll?.fullScroll(View.FOCUS_DOWN) else scroll?.scrollY = keep
+            }
+        }
+        val lost = TraceLog.droppedLines
+        status.text = "showing last ${minOf(n, VISIBLE_LINES)} of $n lines kept · EXPORT writes all $n · $n - ${maxOf(0, n - startedAtLines)} added since this screen opened" +
+            (if (lost > 0L) " · $lost rolled off the front (buffer is ${TraceLog.MAX_LINES})" else "")
     }
 
     private fun scrollBottom() {

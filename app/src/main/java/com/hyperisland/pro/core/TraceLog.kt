@@ -1,8 +1,5 @@
 package com.hyperisland.pro.core
 
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * An in-app trace buffer: every decision the island makes, kept where the user can read it.
@@ -26,7 +23,15 @@ object TraceLog {
      * the tester lost the evidence he needed to say *which* build felt slow. 1500 lines is still a few
      * hundred KB of string, and the whole buffer now goes to a file on demand.
      */
-    const val MAX_LINES = 1500
+    const val MAX_LINES = 4000
+
+    /**
+     * Lines that fell off the front of the buffer. It used to be silent: his export said "1500 lines of 1500"
+     * and 2686 lines had already been thrown away, so I was reading a session that had lost its first half and
+     * calling it the whole story. A capped buffer is fine; an uncapped-looking one is not.
+     */
+    var droppedLines = 0L
+        private set
 
     /** How much of the tail survives a process kill (SharedPreferences is not a database; keep it small). */
     const val PERSISTED_LINES = 600
@@ -34,7 +39,32 @@ object TraceLog {
     private val lock = Any()
     private val lines = ArrayDeque<String>()
     private var seq = 0L
-    private var clock: (Long) -> String = { SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(it)) }
+    /**
+     * `SimpleDateFormat` was being **constructed for every single line** - the allocation plus the timezone rule
+     * lookup is what his sampler kept catching as `clock$lambda$0` (19 stalls in one session, on a path that
+     * runs on every notification of a flood). The time is now arithmetic, with the offset re-read once a minute.
+     */
+    private var clock: (Long) -> String = { formatClock(it) }
+    private var clockOffsetMs = 0L
+    private var clockOffsetAt = Long.MIN_VALUE
+
+    fun formatClock(tms: Long): String {
+        // The first call must always compute: `tms - Long.MIN_VALUE` overflows, so the sentinel is tested
+        // explicitly instead of arithmetically. A backwards jump (an NTP correction) re-reads as well.
+        if (clockOffsetAt == Long.MIN_VALUE || tms < clockOffsetAt || tms - clockOffsetAt > 60_000L) {
+            clockOffsetAt = tms
+            clockOffsetMs = java.util.TimeZone.getDefault().getOffset(tms)
+        }
+        var rest = (tms + clockOffsetMs) / 1000L
+        val ms = (tms + clockOffsetMs) % 1000L
+        val sec = rest % 60; rest /= 60
+        val min = rest % 60
+        val hr = (rest / 60) % 24
+        return pad2(hr) + ":" + pad2(min) + ":" + pad2(sec) + "." + pad3(ms)
+    }
+
+    private fun pad2(v: Long) = if (v < 10) "0$v" else "$v"
+    private fun pad3(v: Long) = when { v < 10 -> "00$v"; v < 100 -> "0$v"; else -> "$v" }
 
     /** Where each finished line also goes — the service points this at logcat. */
     var sink: (String) -> Unit = {}
@@ -48,7 +78,7 @@ object TraceLog {
             lines.addLast(stamped)
             // Dropping the oldest line is the whole point: the buffer must survive a 200-message flood
             // from a promo app without ever growing.
-            if (lines.size > MAX_LINES) lines.removeFirst()
+            if (lines.size > MAX_LINES) { lines.removeFirst(); droppedLines++ }
         }
         sink(stamped)
         onLine(stamped)
@@ -87,6 +117,7 @@ object TraceLog {
     fun clear() = synchronized(lock) {
         lines.clear()
         seq = 0L
+        droppedLines = 0L // otherwise the header keeps reporting losses from before the clear
     }
 
     /** After a process restart: seed the buffer from what was persisted, newest last. */
