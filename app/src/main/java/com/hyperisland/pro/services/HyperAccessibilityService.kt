@@ -505,12 +505,16 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphCarryGrowing = true
     private var morphScaleOn = false
     private var morphOpacityFollowsShape = false
+    /** Whether this morph ENDS at the expanded card, i.e. whether the row is meant to be seen at the end. */
+    private var morphTowardCard = false
     private var morphScaleFrom = 0.88f
     private var morphSwapAt = 0.5f
     private var morphOutBy = 0.4f
     private var morphFromW = 0
     private var morphToW = 0
     private var lastRingOp = "init"
+    private var morphIconRide = true
+    private var morphContentLeadPx = 0f
     private var lastMorphBoxLeft = 0
     private var morphIconLauncher: android.graphics.drawable.Drawable? = null
     private var morphIconPill: android.graphics.drawable.Drawable? = null
@@ -1280,7 +1284,7 @@ class HyperAccessibilityService : AccessibilityService() {
             })
         }
         morphAnimator = anim
-        beginMorphPerf("notify->ping", 360L, curW, curH, targetW, targetH, targetR, outBy = 0.45f)
+        beginMorphPerf("notify->ping", 360L, curW, curH, targetW, targetH, targetR, outBy = 0.45f, towardCard = false)
         anim.start()
     }
 
@@ -2951,7 +2955,7 @@ class HyperAccessibilityService : AccessibilityService() {
             playSequentially(ping, expand)
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationStart(a: Animator) {
-                    beginMorphPerf("notify->full", 720L, startW, startH, targetW, targetH, targetR)
+                    beginMorphPerf("notify->full", 720L, startW, startH, targetW, targetH, targetR, towardCard = true)
                 }
 
                 override fun onAnimationEnd(a: Animator) {
@@ -3099,6 +3103,7 @@ class HyperAccessibilityService : AccessibilityService() {
         beginMorphPerf(
             "stage->$target", anim.duration, curW, curH, targetW, targetH, targetR,
             outBy = if (target == IslandStage.STAGE2_PING) 0.45f else 0.4f,
+            towardCard = target == IslandStage.STAGE3_FULL,
         )
         anim.start()
     }
@@ -3161,33 +3166,48 @@ class HyperAccessibilityService : AccessibilityService() {
         MorphCarry.shapeProgress(lastMorphBoxLeft, morphFromW, morphToW, morphPinW())
 
     private fun applyMorphCarry(t: Float) {
-        if (!morphCarryOn && !morphScaleOn) return
-        if (morphCarryOn) {
-            val x = MorphCarry.translationX(lastMorphBoxLeft)
-            gridRoot?.translationX = x
-            pillPreviewRoot?.translationX = x
-        }
+        if (!morphCarryOn && !morphScaleOn && !morphIconRide) return
+        val progress = morphShapeProgress()
+        // ONE writer for the row's x, whatever the style: the box's own left edge when the carry is on, plus the
+        // pull out of the pill's mouth when that slider is up. Two owners of translationX is precisely how the
+        // row ends up drawn in two places at once.
+        val lead = MorphCarry.contentLeadOffset(progress, morphContentLeadPx)
+        gridRoot?.translationX = (if (morphCarryOn) MorphCarry.translationX(lastMorphBoxLeft) else 0f) + lead
+        // The pill's row rides too, but on the box alone: sliding the pill sideways as well as growing it is
+        // what read as a second pill lagging behind the first.
+        if (morphCarryOn) pillPreviewRoot?.translationX = MorphCarry.translationX(lastMorphBoxLeft)
         if (morphScaleOn) {
             // Pivot on the leading edge, so the row grows rightward and downward the way the box does:
             // the first glyph stays where the eye already found it instead of sliding sideways.
-            val s = MorphCarry.contentScale(morphShapeProgress(), morphScaleFrom)
+            val s = MorphCarry.contentScale(progress, morphScaleFrom, morphTowardCard)
             gridRoot?.let { g ->
                 g.pivotX = 0f
                 g.pivotY = g.height / 2f
                 g.scaleX = s
                 g.scaleY = s
                 if (morphOpacityFollowsShape) {
-                    g.alpha = MorphCarry.contentAlpha(
-                        t, morphShapeProgress(), morphCarryGrowing, true, morphOutBy
-                    )
+                    // Keyed on what the morph is HEADING for, not on whether the box grew: a pill pop from idle
+                    // also grows, and keying on growth used to light the card row up inside the pill.
+                    g.alpha = MorphCarry.contentAlpha(t, progress, morphTowardCard, true, morphOutBy)
                 }
             }
         }
-        // The icon ride belongs to the carry: its start point is the pill's slot, so with the carry off the
-        // glyph stays where the layout put it and only the content policy above applies.
-        if (!morphCarryOn) return
+        // The ride is its own switch now, so it can sit on top of any style - he asked for exactly that
+        // combination once he had felt "scale + fade" without it.
+        if (!morphIconRide) return
         val icon = appIconView ?: return
         val pill = pillPreviewIcon
+        // Only one icon may be on screen while the rider is in flight: the pill's own copy stands down for as
+        // long as the row is still being drawn, then takes the slot back. No threshold tuning, no overlap.
+        if (pill != null) {
+            val row = gridRoot
+            // Read the row's visibility from the SAME rule that drives it - the shape's own clock when the style
+            // fades with the shape, the morph clock when a view animator does - and from its real VISIBLE state.
+            // Keying it on view.alpha alone would strand a ride-only collapse with no icon on the pill at all,
+            // because in that style something else owns the fade.
+            val rowAlpha = MorphCarry.contentAlpha(t, progress, morphTowardCard, morphOpacityFollowsShape, morphOutBy)
+            pill.alpha = if (MorphCarry.pillIconHidden(rowAlpha, row != null && row.visibility == View.VISIBLE)) 0f else 1f
+        }
         val ratio = if (icon.width > 0 && pill != null && pill.width > 0) {
             (pill.width.toFloat() / icon.width.toFloat()).coerceIn(0.4f, 1f)
         } else {
@@ -3216,6 +3236,7 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewRoot?.translationX = 0f
         appIconView?.scaleX = 1f
         appIconView?.scaleY = 1f
+        pillPreviewIcon?.alpha = 1f // the hand-off always ends with the pill owning its own icon again
         morphIconLauncher?.let { d -> if (appIconView?.drawable !== d) appIconView?.setImageDrawable(d) }
         morphIconLauncher = null
         morphIconPill = null
@@ -3458,7 +3479,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun beginMorphPerf(
         label: String, durationMs: Long, fromW: Int, fromH: Int, toW: Int, toH: Int, toR: Float,
-        outBy: Float = 0.4f,
+        outBy: Float = 0.4f, towardCard: Boolean,
     ) {
         morphLayoutW = -1; morphLayoutH = -1
         morphFinalW = toW; morphFinalH = toH; morphFinalR = toR
@@ -3480,6 +3501,7 @@ class HyperAccessibilityService : AccessibilityService() {
         lastMorphBoxLeft = startFrame.left
         islandMorph?.applyMorphFrame(startFrame, startR)
         morphOutBy = outBy
+        morphTowardCard = towardCard
         morphGcStart = gcSnapshot()
         // The carry only makes sense while the box is what moves: on the fallback path the view itself is
         // resized per frame, so the row already sits against its left edge.
@@ -3490,6 +3512,8 @@ class HyperAccessibilityService : AccessibilityService() {
         morphOpacityFollowsShape = morphScaleOn
         morphScaleFrom = (100 - AppSettings.getMorphContentScalePct(this)) / 100f
         morphSwapAt = AppSettings.getMorphGlyphSwapPct(this) / 100f
+        morphIconRide = AppSettings.getMorphIconRide(this)
+        morphContentLeadPx = dp(AppSettings.getMorphContentLeadDp(this)).toFloat()
         morphCarryGrowing = toW + toH >= fromW + fromH
         morphFromW = fromW; morphToW = toW
         morphIconLauncher = appIconView?.drawable
@@ -3497,8 +3521,10 @@ class HyperAccessibilityService : AccessibilityService() {
         applyMorphCarry(0f)
         TraceLog.morph(
             "start $label dur=${durationMs}ms style=${AppSettings.getMorphStyleName(this)} " +
+            "toward=${if (morphTowardCard) "card" else "pill"} " +
                 "carry=${if (morphCarryOn) "on" else "off"} scale=${if (morphScaleOn) "%.2f".format(morphScaleFrom) else "off"} " +
-                "swap=${(morphSwapAt * 100).toInt()}% iconRide=${if (morphIconPill != null && morphIconLauncher != null) "on" else "n/a"}"
+                "swap=${(morphSwapAt * 100).toInt()}% ride=${if (morphIconRide) "on" else "off"}" +
+                " lead=${AppSettings.getMorphContentLeadDp(this)}dp"
         )
     }
 

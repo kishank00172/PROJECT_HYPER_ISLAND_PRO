@@ -3,6 +3,7 @@ package com.hyperisland.pro.ui
 import android.app.Activity
 import android.os.Bundle
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.TextView
@@ -183,6 +184,24 @@ class TestLabActivity : Activity() {
             R.id.seekMorphSwap, R.id.tvMorphSwapLabel, "icon becomes the app badge at", 10, 90,
             { AppSettings.getMorphGlyphSwapPct(it) }, { c, v -> AppSettings.setMorphGlyphSwapPct(c, v) }
         )
+        // The ride is separate from the style because he asked to feel "scale + fade" WITH the travelling icon,
+        // and because a bundled switch is a switch he cannot actually test.
+        findViewById<CheckBox>(R.id.chkMorphRide).apply {
+            isChecked = AppSettings.getMorphIconRide(this@TestLabActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setMorphIconRide(this@TestLabActivity, checked)
+                Toast.makeText(
+                    this@TestLabActivity,
+                    if (checked) "Icon ride on" else "Icon ride off",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        bindMorphSeek(
+            R.id.seekMorphLead, R.id.tvMorphLeadLabel, "content pulled out of the pill by", 0, 48,
+            { AppSettings.getMorphContentLeadDp(it) }, { c, v -> AppSettings.setMorphContentLeadDp(c, v) },
+            unit = "dp"
+        )
         findViewById<Button>(R.id.btnReplayMorph).setOnClickListener {
             // Both directions on one press: "opens nicely, closes wrong" is a real answer he could not
             // otherwise give me without timing two taps against a 320 ms morph.
@@ -199,12 +218,13 @@ class TestLabActivity : Activity() {
         label: String,
         min: Int,
         max: Int,
+        unit: String = "%",
         get: (android.content.Context) -> Int,
         set: (android.content.Context, Int) -> Unit,
     ) {
         val seekBar = findViewById<SeekBar>(seekId)
         val labelView = findViewById<TextView>(labelId)
-        fun show(v: Int) { labelView.text = "$label: $v%" }
+        fun show(v: Int) { labelView.text = "$label: $v$unit" }
         seekBar.max = max - min
         val initial = get(this).coerceIn(min, max)
         seekBar.progress = initial - min
@@ -226,14 +246,12 @@ class TestLabActivity : Activity() {
     private fun idForMorphStyle(style: Int): Int = when (style) {
         AppSettings.MORPH_STYLE_CARRY -> R.id.radioMorphCarry
         AppSettings.MORPH_STYLE_SHAPE_ONLY -> R.id.radioMorphScaleOnly
-        AppSettings.MORPH_STYLE_REVEAL -> R.id.radioMorphReveal
         else -> R.id.radioMorphBalanced
     }
 
     private fun morphStyleForId(id: Int): Int = when (id) {
         R.id.radioMorphCarry -> AppSettings.MORPH_STYLE_CARRY
         R.id.radioMorphScaleOnly -> AppSettings.MORPH_STYLE_SHAPE_ONLY
-        R.id.radioMorphReveal -> AppSettings.MORPH_STYLE_REVEAL
         else -> AppSettings.MORPH_STYLE_BALANCED
     }
 

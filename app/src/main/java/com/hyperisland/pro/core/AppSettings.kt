@@ -17,6 +17,8 @@ object AppSettings {
     private const val KEY_MORPH_CONTENT_SCALE = "morph_content_scale_pct"
     private const val KEY_MORPH_GLYPH_SWAP = "morph_glyph_swap_pct"
     private const val KEY_SHADE_POLICY = "shade_open_policy"
+    private const val KEY_MORPH_ICON_RIDE = "morph_icon_ride"
+    private const val KEY_MORPH_CONTENT_LEAD_DP = "morph_content_lead_dp"
     private const val KEY_ISLAND_CORNER_RADIUS_DP = "island_corner_radius_dp"
 
     private const val KEY_ISLAND_STAGE2_WIDTH_DP = "island_stage2_width_dp"
@@ -81,11 +83,25 @@ object AppSettings {
      */
     const val MORPH_STYLE_BALANCED = 0     // rides the shape, scales, opacity follows the shape
     const val MORPH_STYLE_CARRY = 1        // rides the shape only (what b1378 shipped)
-    const val MORPH_STYLE_REVEAL = 2       // neither: the old clip-reveal, kept as an A/B control
-    const val MORPH_STYLE_SHAPE_ONLY = 3   // scales and fades with the shape, no travel
+    const val MORPH_STYLE_SHAPE_ONLY = 2   // scales and fades with the shape, no travel
     const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
+    const val DEFAULT_MORPH_ICON_RIDE = true
+    /** How far the row is still pulled into the pill's mouth at the end of the shape's travel, in dp. */
+    const val DEFAULT_MORPH_CONTENT_LEAD_DP = 14
+
+    /**
+     * The icon ride is NOT part of a style any more. He liked "scale + fade" for the content and the travelling
+     * icon separately - "scale plus fade bhi mast hai lekin ... upar se icon ride hoti to aur mast lagti" - and
+     * bundling the two meant he could not have both. One switch, combinable with any style.
+     */
+    fun getMorphIconRide(context: Context) = prefs(context).getBoolean(KEY_MORPH_ICON_RIDE, DEFAULT_MORPH_ICON_RIDE)
+    fun setMorphIconRide(context: Context, v: Boolean) = prefs(context).edit().putBoolean(KEY_MORPH_ICON_RIDE, v).apply()
+
+    fun getMorphContentLeadDp(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_LEAD_DP, DEFAULT_MORPH_CONTENT_LEAD_DP)
+    fun setMorphContentLeadDp(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_MORPH_CONTENT_LEAD_DP, v.coerceIn(0, 48)).apply()
 
     /**
      * What opening the notification shade does to the island. There was one behaviour and it was wrong: the
@@ -153,7 +169,6 @@ object AppSettings {
 
     fun getMorphStyleName(context: Context): String = when (getMorphStyle(context)) {
         MORPH_STYLE_CARRY -> "ride only (b1378)"
-        MORPH_STYLE_REVEAL -> "reveal (old)"
         MORPH_STYLE_SHAPE_ONLY -> "scale + fade only"
         else -> "balanced"
     }
