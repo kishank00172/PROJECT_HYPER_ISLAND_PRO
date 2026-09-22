@@ -78,6 +78,7 @@ import com.hyperisland.pro.core.IslandGesture
 import com.hyperisland.pro.core.IslandMorphFrame
 import com.hyperisland.pro.core.MorphFrame
 import com.hyperisland.pro.core.MorphFrameHost
+import com.hyperisland.pro.core.MorphCarry
 import com.hyperisland.pro.core.MorphJankMeter
 import com.hyperisland.pro.core.stallLine
 import com.hyperisland.pro.core.stallShouldPrint
@@ -465,6 +466,17 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphLayoutH = -1
     /** The card view, seen as the thing that can draw its own morph box (null = use the old resize path). */
     private var islandMorph: MorphFrameHost? = null
+    /**
+     * The travelling-element state, armed only while a drawn box is what moves. Both drawables are taken from
+     * the views that already hold them, so a morph costs no extra `PackageManager` call: `morphIconLauncher` is
+     * the badge the card was showing, `morphIconPill` the glyph the pill was showing.
+     */
+    private var morphCarryOn = false
+    private var morphCarryGrowing = true
+    private var lastMorphBoxLeft = 0
+    private var morphIconLauncher: android.graphics.drawable.Drawable? = null
+    private var morphIconPill: android.graphics.drawable.Drawable? = null
+
     /** The size the view is pinned to for this morph: start and target, per axis, whichever is larger. */
     private var morphPinW: Int? = null
     private var morphPinH: Int? = null
@@ -1137,6 +1149,7 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                applyMorphCarry(t)
                 morphMeter?.frame(System.nanoTime(), t)
                 pillPreviewRoot?.alpha = t
                 pillPreviewRoot?.scaleX = 0.92f + 0.08f * t
@@ -2799,6 +2812,7 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(startW, pingW, t), startH, startR)
+                applyMorphCarry(0f) // the ping half still wears the pill's glyph and pill's icon size
                 morphMeter?.frame(System.nanoTime(), t)
             }
         }
@@ -2812,6 +2826,7 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
+                applyMorphCarry(0.5f + 0.5f * t) // the expand half finishes the travel the ping phase started
                 morphMeter?.frame(System.nanoTime(), t)
                 gridRoot?.visibility = View.VISIBLE
                 gridRoot?.alpha = t
@@ -2896,6 +2911,7 @@ class HyperAccessibilityService : AccessibilityService() {
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                applyMorphCarry(t)
                 morphMeter?.frame(System.nanoTime(), t)
                 // One owner of the pill's fade for every stage change, notification or not. It used to be
                 // written here *and* by a separate 140/160ms animator, which is the mid-morph pop.
@@ -3007,6 +3023,57 @@ class HyperAccessibilityService : AccessibilityService() {
      *  - `visualRoot.invalidateOutline()` is gone from the path above as well: the outline belongs to the
      *    card, and invalidating the root's was asking RenderThread to redo the whole overlay per frame.
      */
+    /**
+     * One row, riding the shape. The card's content starts at the box's left inner edge - which is where the
+     * pill's own content sits - and slides into its final layout as the box opens, instead of standing still
+     * at the final position while the island uncovers it. That stillness is what he named: "saara content draw
+     * ho ja rha hai but invisible, and island me visible kar deta hai". The shift is the box's own left edge, so
+     * it vanishes by itself when the box reaches full width; no reset to get wrong, no snap at the settle. And
+     * because a translation is a render transform, the width lock that stopped the text jitter stays intact -
+     * nothing here re-measures a line.
+     *
+     * The icon additionally changes size and, at the half-way point, swaps the pill's small glyph for the
+     * launcher badge, so it reads as the same element travelling and transforming rather than two images
+     * cross-fading in different corners.
+     */
+    private fun applyMorphCarry(t: Float) {
+        if (!morphCarryOn) return
+        val x = MorphCarry.translationX(lastMorphBoxLeft)
+        gridRoot?.translationX = x
+        pillPreviewRoot?.translationX = x
+        val icon = appIconView ?: return
+        val pill = pillPreviewIcon
+        val ratio = if (icon.width > 0 && pill != null && pill.width > 0) {
+            (pill.width.toFloat() / icon.width.toFloat()).coerceIn(0.4f, 1f)
+        } else {
+            32f / 38f // dp(32) in the pill vs dp(38) in the card, if a view has not been laid out yet
+        }
+        val scale = MorphCarry.iconScale(if (morphCarryGrowing) t else 1f - t, ratio)
+        icon.pivotX = icon.width / 2f
+        icon.pivotY = icon.height / 2f
+        icon.scaleX = scale
+        icon.scaleY = scale
+        val launcher = morphIconLauncher
+        val glyph = morphIconPill
+        if (launcher != null && glyph != null) {
+            val want = if (MorphCarry.showsPillGlyph(t, morphCarryGrowing)) glyph else launcher
+            if (icon.drawable !== want) icon.setImageDrawable(want)
+        }
+    }
+
+    /** Every carry value has an identity state; the settle and any cancellation both land here. */
+    private fun clearMorphCarry() {
+        morphCarryOn = false
+        gridRoot?.translationX = 0f
+        pillPreviewRoot?.translationX = 0f
+        appIconView?.scaleX = 1f
+        appIconView?.scaleY = 1f
+        morphIconLauncher?.let { d -> if (appIconView?.drawable !== d) appIconView?.setImageDrawable(d) }
+        morphIconLauncher = null
+        morphIconPill = null
+        lastMorphBoxLeft = 0
+    }
+
     /** The pinned bound, falling back to the target for any frame that arrives outside a morph. */
     private fun morphPinW(): Int = morphPinW ?: morphFinalW
     private fun morphPinH(): Int = morphPinH ?: morphFinalH
@@ -3018,7 +3085,9 @@ class HyperAccessibilityService : AccessibilityService() {
         if (host != null) {
             // The card is not resized at all during a morph: this frame is one small invalidate inside the
             // view, which is why the overlay window stops being laid out 60 times a second.
-            host.applyMorphFrame(IslandMorphFrame.compute(morphPinW(), morphPinH(), w, h), r)
+            val frame = IslandMorphFrame.compute(morphPinW(), morphPinH(), w, h)
+            lastMorphBoxLeft = frame.left
+            host.applyMorphFrame(frame, r)
             return
         }
         if (w == morphLayoutW && h == morphLayoutH) return
@@ -3256,12 +3325,25 @@ class HyperAccessibilityService : AccessibilityService() {
         // what made every collapse frame clamp to the final size, so the shape never moved at all.
         morphPinW = maxOf(fromW, toW); morphPinH = maxOf(fromH, toH)
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
-        islandMorph?.applyMorphFrame(IslandMorphFrame.compute(morphPinW!!, morphPinH!!, fromW, fromH), startR)
+        val startFrame = IslandMorphFrame.compute(morphPinW!!, morphPinH!!, fromW, fromH)
+        lastMorphBoxLeft = startFrame.left
+        islandMorph?.applyMorphFrame(startFrame, startR)
         morphGcStart = gcSnapshot()
-        TraceLog.morph("start $label dur=${durationMs}ms drawn-box=${islandMorph != null}")
+        // The carry only makes sense while the box is what moves: on the fallback path the view itself is
+        // resized per frame, so the row already sits against its left edge.
+        morphCarryOn = islandMorph != null
+        morphCarryGrowing = toW + toH >= fromW + fromH
+        morphIconLauncher = appIconView?.drawable
+        morphIconPill = pillPreviewIcon?.drawable
+        applyMorphCarry(0f)
+        TraceLog.morph(
+            "start $label dur=${durationMs}ms drawn-box=${islandMorph != null} " +
+                "carry=${if (morphCarryOn) "on" else "off"} iconRide=${if (morphIconPill != null && morphIconLauncher != null) "on" else "n/a"}"
+        )
     }
 
     private fun endMorphPerf(label: String) {
+        clearMorphCarry()
         setContentPinnedForMorph(false)
         gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
         // Size first, then release the drawn box - same message, one traversal after both. On a collapse the
