@@ -89,7 +89,19 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-22 (read me first if you lost the plot)
 
-`main` head carries the **b1382** round (release `ci-382`, code commits `c8fec1e`..`854319c`, 100 JVM tests green; this README's own commit lands after the APK, docs-only).
+`main` head carries the **b1386** round (release `ci-386`, code commits `09341ac`..`7315ccd`, 101 JVM tests
+green; APK 2 820 422 B, sha256 `bc5f0a3a496130bafd01ad20dac54ba65ade4780c16cabe53692b578ca86b313`). He reported
+that the count falls during a notification rain with nothing opened, and he was also right that the log had been
+growing one line per symptom instead of covering the state. Both fixed: the count has one writer and it logs every
+change with its cause (`4->11 chats=11 page=1/11 cause=new`), the ring wipe names its victims
+(`CLEAR 12 pages ['VIJAY TRADER', ...] because=shade-open`), the shade decision logs the window that made it
+(`shade -> OPEN (systemui window 47% of screen)`), and the badge rule now lives in `PillBadge` with a test on the
+1-vs-2 boundary. The cause of his symptom was in the code, not the log: opening the shelf emptied the whole ring
+and every notification arriving meanwhile was silently refused - `isShadeOpen` is a window-height test, so a tall
+heads-up can trigger it with nobody touching anything. The policy is a TestLab choice now: **keep counting**
+(default) or **shade wipes (old)**.
+
+Before that, the **b1382** round (release `ci-382`, code commits `c8fec1e`..`854319c`, 100 JVM tests green; this README's own commit lands after the APK, docs-only).
 The APK is 2 815 310 B, sha256 `a859e952385883f46ae17dba9062dc9e91f6840dc933779f3273ce03593658a3`.
 
 **Handover rule, learned the hard way just now:** the `ci-<N>` tag is GitHub's `run_number`, which counts *every*
