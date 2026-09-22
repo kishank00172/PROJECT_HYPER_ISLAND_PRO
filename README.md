@@ -89,7 +89,24 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-22 (read me first if you lost the plot)
 
-`main` head carries the **b1386** round (release `ci-386`, code commits `09341ac`..`7315ccd`, 101 JVM tests
+`main` head carries the **b1390** round (release `ci-390`, code commits `0c2cf77`..`c446c1d`, 103 JVM tests
+green; APK 2 824 966 B, sha256 `05da990484bf7a288caea706bb0178a0d279ca216b71c85100866aeccf6835ad`). He felt the
+four Lab styles and reported that Balanced duplicates the pill - "icon duplicate hoke thoda right shift hoke
+original wale pe draw ho jata hai", card content visible inside the collapsed pill for the last frames - and that
+Scale+fade leaks the same content while being the right feeling, "upar se icon ride hoti to aur mast lagti";
+Reveal: "faltu hai hatao". All three were true and the first two were one bug of mine: `MorphCarry.shapeProgress`
+runs 0 to 1 in *both* directions (0 at the morph's start size), and `contentScale`/`contentAlpha` mirrored it as
+if a collapse ran it 1 to 0 - so the card row reached full opacity exactly at pill size, its `bg_card` panels
+drawing the "second pill" and its centred icon sitting right of the pill's own. Both curves now key on what the
+morph is heading for (`towardCard`), not on its size delta, and `MorphCarryTest` asserts the visible ends plus a
+sweep that fails if anything is drawn over the pill (the old green test had pinned the bug). From research, not
+recombination: the icon ride is a switch of its own so it can sit on top of any style; while the rider is in
+flight the pill's own icon is not drawn at all (`pillIconHidden`, Apple's `matchedGeometryEffect` never
+cross-fades two copies); and a 0-48 dp "content pulled out of the pill by" slider moves the row in from the
+shape's edge instead of scaling it, which is what Apple's `move(edge:)/slide/push` and Material's "fade + slide
+from edge, exits faster" actually do. Reveal is deleted from the settings, the service, the Lab and the layout.
+
+Before that: **b1386** round (release `ci-386`, code commits `09341ac`..`7315ccd`, 101 JVM tests
 green; APK 2 820 422 B, sha256 `bc5f0a3a496130bafd01ad20dac54ba65ade4780c16cabe53692b578ca86b313`). He reported
 that the count falls during a notification rain with nothing opened, and he was also right that the log had been
 growing one line per symptom instead of covering the state. Both fixed: the count has one writer and it logs every
