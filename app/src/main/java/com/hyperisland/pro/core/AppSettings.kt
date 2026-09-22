@@ -16,6 +16,7 @@ object AppSettings {
     private const val KEY_MORPH_STYLE = "morph_style"
     private const val KEY_MORPH_CONTENT_SCALE = "morph_content_scale_pct"
     private const val KEY_MORPH_GLYPH_SWAP = "morph_glyph_swap_pct"
+    private const val KEY_SHADE_POLICY = "shade_open_policy"
     private const val KEY_ISLAND_CORNER_RADIUS_DP = "island_corner_radius_dp"
 
     private const val KEY_ISLAND_STAGE2_WIDTH_DP = "island_stage2_width_dp"
@@ -85,6 +86,18 @@ object AppSettings {
     const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
+
+    /**
+     * What opening the notification shade does to the island. There was one behaviour and it was wrong: the
+     * shade being open (or MIUI reporting any tall enough systemui window as the shade - a heads-up can do that)
+     * emptied the ring AND refused every notification that arrived meanwhile. So the count fell during a
+     * notification rain with nothing touched, and some messages never showed at all. The quiet policy keeps
+     * counting and only hides the pill; WIPES is the old behaviour, left in TestLab so it can be compared
+     * instead of argued about.
+     */
+    const val SHADE_POLICY_COUNT_QUIETLY = 0  // keep counting, never pop, never wipe
+    const val SHADE_POLICY_WIPES = 1          // old: opening the shelf marks everything read
+    const val DEFAULT_SHADE_POLICY = SHADE_POLICY_COUNT_QUIETLY
     const val DEFAULT_ISLAND_CORNER_RADIUS_DP = 19
     const val DEFAULT_ISLAND_STAGE2_WIDTH_DP = 180
     const val DEFAULT_ISLAND_EXPANDED_WIDTH_DP = 390
@@ -155,7 +168,16 @@ object AppSettings {
     fun setMorphGlyphSwapPct(context: Context, v: Int) =
         prefs(context).edit().putInt(KEY_MORPH_GLYPH_SWAP, v.coerceIn(10, 90)).apply()
 
-    fun getIslandStage2WidthDp(context: Context) = prefs(context).getInt(KEY_ISLAND_STAGE2_WIDTH_DP, DEFAULT_ISLAND_STAGE2_WIDTH_DP)
+    fun getShadeOpenPolicy(context: Context) = prefs(context).getInt(KEY_SHADE_POLICY, DEFAULT_SHADE_POLICY)
+        .coerceIn(SHADE_POLICY_COUNT_QUIETLY, SHADE_POLICY_WIPES)
+
+    fun setShadeOpenPolicy(context: Context, v: Int) = prefs(context).edit()
+        .putInt(KEY_SHADE_POLICY, v.coerceIn(SHADE_POLICY_COUNT_QUIETLY, SHADE_POLICY_WIPES)).apply()
+
+    fun getShadeOpenPolicyName(context: Context): String =
+        if (getShadeOpenPolicy(context) == SHADE_POLICY_WIPES) "shade wipes (old)" else "keep counting"
+
+    fun getIslandStage2WidthDp(context: Context)
     fun setIslandStage2WidthDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_STAGE2_WIDTH_DP, v).apply()
     fun getIslandExpandedWidthDp(context: Context) = prefs(context).getInt(KEY_ISLAND_EXPANDED_WIDTH_DP, DEFAULT_ISLAND_EXPANDED_WIDTH_DP)
     fun setIslandExpandedWidthDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_EXPANDED_WIDTH_DP, v).apply()

@@ -191,7 +191,42 @@
         </RadioGroup>
 
 
-                <!-- The morph feel is his to choose, not mine to guess: the style swaps here and the island replays
+                <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Notification shade policy (what opening the shelf does)"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:textSize="18sp" />
+
+        <RadioGroup
+            android:id="@+id/radioShadePolicy"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <RadioButton
+                android:id="@+id/radioShadeKeepCounting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Keep counting - the shelf hides the pill, messages still arrive, nothing is wiped"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioShadeWipes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Old behaviour - opening the shelf marks everything read and drops new arrivals"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+        </RadioGroup>
+
+        <!-- The morph feel is his to choose, not mine to guess: the style swaps here and the island replays
              it live, so "thoda aur" costs one drag instead of one APK. -->
         <TextView
             android:layout_width="match_parent"

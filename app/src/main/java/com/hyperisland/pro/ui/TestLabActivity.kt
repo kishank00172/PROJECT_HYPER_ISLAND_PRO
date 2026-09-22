@@ -20,6 +20,7 @@ class TestLabActivity : Activity() {
 
         bindReplyAnimationLab()
         bindLiquidCalibration()
+        bindShadePolicyLab()
         bindMorphLab()
         bindPillIconLab()
         bindShadePullLab()
@@ -145,6 +146,24 @@ class TestLabActivity : Activity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
+    }
+
+    private fun bindShadePolicyLab() {
+        // The count vanishing during a notification rain is a policy question, so it is his to set and not mine
+        // to keep guessing at, and it is one radio away from the trace log that will now show what happened.
+        val group = findViewById<RadioGroup>(R.id.radioShadePolicy)
+        group.check(
+            if (AppSettings.getShadeOpenPolicy(this) == AppSettings.SHADE_POLICY_WIPES)
+                R.id.radioShadeWipes else R.id.radioShadeKeepCounting
+        )
+        group.setOnCheckedChangeListener { _, checkedId ->
+            AppSettings.setShadeOpenPolicy(
+                this,
+                if (checkedId == R.id.radioShadeWipes) AppSettings.SHADE_POLICY_WIPES
+                else AppSettings.SHADE_POLICY_COUNT_QUIETLY
+            )
+            Toast.makeText(this, "Shade: " + AppSettings.getShadeOpenPolicyName(this), Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun bindMorphLab() {

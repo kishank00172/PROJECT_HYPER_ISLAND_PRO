@@ -443,7 +443,33 @@ class HyperAccessibilityService : AccessibilityService() {
     private var pillPreviewIcon: ImageView? = null
     private var pillPreviewCount: TextView? = null
     /** The pill badge: how many conversations are stacked right now. Not a sum of app badges. */
-    private var pillChatCount: Int = 0
+    private var pillChatCountField = 0
+
+    /**
+     * The number he sees, with exactly one writer that cannot stay silent. Until now `clearNotificationRing()`
+     * zeroed it with no log line at all and the preview paths wrote it behind everyone's back, so "notification
+     * khole bina kam ho rahe hain" had no answer in the trace. A property cannot be bypassed by the next
+     * well-meaning patch, which is the point: the log must not depend on what I remembered to instrument.
+     */
+    private var pillChatCount: Int
+        get() = pillChatCountField
+        set(value) {
+            val before = pillChatCountField
+            pillChatCountField = value
+            // Blank below two, a digit from two up, nothing in between: the badge earns its frame of attention
+            // only when there is a stack to count (his rule) - and the number is written here, nowhere else.
+            val badge = com.hyperisland.pro.core.PillBadge.textFor(value)
+            pillPreviewCount?.text = badge
+            pillPreviewCount?.visibility =
+                if (com.hyperisland.pro.core.PillBadge.isShown(value)) View.VISIBLE else View.GONE
+            if (value == before) return
+            val page = if (notificationRing.isEmpty()) 0 else currentRingIndex + 1
+            val unread = notificationRing.getOrNull(currentRingIndex)?.unreadCount ?: 0
+            TraceLog.count(
+                "$before->$value chats=$value page=$page/${notificationRing.size} unread=$unread " +
+                    "badge=\"$badge\" cause=$lastRingOp"
+            )
+        }
 
     // Reply UI
     private var replyBar: LinearLayout? = null
@@ -484,7 +510,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphOutBy = 0.4f
     private var morphFromW = 0
     private var morphToW = 0
-    private var lastCountBadge = ""
     private var lastRingOp = "init"
     private var lastMorphBoxLeft = 0
     private var morphIconLauncher: android.graphics.drawable.Drawable? = null
@@ -589,6 +614,12 @@ class HyperAccessibilityService : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             val shadeOpen = checkNotificationShadeState()
             if (shadeOpen != isShadeOpen) {
+                // What decided it, not only that it changed: a heads-up tall enough to read as a pulled shade
+                // used to wipe the count on its own, and the log could not tell a real pull from that.
+                TraceLog.gesture(
+                    "shade -> ${if (shadeOpen) "OPEN" else "closed"} ($lastShadeEvidence) " +
+                        "policy=${AppSettings.getShadeOpenPolicyName(this)}"
+                )
                 isShadeOpen = shadeOpen
                 this@HyperAccessibilityService.visualRoot?.animate()?.alpha(1f)?.setDuration(120)?.start()
                 if (isShadeOpen) markIslandNotificationsSeenFromShade()
@@ -609,12 +640,20 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun markIslandNotificationsSeenFromShade() {
-        // User opened notification shade, so compact pill count is considered read/seen.
-        // Visual exit uses selected Shade Pull preset instead of snap-hiding.
+        // Opening the shelf used to mean "everything was read": the ring was emptied here, and separately every
+        // notification that arrived while the shade was open was refused at the listener's door. During a
+        // notification rain those two rules together are exactly what he saw - "kholta bhi nahi aur notification
+        // kam ho ja rahe hain" - and neither of them was logged. Now the default hides the pill while he reads
+        // and keeps the pages, because the shelf reports read-ness notification by notification; wiping is a
+        // setting he can pick, not a law I assumed.
         if (isReplyMode) return
         autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }
         autoCollapseRunnable = null
-        clearNotificationRing()
+        if (AppSettings.getShadeOpenPolicy(this) == AppSettings.SHADE_POLICY_WIPES) {
+            clearNotificationRing("shade-open")
+        } else {
+            ringEvent("shade open: pill hidden, ${notificationRing.size} pages kept (policy=quiet)")
+        }
         isProcessingQueue = false
 
         val root = pillPreviewRoot
@@ -786,10 +825,26 @@ class HyperAccessibilityService : AccessibilityService() {
         return super.onKeyEvent(event)
     }
 
+    /** The window that made the last shade decision, in words, for the log line that follows it. */
+    private var lastShadeEvidence = "no check yet"
+
     private fun checkNotificationShadeState(): Boolean {
-        val windowList = windows ?: return false
+        val windowList = windows ?: return false.also { lastShadeEvidence = "windows=null" }
         val screenHeight = resources.displayMetrics.heightPixels
-        return windowList.any { it.type == AccessibilityWindowInfo.TYPE_SYSTEM && it.getBoundsInScreen(this@HyperAccessibilityService.outlineRect).let { rect -> this@HyperAccessibilityService.outlineRect.height() > screenHeight * 0.35f } && it.root?.packageName == "com.android.systemui" }
+        var decidedPct = 0
+        var candidates = 0
+        val open = windowList.any { w ->
+            val systemUi = w.type == AccessibilityWindowInfo.TYPE_SYSTEM && w.root?.packageName == "com.android.systemui"
+            if (systemUi) candidates++
+            val tall = systemUi && w.getBoundsInScreen(outlineRect) && outlineRect.height() > screenHeight * 0.35f
+            if (tall && decidedPct == 0) decidedPct = outlineRect.height() * 100 / screenHeight
+            tall
+        }
+        // Height as a share of the screen is the only thing separating a pulled shade from a big heads-up, so
+        // the number that made the call is kept with the verdict.
+        lastShadeEvidence = if (open) "systemui window ${decidedPct}% of screen"
+        else "$candidates systemui window(s), none over 35%"
+        return open
     }
 
     override fun onInterrupt() = Unit
@@ -821,7 +876,7 @@ class HyperAccessibilityService : AccessibilityService() {
             pillPreviewRoot?.alpha = 1f
             setStageAnimated(IslandStage.STAGE2_PING, ExpandReason.MANUAL_USER)
         } else {
-            clearNotificationRing()
+            clearNotificationRing("swipe-up")
             pillPreviewCount?.visibility = View.GONE
             setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
         }
@@ -830,7 +885,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postNotificationEvent(packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
-            if (isShadeOpen) {
+            // Two separate questions used to be one: "should the island pop while he reads the shelf?" and
+            // "should this message exist in the ring?". The answer to the first is no; the answer to the second
+            // is always yes, and refusing it is what made messages vanish during a rain.
+            val quietForShade = isShadeOpen &&
+                AppSettings.getShadeOpenPolicy(this) == AppSettings.SHADE_POLICY_COUNT_QUIETLY
+            if (isShadeOpen && !quietForShade) {
                 // Notification shade is already open; user is looking at notifications.
                 // Do not create/update the pill badge for messages arriving while shade is open.
                 markIslandNotificationsSeenFromShade()
@@ -858,6 +918,10 @@ class HyperAccessibilityService : AccessibilityService() {
             val finalConversationKeySource = conversationKeySource ?: "serviceFallback"
             val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs)
             addOrUpdateNotificationRing(incomingModel)
+            if (quietForShade) {
+                TraceLog.ingest("quiet: shade open, ring=${notificationRing.size}, no pop from $packageName")
+                return@post
+            }
             if (currentStage == IslandStage.STAGE3_FULL) {
                 // User is actively reading expanded island; don't auto-shrink/replace it.
                 TraceLog.ingest("expanded already open - ring updated, no morph: $packageName")
@@ -1041,7 +1105,13 @@ class HyperAccessibilityService : AccessibilityService() {
         return notificationRing[currentRingIndex]
     }
 
-    private fun clearNotificationRing() {
+    private fun clearNotificationRing(cause: String) {
+        if (notificationRing.isNotEmpty()) {
+            // A wipe used to be the one change nobody could see coming, so it names its victims.
+            val killed = notificationRing.take(4).joinToString(", ") { "'${it.title}'" } +
+                if (notificationRing.size > 4) ", +${notificationRing.size - 4} more" else ""
+            ringEvent("CLEAR ${notificationRing.size} pages [$killed] because=$cause")
+        }
         notificationRing.clear()
         currentRingIndex = 0
         notificationQueue.clear()
@@ -1134,22 +1204,8 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(loadPillNotificationIcon(model.packageName, model.smallIcon))
-        // Blank below two, a digit from two up, nothing in between: the badge is only worth its frame of
-        // attention when there is a stack to count (his rule).
-        val prevShown = pillPreviewCount?.text?.toString() ?: ""
-        val badge = if (pillChatCount <= 1) "" else pillChatCount.toString()
-        pillPreviewCount?.text = badge
-        pillPreviewCount?.visibility = if (pillChatCount <= 1) View.GONE else View.VISIBLE
-        val page = if (notificationRing.isEmpty()) 0 else currentRingIndex + 1
-        val sig = "$pillChatCount/$page/${model.unreadCount}/$badge"
-        if (sig != lastCountBadge) {
-            val moved = if (prevShown != badge) " badge \"$prevShown\"->\"$badge\"" else ""
-            lastCountBadge = sig
-            TraceLog.count(
-                "chats=$pillChatCount page=$page/${notificationRing.size} " +
-                    "unread=${model.unreadCount}$moved cause=$lastRingOp"
-            )
-        }
+        // The digit and its visibility belong to the `pillChatCount` property now - one writer, one log line.
+        // This function owns the icon, which is the only part of the badge that used to be re-decided here.
     }
 
     private fun triggerPillPreview() {
