@@ -177,7 +177,7 @@ object AppSettings {
     fun getShadeOpenPolicyName(context: Context): String =
         if (getShadeOpenPolicy(context) == SHADE_POLICY_WIPES) "shade wipes (old)" else "keep counting"
 
-    fun getIslandStage2WidthDp(context: Context)
+    fun getIslandStage2WidthDp(context: Context) = prefs(context).getInt(KEY_ISLAND_STAGE2_WIDTH_DP, DEFAULT_ISLAND_STAGE2_WIDTH_DP)
     fun setIslandStage2WidthDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_STAGE2_WIDTH_DP, v).apply()
     fun getIslandExpandedWidthDp(context: Context) = prefs(context).getInt(KEY_ISLAND_EXPANDED_WIDTH_DP, DEFAULT_ISLAND_EXPANDED_WIDTH_DP)
     fun setIslandExpandedWidthDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_EXPANDED_WIDTH_DP, v).apply()

@@ -836,7 +836,10 @@ class HyperAccessibilityService : AccessibilityService() {
         val open = windowList.any { w ->
             val systemUi = w.type == AccessibilityWindowInfo.TYPE_SYSTEM && w.root?.packageName == "com.android.systemui"
             if (systemUi) candidates++
-            val tall = systemUi && w.getBoundsInScreen(outlineRect) && outlineRect.height() > screenHeight * 0.35f
+            // AccessibilityWindowInfo.getBoundsInScreen returns Unit before API 33, so it cannot sit inside the
+            // condition - the original code hid that in a `let`. It fills the shared rect, then we read it.
+            if (systemUi) w.getBoundsInScreen(outlineRect)
+            val tall = systemUi && outlineRect.height() > screenHeight * 0.35f
             if (tall && decidedPct == 0) decidedPct = outlineRect.height() * 100 / screenHeight
             tall
         }
