@@ -563,6 +563,15 @@ class HyperAccessibilityService : AccessibilityService() {
     private var cutoutHalfW = 0f
     private var morphCenterPx = 0f
     private var lastShelfCheckAt = 0L
+    /**
+     * One daemon thread for the shelf probe, and a single-flight flag. The thread exists because a binder round
+     * trip to the window manager has no business being on the draw path; the flag exists because without it, a
+     * burst of window changes would queue fifty probes of the same question and the "fix" would be a backlog.
+     */
+    private val shelfProbe = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "hip-shelf-probe").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
+    }
+    private val shelfProbeBusy = java.util.concurrent.atomic.AtomicBoolean(false)
     /** Which app we are waiting to take the foreground after a quick action, and since when. */
     private var actionTakeoverPkg: String? = null
     private var actionTakeoverAt = 0L
@@ -699,13 +708,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 TraceLog.line("ACTION", "$awaiting took the foreground ${waitedFor}ms after the action - back to the pill")
                 returnToPillAfterAction()
             }
-            // Whether the shelf is down decides one thing: the pill hides. Getting that answer costs two binder
-            // round trips (`windows`, then each system window's root), and this event fires for every window
-            // change on the phone - the IME, an app coming forward, a heads-up. His b1396 capture had 220 STALL
-            // lines from this call alone at 24-37 ms each, and one of them landed inside the collapse he was
-            // judging (`[MORPH] end ... max=24ms@t=0.76` with checkNotificationShadeState on the stack at
-            // t=0.4). Instrumentation that eats the frames it measures is worse than none, so: ask only when the
-            // event could even be the shelf, and at most twice a second.
+            // Whether the shelf is down decides one thing: the pill hides. Getting that answer costs a binder
+            // round trip per system window, and this event fires for every window change on the phone - the IME,
+            // an app coming forward, a heads-up. b1396's capture had 220 STALL lines from this call, so it got a
+            // throttle; b1406's capture shows the throttle was the wrong half of the answer: 80 calls, 3 750 ms
+            // of main-thread blocking in ten minutes, and a stall inside 33 of his 74 morph windows - which is
+            // why it reads as "bahut kuch glitchy" on EVERY style and not only the new two. So now: ask only when the
+            // event could even be the shelf, at most twice a second, and never on the thread that draws. A verdict
+            // that arrives ~40 ms later hides the pill 40 ms later; a verdict asked synchronously costs the frames
+            // of whatever the island is doing at that moment.
             val cls = event.className?.toString().orEmpty()
             val couldBeShelf = eventPkg.isEmpty() || eventPkg == "com.android.systemui" ||
                 cls.contains("shade", true) || cls.contains("notification", true) || cls.contains("panel", true)
@@ -714,18 +725,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // ingestion fallback below it, which is a behaviour change dressed up as a performance fix.)
             if (couldBeShelf && shelfNow - lastShelfCheckAt >= SHELF_CHECK_MIN_INTERVAL_MS) {
                 lastShelfCheckAt = shelfNow
-                val shadeOpen = checkNotificationShadeState()
-                if (shadeOpen != isShadeOpen) {
-                    // What decided it, not only that it changed: a heads-up tall enough to read as a pulled shade
-                    // used to wipe the count on its own, and the log could not tell a real pull from that.
-                    TraceLog.gesture(
-                        "shade -> ${if (shadeOpen) "OPEN" else "closed"} ($lastShadeEvidence) " +
-                            "policy=${AppSettings.getShadeOpenPolicyName(this)}"
-                    )
-                    isShadeOpen = shadeOpen
-                    this@HyperAccessibilityService.visualRoot?.animate()?.alpha(1f)?.setDuration(120)?.start()
-                    if (isShadeOpen) markIslandNotificationsSeenFromShade()
-                }
+                probeShadeOffMainThread()
             }
         }
         // Notification ingestion used to have a second source: this event's CharSequence list,
@@ -932,25 +932,70 @@ class HyperAccessibilityService : AccessibilityService() {
     private var lastShadeEvidence = "no check yet"
 
     private fun checkNotificationShadeState(): Boolean {
-        val windowList = windows ?: return false.also { lastShadeEvidence = "windows=null" }
+        val (open, evidence) = shadeVerdictOf(windows, resources.displayMetrics.heightPixels)
+        lastShadeEvidence = evidence
+        return open
+    }
+
+    /**
+     * The shelf question, asked on its own thread, with the answer posted back. One flight at a time: two
+     * overlapping probes would be two binder round trips for one verdict, which is the cost this exists to
+     * remove. Nothing here touches a view - the only reason the answer is applied in a `post` and not where it
+     * is computed.
+     */
+    private fun probeShadeOffMainThread() {
+        if (!shelfProbeBusy.compareAndSet(false, true)) return
         val screenHeight = resources.displayMetrics.heightPixels
-        var decidedPct = 0
+        shelfProbe.execute {
+            val verdict = runCatching { shadeVerdictOf(windows, screenHeight) }
+                .getOrDefault(false to "probe failed")
+            mainHandler.post {
+                shelfProbeBusy.set(false)
+                lastShadeEvidence = verdict.second
+                val open = verdict.first
+                if (open != isShadeOpen) {
+                    // What decided it, not only that it changed: a heads-up tall enough to read as a pulled shade
+                    // used to wipe the count on its own, and the log could not tell a real pull from that.
+                    TraceLog.gesture(
+                        "shade -> ${if (open) "OPEN" else "closed"} ($lastShadeEvidence) " +
+                            "policy=${AppSettings.getShadeOpenPolicyName(this)}"
+                    )
+                    isShadeOpen = open
+                    this@HyperAccessibilityService.visualRoot?.animate()?.alpha(1f)?.setDuration(120)?.start()
+                    if (isShadeOpen) markIslandNotificationsSeenFromShade()
+                }
+            }
+        }
+    }
+
+    /**
+     * The one implementation of "is the shade down", and it takes its rect from nowhere but itself: the old
+     * version measured into `outlineRect`, the shared rect the island's outline provider reads while drawing.
+     * Harmless on the main thread, a race the moment the probe moves off it, and a race with the render thread is
+     * exactly the kind of bug that shows up as a card with a wrong corner once a week.
+     */
+    private fun shadeVerdictOf(windowList: List<AccessibilityWindowInfo>?, screenHeight: Int): Pair<Boolean, String> {
+        if (windowList == null) return false to "windows=null"
+        val r = android.graphics.Rect()
         var candidates = 0
-        val open = windowList.any { w ->
+        var decidedPct = 0
+        var open = false
+        for (w in windowList) {
             val systemUi = w.type == AccessibilityWindowInfo.TYPE_SYSTEM && w.root?.packageName == "com.android.systemui"
-            if (systemUi) candidates++
-            // AccessibilityWindowInfo.getBoundsInScreen returns Unit before API 33, so it cannot sit inside the
-            // condition - the original code hid that in a `let`. It fills the shared rect, then we read it.
-            if (systemUi) w.getBoundsInScreen(outlineRect)
-            val tall = systemUi && outlineRect.height() > screenHeight * 0.35f
-            if (tall && decidedPct == 0) decidedPct = outlineRect.height() * 100 / screenHeight
-            tall
+            if (!systemUi) continue
+            candidates++
+            // AccessibilityWindowInfo.getBoundsInScreen returns Unit before API 33, so it cannot sit inside a
+            // condition: it fills the rect, then we read it.
+            w.getBoundsInScreen(r)
+            if (r.height() > screenHeight * 0.35f) {
+                if (!open) decidedPct = r.height() * 100 / screenHeight
+                open = true
+            }
         }
         // Height as a share of the screen is the only thing separating a pulled shade from a big heads-up, so
         // the number that made the call is kept with the verdict.
-        lastShadeEvidence = if (open) "systemui window ${decidedPct}% of screen"
-        else "$candidates systemui window(s), none over 35%"
-        return open
+        return open to (if (open) "systemui window ${decidedPct}% of screen"
+            else "$candidates systemui window(s), none over 35%")
     }
 
     override fun onInterrupt() = Unit
