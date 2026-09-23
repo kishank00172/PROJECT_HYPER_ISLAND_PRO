@@ -89,8 +89,43 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-23 (read me first if you lost the plot)
 
-`main` head carries the **b1399** round (release `ci-399`, code `793b331`..`d246e3d`, 118 JVM tests green; APK
-2 845 414 B, sha256 `b0856bf75f17928cff77b52397354ee1dc47dc4b36126e144c123b6cdd612d05`). He did not judge the ride
+`main` head carries the **b1401** round (release `ci-401`, code `6dc0ed4`, 117 JVM tests green; APK 2 843 138 B,
+sha256 `df4d889dd1bf25c980c1e22285569cae3cf965039d962d7be2948fa8a9142ae8`). Two instructions, both about the same
+mistake seen from two sides - "4th mei kya hai, kuchh to alag hai he nahi, 3rd jaisa he to hai" and "baki ke jo do
+the unka icon morph pichhle do-teen build se kharab kar diya ... jo ek maine praise kiya tha usko recover karo".
+
+**The icon ride is recovered from `5d54874` (b1378),** the only animation change he has ever praised. Mechanism for
+mechanism: the glyph scales from the pill's relative size to the launcher's about its own centre on the clock,
+swaps its drawable once at the midpoint, and travels the drawn box's own left edge *undivided*, so its travel ends
+at zero where the row rests. Five of my own later changes were what cost it, and each one was a correctness win
+that spent the property he was actually praising: the row's sideways entry was replaced by a vertical drop (the
+icon's travel was a side effect of it, so the icon lost it too); the travel and the size were divided by the row's
+scale so they would land exact; the two icon slots' distance was measured and added back as a vertical drift
+(`riderY=-150px` in his log - 150 px of drift inside a 260 ms morph, in a layout whose two rows share one line);
+the pill's own copy stood down for the ride's whole duration, so the badge appeared mid-flight; and the row's fade
+moved onto its children, so every view owned an alpha again. `riderShift`, `riderScale`, `pillIconVisible`,
+`riderSlotDeltaY` and `setMorphContentAlpha`'s per-child branch are deleted, not tuned. `docs/MOTION-RESEARCH.md`
+§4 is the table of what each trade bought and cost, with the rule that follows: **a shared element that is part of
+a moving container is not driven separately from it** - and when the numbers say a motion is exact while he says it
+looks wrong, the numbers are what to question. The ride's Lab checkbox is deleted too, not defaulted: his capture
+had `ride=off` on every morph of the session, so one unticked box had quietly removed the animation he likes from
+all four styles. The price is in the code so nobody re-fixes it: in the styles that scale the row, the icon's
+travel is scaled with it (12 % short early on, exact where it lands). That is what riding means.
+
+**The fourth style is now a look, not a timing difference.** Per-part flight is withdrawn - a real mechanism,
+tested, and invisible to him. **"Glass settle"** takes its place, copied from the material iOS 26 is built on:
+Apple's glass responds to what is under it and morphs between states, and its lensing is precisely what Reduce
+Motion exists to strip out, so the blur *is* the motion. The card's text arrives legible but out of focus and
+sharpens as the box completes; collapsing, it blurs back out instead of only dimming. Android has had the same
+thing as a render-node property since API 12 (`RenderEffect.createBlurEffect`), so the cost sits on the render
+thread and not in our frame loop: one effect shared by the four content views (never the row, so the icon stays
+sharp), quantised to half-pixel steps, cleared entirely below 0.5 px so a settled card carries no effect at all.
+The style keeps the shape-driven scale, which is what stops it reading as "scale + fade" from across the room.
+`[MORPH] start` prints `ride=classic(b1378)` and `glass=on blur=18px`, so a verdict and a log agree on what he
+felt, and `riderY=` is gone with the thing it described.
+
+Before that: the **b1399** round (release `ci-399`, code `793b331`..`d246e3d`, 118 JVM tests green; APK
+2 845 414 B, sha256 `b0856bf75f17928cff77b52397354ee1dc47dc4b36126e144c123b6cdd612d05`), his log-driven bug set. He did not judge the ride
 and the roll; he answered with two demands and three bugs, and all four are visible in his own capture
 (`hip-log-20260923-163536.txt`, 574 lines), which is now written up in `docs/ISLAND-LIFECYCLE.md`:
 
