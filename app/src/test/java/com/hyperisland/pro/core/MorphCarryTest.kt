@@ -161,19 +161,38 @@ class MorphCarryTest {
         assertTrue(MorphCarry.showsPillGlyph(t = 0.9f, growing = false, swapAt = 0.2f))
     }
 
-    @Test fun `only one icon is ever drawn while the ride is in flight`() {
-        assertTrue(MorphCarry.pillIconHidden(rowAlpha = 1f, rowShown = true))
-        assertFalse(MorphCarry.pillIconHidden(rowAlpha = 0f, rowShown = true))
-        assertFalse(MorphCarry.pillIconHidden(rowAlpha = 1f, rowShown = false))
-        // The threshold is not decoration: a row at 1% alpha still leaves a visible ghost of the app icon over
-        // the pill's own, which is the "glitchy last frames" he described twice.
-        assertTrue(MorphCarry.pillIconHidden(rowAlpha = 0.05f, rowShown = true))
-        assertFalse(MorphCarry.pillIconHidden(rowAlpha = 0.02f, rowShown = true))
-        for (i in 0..100) {
-            val a = i / 100f
-            val hidden = MorphCarry.pillIconHidden(a, true)
-            val drawn = a > 0.02f
-            assertTrue("two icons at once at alpha $a", hidden == drawn)
+    @Test fun `one element means one icon, and the pill owns it again the moment the row is done`() {
+        assertFalse(MorphCarry.pillIconVisible(rideOn = true, rowShown = true))
+        assertTrue(MorphCarry.pillIconVisible(rideOn = false, rowShown = true))
+        assertTrue(MorphCarry.pillIconVisible(rideOn = true, rowShown = false))
+        assertTrue(MorphCarry.pillIconVisible(rideOn = false, rowShown = false))
+        // A pill pop from idle has no row on screen at all, so the rider must not be able to switch the pill's
+        // own icon off for the whole pop - that is how "hidden while the row is visible" is keyed on the row's
+        // real visibility rather than on a fade it no longer owns.
+        for (open in 0..100) {
+            val o = open / 100f
+            assertTrue("both copies at once while riding at open $o", !(MorphCarry.pillIconVisible(true, true) && o < 1f))
+        }
+    }
+
+    /**
+     * The rider shares its parent's transform, and the parent scales in two of the three styles. Without this
+     * compensation the travel lands short and the glyph is sized twice, which is exactly how a transformation he
+     * called "ekdum seamless" became one he could see: "abhi notice ho ja rha hai change".
+     */
+    @Test fun `the rider's path is true even while the row itself is scaled`() {
+        assertEquals(350f, MorphCarry.riderShift(350f, 1f), 1e-4f)
+        // 0.88 is the scale floor he leaves the slider at by default: 350 px of travel must still arrive at 350.
+        assertEquals(397.7f, MorphCarry.riderShift(350f, 0.88f), 0.1f)
+        assertEquals(350f, MorphCarry.riderShift(350f, 0.88f) * 0.88f, 1e-3f)
+        assertEquals(1f, MorphCarry.riderScale(0.88f, 1f), 1e-6f)
+        assertEquals(1f, MorphCarry.riderScale(0.84f, 0.84f), 1e-6f) // the drawn size is the ride's, not the row's
+        // A degenerate parent scale must not turn into an infinite translation.
+        assertTrue(MorphCarry.riderShift(350f, 0f) < 1e4f)
+        for (i in 1..100) {
+            val s = i / 100f
+            val drawn = MorphCarry.riderShift(350f, s) * s
+            assertEquals("travel distorted at parent scale $s", 350f, drawn.toFloat(), 1e-2f)
         }
     }
 

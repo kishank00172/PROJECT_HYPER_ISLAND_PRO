@@ -19,6 +19,7 @@ object AppSettings {
     private const val KEY_SHADE_POLICY = "shade_open_policy"
     private const val KEY_MORPH_ICON_RIDE = "morph_icon_ride"
     private const val KEY_MORPH_CONTENT_DROP_DP = "morph_content_drop_dp"
+    private const val KEY_MORPH_COUNT_ROLL = "morph_count_roll"
     private const val KEY_MORPH_ENTRY = "morph_content_entry"
     private const val KEY_MORPH_STAGGER_PCT = "morph_stagger_pct"
     private const val KEY_MORPH_GONE_BY_PCT = "morph_gone_by_pct"
@@ -119,6 +120,10 @@ object AppSettings {
     fun getMorphContentDropDp(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_DROP_DP, DEFAULT_MORPH_CONTENT_DROP_DP)
     fun setMorphContentDropDp(context: Context, v: Int) =
         prefs(context).edit().putInt(KEY_MORPH_CONTENT_DROP_DP, v.coerceIn(0, 40)).apply()
+
+    /** The badge's digits slide the way the number moved (Apple's `.numericText()`); off means it just changes. */
+    fun getMorphCountRoll(context: Context) = prefs(context).getBoolean(KEY_MORPH_COUNT_ROLL, true)
+    fun setMorphCountRoll(context: Context, v: Boolean) = prefs(context).edit().putBoolean(KEY_MORPH_COUNT_ROLL, v).apply()
 
     fun getMorphEntryName(context: Context): String =
         if (getMorphEntry(context) == MORPH_ENTRY_DROP) "drops out of the pill" else "centred in the box"

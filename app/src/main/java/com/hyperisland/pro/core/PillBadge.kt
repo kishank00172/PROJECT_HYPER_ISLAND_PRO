@@ -12,4 +12,16 @@ object PillBadge {
 
     /** Below this the pill shows no digit at all, so the view is not even laid out for it. */
     fun isShown(chats: Int): Boolean = chats > 1
+
+    /**
+     * Apple's `contentTransition(.numericText())`: a number that changed does not blink, its digits travel in the
+     * direction the value moved. 1 for up (a stack arriving), -1 for down (a stack being read), 0 for no change -
+     * so the caller never animates a frame for a number that did not move, and the badge's own rule ("nothing
+     * below two") stays the only reason it is not drawn.
+     */
+    fun rollDirection(from: Int, to: Int): Float = when {
+        to > from -> 1f
+        to < from -> -1f
+        else -> 0f
+    }
 }

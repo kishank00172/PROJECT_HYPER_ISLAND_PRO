@@ -20,4 +20,19 @@ class PillBadgeTest {
         assertFalse(PillBadge.isShown(1))
         assertTrue(PillBadge.isShown(2))
     }
+
+    /**
+     * .numericText(): the digits travel the way the value moved. Zero on no change is the part that matters -
+     * it is what stops an animation for a number that did not move, and the badge is written more often than it
+     * changes.
+     */
+    @Test fun theCountRollsInTheDirectionTheNumberMoved() {
+        assertEquals(1f, PillBadge.rollDirection(3, 11), 0f)
+        assertEquals(-1f, PillBadge.rollDirection(11, 3), 0f)
+        assertEquals(0f, PillBadge.rollDirection(7, 7), 0f)
+        // The badge earns a roll only between two visible numbers; 1 -> 2 is the appearance of the badge, not a
+        // change of it, and the view has no height to travel over yet.
+        assertEquals(1f, PillBadge.rollDirection(1, 2), 0f)
+        assertEquals(0f, PillBadge.rollDirection(0, 0), 0f)
+    }
 }

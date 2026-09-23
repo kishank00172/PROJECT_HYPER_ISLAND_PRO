@@ -463,6 +463,9 @@ class HyperAccessibilityService : AccessibilityService() {
             pillPreviewCount?.visibility =
                 if (com.hyperisland.pro.core.PillBadge.isShown(value)) View.VISIBLE else View.GONE
             if (value == before) return
+            if (com.hyperisland.pro.core.PillBadge.isShown(before) && com.hyperisland.pro.core.PillBadge.isShown(value)) {
+                rollBadge(before, value)
+            }
             val page = if (notificationRing.isEmpty()) 0 else currentRingIndex + 1
             val unread = notificationRing.getOrNull(currentRingIndex)?.unreadCount ?: 0
             TraceLog.count(
@@ -517,6 +520,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphContentDropPx = 0f
     private var morphEntryDrop = true
     private var morphStagger = 0f
+    private var morphRiderDy = 0f
+    private var morphOpenFrame = 0f
     private var lastMorphBoxLeft = 0
     private var morphIconLauncher: android.graphics.drawable.Drawable? = null
     private var morphIconPill: android.graphics.drawable.Drawable? = null
@@ -2950,7 +2955,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 gridRoot?.visibility = View.VISIBLE
                 // The other expand path, the other owner rule: when the carry drives the opacity it owns it for
                 // the whole morph here too, or the last writer of the frame wins and the TestLab choice is a lie.
-                if (!morphOpacityFollowsShape) gridRoot?.alpha = t
+                if (!morphOpacityFollowsShape) setMorphContentAlpha(t)
             }
         }
         val set = AnimatorSet().apply {
@@ -3055,13 +3060,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 // as "no animation at all" - the text was already opaque while the card was still tiny);
                 // collapsing, it must be GONE by ~40-45% of the shrink, or expanded text hangs below the
                 // pill in the last frames. Both rules were measured on hardware.
+                // Both ramps go through the one owner: with the icon riding, the fade has to land on the content
+                // views and not on the row, and this path is not allowed to disagree about that.
                 if (!morphOpacityFollowsShape) {
                     if (target == IslandStage.STAGE3_FULL) {
-                        gridRoot?.alpha = t
+                        setMorphContentAlpha(t)
                     } else if (target == IslandStage.STAGE2_PING) {
-                        gridRoot?.alpha = 1f - (t / 0.45f).coerceIn(0f, 1f)
+                        setMorphContentAlpha(1f - (t / 0.45f).coerceIn(0f, 1f))
                     } else if (target == IslandStage.STAGE1_IDLE) {
-                        gridRoot?.alpha = 1f - (t / 0.4f).coerceIn(0f, 1f)
+                        setMorphContentAlpha(1f - (t / 0.4f).coerceIn(0f, 1f))
                     }
                 }
                 if (target == IslandStage.STAGE2_PING) pillPreviewRoot?.alpha = 1f
@@ -3163,13 +3170,27 @@ class HyperAccessibilityService : AccessibilityService() {
      * launcher badge, so it reads as the same element travelling and transforming rather than two images
      * cross-fading in different corners.
      */
+    /** The rider's vertical travel, in window coordinates, from the card's icon box to the pill's icon box. */
+    private fun riderSlotDeltaY(): Float {
+        val a = appIconView ?: return 0f
+        val b = pillPreviewIcon ?: return 0f
+        if (a.width == 0 || b.width == 0) return 0f
+        val pa = IntArray(2)
+        val pb = IntArray(2)
+        a.getLocationInWindow(pa)
+        b.getLocationInWindow(pb)
+        return (pb[1] - pa[1]).toFloat()
+    }
+
     private fun morphShapeProgress(): Float =
         MorphCarry.shapeProgress(lastMorphBoxLeft, morphFromW, morphToW, morphPinW())
 
     private fun applyMorphCarry(t: Float) {
-        if (!morphCarryOn && !morphScaleOn && !morphIconRide) return
-        // The one place a morph's direction is decided; every rule below reads the result.
+        // The one place a morph's direction is decided; every rule below reads the result. Stashed for the
+        // styles whose fade is written by the stage animator, so both owners read the same number.
         val open = MorphCarry.openProgress(morphShapeProgress(), morphTowardCard)
+        morphOpenFrame = open
+        if (!morphCarryOn && !morphScaleOn && !morphIconRide) return
         val g = gridRoot
         if (morphEntryDrop) {
             // No sideways travel: the box widens evenly on both sides, so any x movement reads as the content
@@ -3193,47 +3214,30 @@ class HyperAccessibilityService : AccessibilityService() {
         // The pill's row rides too, but on the box alone: sliding the pill sideways as well as growing it is
         // what read as a second pill lagging behind the first.
         if (morphCarryOn) pillPreviewRoot?.translationX = MorphCarry.translationX(lastMorphBoxLeft)
+        var rowScale = 1f
         if (morphScaleOn && g != null) {
             // Scale about the anchor the box grows from: its top edge when the row hangs there, its middle when
             // the row is being centred. A pivot in the wrong corner is a slide in disguise.
-            val s = MorphCarry.contentScale(open, morphScaleFrom)
+            rowScale = MorphCarry.contentScale(open, morphScaleFrom)
             g.pivotX = 0f
             g.pivotY = if (morphEntryDrop) 0f else g.height / 2f
-            g.scaleX = s
-            g.scaleY = s
-            if (morphOpacityFollowsShape) g.alpha = MorphCarry.contentAlpha(open, morphTowardCard, morphOutBy)
+            g.scaleX = rowScale
+            g.scaleY = rowScale
         }
-        // Staggered entry: header, title, message, then the actions - each gets its own slice of the same
-        // travel. Children multiply their parent's alpha in Android, so the style's fade still owns the row as
-        // a whole and nobody else writes these four (the actions' alpha is set to 1 when they are rebuilt).
-        if (morphStagger > 0f) {
-            val kids = arrayOf<android.view.View?>(headerLine, titleText, messageText, actionScroll)
-            val n = kids.size
-            for (i in 0 until n) {
-                val v = kids[i] ?: continue
-                // Arriving, the reading order leads. Leaving, it folds back the way it came: bottom first.
-                val idx = if (morphTowardCard) i else n - 1 - i
-                v.alpha = MorphCarry.childOpen(idx, n, open, morphStagger)
-            }
+        if (morphOpacityFollowsShape) {
+            setMorphContentAlpha(MorphCarry.contentAlpha(open, morphTowardCard, morphOutBy))
         }
         // The ride is its own switch now, so it can sit on top of any style - he asked for exactly that
         // combination once he had felt "scale + fade" without it.
         if (!morphIconRide) return
         val icon = appIconView ?: return
         val pill = pillPreviewIcon
-        // Only one icon may be on screen while the rider is in flight: the pill's own copy stands down for as
-        // long as the row is still being drawn, then takes the slot back. No threshold tuning, no overlap.
+        // One element, one copy in flight. The rider lands on the pill's slot (it rides the box's own left edge,
+        // so the two positions coincide by construction), which is why standing the pill's copy down and taking
+        // it back at the end is a swap of identical pixels rather than the pop his report is about.
         if (pill != null) {
             val row = gridRoot
-            // Read the row's visibility from the SAME rule that drives it - the shape's own clock when the style
-            // fades with the shape, the morph clock when a view animator does - and from its real VISIBLE state.
-            // Keying it on view.alpha alone would strand a ride-only collapse with no icon on the pill at all,
-            // because in that style something else owns the fade.
-            // Whatever the row's drawn alpha actually IS, whichever of the two owners wrote it - the style's
-            // own ramp when the fade follows the shape (written a few lines above, in this same frame), or the
-            // stage animator's when it does not. Guessing it from a curve would strand a ride-only collapse with
-            // no icon on the pill at all, because in that style something else owns the fade.
-            pill.alpha = if (MorphCarry.pillIconHidden(row?.alpha ?: 0f, row != null && row.visibility == View.VISIBLE)) 0f else 1f
+            pill.alpha = if (MorphCarry.pillIconVisible(true, row != null && row.visibility == View.VISIBLE)) 1f else 0f
         }
         val ratio = if (icon.width > 0 && pill != null && pill.width > 0) {
             (pill.width.toFloat() / icon.width.toFloat()).coerceIn(0.4f, 1f)
@@ -3243,14 +3247,80 @@ class HyperAccessibilityService : AccessibilityService() {
         val scale = MorphCarry.iconScale(if (morphCarryGrowing) t else 1f - t, ratio)
         icon.pivotX = icon.width / 2f
         icon.pivotY = icon.height / 2f
-        icon.scaleX = scale
-        icon.scaleY = scale
+        icon.scaleX = MorphCarry.riderScale(scale, rowScale)
+        icon.scaleY = MorphCarry.riderScale(scale, rowScale)
+        // The travel belongs to the rider, not to the row's x policy. It used to ride on the row's translation
+        // by accident, so making the drop the default (which is what he asked for: no sideways content) quietly
+        // removed the icon's movement - his log line is the proof, carry=on entry=drop, and what was left was a
+        // glyph resizing in place. Dividing by the row's own scale keeps the drawn path true in the styles that
+        // scale the content, where 350 px at 0.88 would otherwise land 42 px short of the slot.
+        icon.translationX = MorphCarry.riderShift(if (morphEntryDrop) MorphCarry.translationX(lastMorphBoxLeft) else 0f, rowScale)
+        icon.translationY = MorphCarry.riderShift(morphRiderDy * (1f - open), rowScale)
         val launcher = morphIconLauncher
         val glyph = morphIconPill
         if (launcher != null && glyph != null) {
             val want = if (MorphCarry.showsPillGlyph(t, morphCarryGrowing, morphSwapAt)) glyph else launcher
             if (icon.drawable !== want) icon.setImageDrawable(want)
         }
+    }
+
+    /**
+     * The only writer of the card content's opacity while a morph runs, for both styles - the shape-driven ramp
+     * from [applyMorphCarry] and the clock-driven one from the stage animator both come through here, because
+     * two owners of one alpha is the bug this file keeps meeting.
+     *
+     * With the icon riding, the fade goes on the content VIEWS and not on the row. That is the whole of the
+     * regression he reported - "pehle ekdum seamlessly tha ... abhi notice ho ja rha hai change": the row's ramp
+     * is over at goneBy (25-45% of the shape in his own log), so a fade on the row ended the ride a third of the
+     * way in, and the pill's own icon appeared while the rider still had travel left. A shared element must not
+     * be faded by the container it is leaving. The stagger lives here too, in the same place, because it writes
+     * the very same views: each one gets the row's opacity times its own slice of the travel.
+     */
+    private fun setMorphContentAlpha(a: Float) {
+        val g = gridRoot ?: return
+        if (!morphIconRide) {
+            g.alpha = a
+            if (morphStagger > 0f) applyMorphStagger(1f)
+            return
+        }
+        g.alpha = 1f
+        val rider = appIconView?.parent as? View
+        for (i in 0 until g.childCount) {
+            val child = g.getChildAt(i)
+            child.alpha = if (child === rider) 1f else a
+        }
+        applyMorphStagger(a)
+    }
+
+    /** Header, title, message, actions - each with its own slice of the shape's travel, reading order first. */
+    private fun applyMorphStagger(base: Float) {
+        val kids = arrayOf<android.view.View?>(headerLine, titleText, messageText, actionScroll)
+        val n = kids.size
+        if (n == 0) return
+        val on = morphStagger > 0f
+        for (i in 0 until n) {
+            val v = kids[i] ?: continue
+            if (!on) { v.alpha = 1f; continue }
+            // Arriving, the reading order leads. Leaving, it folds back the way it came: the actions go first.
+            val idx = if (morphTowardCard) i else n - 1 - i
+            v.alpha = base * MorphCarry.childOpen(idx, n, morphOpenFrame, morphStagger)
+        }
+    }
+
+    /**
+     * Apple's `contentTransition(.numericText())` on the one number that changes while the island is open: the
+     * digits travel in the direction the value moved instead of blinking into place. Two properties on a view
+     * that was redrawing for the new text anyway, so this costs no measure pass and no layout.
+     */
+    private fun rollBadge(from: Int, to: Int) {
+        if (!AppSettings.getMorphCountRoll(this)) return
+        val v = pillPreviewCount ?: return
+        val dir = com.hyperisland.pro.core.PillBadge.rollDirection(from, to)
+        if (dir == 0f) return
+        v.animate()?.cancel()
+        v.translationY = dir * v.height * 0.55f
+        v.alpha = 0f
+        v.animate().translationY(0f).alpha(1f).setDuration(190L).setInterpolator(morphInterpolator).start()
     }
 
     /** Every carry value has an identity state; the settle and any cancellation both land here. */
@@ -3262,10 +3332,18 @@ class HyperAccessibilityService : AccessibilityService() {
         gridRoot?.translationX = 0f
         pillPreviewRoot?.translationX = 0f
         gridRoot?.translationY = 0f // the host resets its own centring right after; this is the drop term
+        morphRiderDy = 0f
+        morphOpenFrame = 0f
+        // The row's alpha is the settle path's business; these four are ours and must never stay faded, or the
+        // next card is drawn with a half-transparent message and no explanation in the log.
+        gridRoot?.let { g -> for (i in 0 until g.childCount) g.getChildAt(i).alpha = 1f }
         headerLine?.alpha = 1f
         titleText?.alpha = 1f
         messageText?.alpha = 1f
         actionScroll?.alpha = 1f
+        appIconView?.translationX = 0f
+        appIconView?.translationY = 0f
+        pillPreviewIcon?.alpha = 1f
         appIconView?.scaleX = 1f
         appIconView?.scaleY = 1f
         pillPreviewIcon?.alpha = 1f // the hand-off always ends with the pill owning its own icon again
@@ -3552,6 +3630,8 @@ class HyperAccessibilityService : AccessibilityService() {
         morphFromW = fromW; morphToW = toW
         morphIconLauncher = appIconView?.drawable
         morphIconPill = pillPreviewIcon?.drawable
+        // How far the pill's slot sits from the card's, measured once while both are laid out where they rest.
+        morphRiderDy = riderSlotDeltaY()
         applyMorphCarry(0f)
         TraceLog.morph(
             "start $label dur=${durationMs}ms style=${AppSettings.getMorphStyleName(this)} " +
@@ -3559,7 +3639,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 "carry=${if (morphCarryOn) "on" else "off"} scale=${if (morphScaleOn) "%.2f".format(morphScaleFrom) else "off"} " +
                 "swap=${(morphSwapAt * 100).toInt()}% ride=${if (morphIconRide) "on" else "off"} " +
                 "entry=${if (morphEntryDrop) "drop" else "centred"} drop=${AppSettings.getMorphContentDropDp(this)}dp " +
-                "stagger=${(morphStagger * 100).toInt()}% goneBy=${(morphOutBy * 100).toInt()}%"
+                "stagger=${(morphStagger * 100).toInt()}% goneBy=${(morphOutBy * 100).toInt()}% " +
+                // The travel is printed because it is the thing that silently disappeared once already: a line
+                // with ride=on and riderY=0px means the two slots are on one line (correct), and ride=on with no
+                // travel at all would mean the ride is again being carried by someone else's transform.
+                "riderY=${morphRiderDy.toInt()}px roll=${if (AppSettings.getMorphCountRoll(this)) "on" else "off"}"
         )
     }
 

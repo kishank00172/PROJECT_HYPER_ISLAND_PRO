@@ -213,6 +213,17 @@ class TestLabActivity : Activity() {
             )
             Toast.makeText(this, "Content entry: " + AppSettings.getMorphEntryName(this), Toast.LENGTH_SHORT).show()
         }
+        findViewById<CheckBox>(R.id.chkMorphRoll).apply {
+            isChecked = AppSettings.getMorphCountRoll(this@TestLabActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setMorphCountRoll(this@TestLabActivity, checked)
+                Toast.makeText(
+                    this@TestLabActivity,
+                    if (checked) "Count roll on - the digits slide the way the number moved" else "Count roll off",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
         bindMorphSeek(
             R.id.seekMorphDrop, R.id.tvMorphDropLabel, "extra drop from the pill", 0, 40,
             { AppSettings.getMorphContentDropDp(it) }, { c, v -> AppSettings.setMorphContentDropDp(c, v) },

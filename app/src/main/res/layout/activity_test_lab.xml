@@ -198,6 +198,15 @@
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
 
+        <CheckBox
+            android:id="@+id/chkMorphRoll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Count roll (the pill's digits slide the way the number moved - Apple's numericText)"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
         <Button
             android:id="@+id/btnReplayMorph"
             android:layout_width="match_parent"
