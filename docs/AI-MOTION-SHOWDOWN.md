@@ -97,6 +97,8 @@ a property I have to reason about at 1 a.m.
 
 ---
 
+**Round 29, after the tables.** The medians above say what ran; `docs/THE-TWO-MOTIONS.md` now says what each frame *draws*, and reading it that closely turned up two things the medians could not show: the auto-notification spring was sized against 720 ms while its animator ran 360 (so it snapped on its last frame, on the path he uses most), and the response table - which I had converted from Claude's ratios into absolute milliseconds - left 9 moving frames out of 23 on his panel. Both are fixed in `27e2eb8`+`ac1105f`, and both are now asserted against the curve itself rather than claimed in a comment. Lesson worth keeping: a spec's *ratio* of response to duration is the transferable part; its number in seconds is only right for the duration it was written next to.
+
 ## 1. Claude's design — "Dual-Spring Liquid Capsule" → style 4, `Liquid capsule (Claude)`
 
 | His claim | Verdict | Where it lives | What he can feel |
