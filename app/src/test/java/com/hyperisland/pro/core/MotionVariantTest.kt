@@ -344,6 +344,37 @@ class MotionVariantTest {
         assertTrue(MotionVariant.compression(0.12f, MotionVariant.COMPRESSION_WINDOW, 0.05f) > 0.02f)
     }
 
+    @Test
+    fun theBounceNeverDrawsOffHisScreen() {
+        // The device that matters, from his own trace: a 1080 px panel with a 1067 px card. There were two bugs in
+        // one here - the box was widened into headroom the display does not have, so the bounce was clipped (the
+        // box appeared to hit a wall at full width), and the content row, anchored to that box's left edge, kept
+        // sliding sideways off-screen. That is "spring sirf icon pe, wo bhi left right".
+        val room = MotionVariant.visibleExcessRoomPx(1080, 1067)
+        assertEquals(13, room)
+        assertEquals(1080, MotionVariant.clampedWidth(1157, 1067, room))
+        assertEquals(77, MotionVariant.wastedWidth(1157, 1067, room))
+        // A card with room of its own keeps a plain width bounce - no redirection, no new behaviour for anyone
+        // whose expanded width is smaller than the screen.
+        val wide = MotionVariant.visibleExcessRoomPx(1080, 700)
+        assertEquals(380, wide)
+        assertEquals(0, MotionVariant.wastedWidth(780, 700, wide))
+        assertEquals(780, MotionVariant.clampedWidth(780, 700, wide))
+        // And the clamp is a no-op at the ends of the curve, which is what lets the box land exact.
+        assertEquals(0, MotionVariant.wastedWidth(1067, 1067, room))
+        assertEquals(0, MotionVariant.wastedWidth(366, 1067, room))
+    }
+
+    @Test
+    fun wastedWidthBecomesHeightTheEyeCanCatch() {
+        // Redirection is only a fix if what it buys is visible. On his card the bouncy profile wastes 77 px of
+        // width, and the gain turns that into 57 px of height on a 421 px card - 13 % - which at his 120 Hz is a
+        // dozen-plus frames of thickening and relaxing instead of nothing at all.
+        val thick = (77 * MotionVariant.WASTED_WIDTH_TO_HEIGHT_GAIN).toInt()
+        assertTrue("only $thick px of height for a clipped bounce", thick >= 25)
+        assertTrue("and too much is a stretch, not a liquid: $thick", thick <= 421 * 4 / 10)
+    }
+
     // ---------------------------------------------------------------- b1406's three glitches
 
     @Test

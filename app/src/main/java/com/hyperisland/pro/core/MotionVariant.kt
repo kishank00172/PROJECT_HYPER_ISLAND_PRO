@@ -82,6 +82,31 @@ object MotionVariant {
      */
     fun viewExcessHalf(pinW: Int, finalW: Int): Int = ((pinW - finalW) / 2).coerceAtLeast(0)
 
+    /**
+     * How much wider than the target the drawn box may get before it is OFF THE SCREEN. The box grows
+     * symmetrically, so the window's edge is the limit, not the card's own size - and on the tester's device
+     * (21091116UI, 1080 px wide, expanded card 1067 px) that limit is 13 px in total while the bouncy profile
+     * asks for 89. Every frame of the promised bounce was being drawn 37 px past each edge of his display:
+     * invisible on the box, and visible only as the content row sliding sideways with the box's left edge. His
+     * round-30 report - "spring effect sirf icon pe hai, aur wo bhi left right" - is that, exactly.
+     */
+    fun visibleExcessRoomPx(screenW: Int, targetW: Int): Int = (screenW - targetW).coerceAtLeast(0)
+
+    /** The part of an overshoot the screen cannot show. Zero whenever there is room, so a narrow card keeps a
+     * real width bounce untouched. */
+    fun wastedWidth(w: Int, targetW: Int, roomW: Int): Int = (w - targetW - roomW).coerceAtLeast(0)
+
+    /** The width that is left after that part is taken back. */
+    fun clampedWidth(w: Int, targetW: Int, roomW: Int): Int = minOf(w, targetW + roomW)
+
+    /**
+     * Where the wasted width goes: into height, at this share. A liquid capsule that cannot get wider is still a
+     * liquid capsule - it thickens and relaxes - and the height has room on every phone, because the card hangs
+     * from the top of the screen. 0.75 rather than 1.0 so a 76 px width waste reads as 57 px of thickening on a
+     * 421 px card (13 %), clearly seen and not so much that the box looks like it is stretching.
+     */
+    const val WASTED_WIDTH_TO_HEIGHT_GAIN = 0.75f
+
     /** A percent slider that cannot smuggle in a nonsense value; shared by every new knob in the Lab. */
     fun clampPct(v: Int, lo: Int, hi: Int): Int = v.coerceIn(lo, hi)
 

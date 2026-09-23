@@ -555,6 +555,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphDamping = 1f
     private var morphDurationMs = 360L
     private var morphOvershootPx = 0
+    /** Total extra width the screen can show beyond the card's own width; see [MotionVariant.visibleExcessRoomPx]. */
+    private var morphRoomW = Int.MAX_VALUE
     private var morphFromH = 0
     private var morphToH = 0
     /** Claude's "asymmetric growth never covers the lens": the band the punch hole occupies, measured per morph. */
@@ -3606,6 +3608,7 @@ class HyperAccessibilityService : AccessibilityService() {
         morphCarryOn = false
         morphScaleOn = false
         morphGlassOn = false
+        morphRoomW = Int.MAX_VALUE
         // The two designs' geometry is a per-morph property, not a setting that leaks into the next draw: an
         // eased offset or a ripple blur still applied outside a morph is a card that has stopped obeying the
         // stage it is in.
@@ -3722,6 +3725,17 @@ class HyperAccessibilityService : AccessibilityService() {
                     if (settle > 0.0005f) bw = (bw * (1f + settle)).toInt()
                 }
                 setGlassBlur(rip * morphBlurPx * MotionVariant.RIPPLE_BLUR_FRACTION)
+            }
+            // The overshoot the screen cannot show is re-spent where there IS room: downward. Only on the way out
+            // (a collapse comes back inward and is never clipped), and only for the spring styles, so the four
+            // classics and any card with room take no change at all. At the end of the morph the excess is zero by
+            // definition, so the box still lands on exactly the size the settings asked for.
+            if (morphCarryGrowing && morphRoomW != Int.MAX_VALUE) {
+                val wasted = MotionVariant.wastedWidth(bw, morphToW, morphRoomW)
+                if (wasted > 0) {
+                    bw = MotionVariant.clampedWidth(bw, morphToW, morphRoomW)
+                    bh += (wasted * MotionVariant.WASTED_WIDTH_TO_HEIGHT_GAIN).toInt()
+                }
             }
             // Both: "cornerRadius = height / 2, radius ko independently animate mat karo". One rule instead of
             // a second animator, and it is what keeps a growing capsule a capsule; the final value is whatever
@@ -4083,12 +4097,18 @@ class HyperAccessibilityService : AccessibilityService() {
         // the box 0.0 %. So the view is widened by the analytic peak of THIS curve, and by nothing else - width
         // only, because the height leftover of a wrap-content card is what centres the row, and touching that
         // re-opens the vertical drift `lerpEven` was invented to close.
+        morphRoomW = if (MotionVariant.isSpring(morphVariant)) {
+            MotionVariant.visibleExcessRoomPx(resources.displayMetrics.widthPixels, maxOf(fromW, toW))
+        } else Int.MAX_VALUE
         morphOvershootPx = if (MotionVariant.isSpring(morphVariant)) {
             val peak = maxOf(fromW, toW) * MotionVariant.peakOvershoot(morphDamping)
             // His 100 -> 102 -> 100 is bigger than a 0.86-damped spring's tail, and the pulse that supplies it
             // needs the same headroom: clamp it and the settle is gone, silently, as before.
             val settle = maxOf(fromW, toW) * MotionVariant.DEFAULT_SETTLE
-            maxOf(peak, settle).toInt()
+            // And the headroom is capped at what his display can actually show, because a view wider than the
+            // window does not overflow the screen - it is clipped by it. The box then looks stuck at full width
+            // while the content, riding the box's off-screen left edge, keeps moving. That is what he saw.
+            minOf(maxOf(peak, settle).toInt(), morphRoomW)
         } else 0
         if (morphOvershootPx > 4) morphPinW = morphPinW!! + morphOvershootPx
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
@@ -4121,7 +4141,13 @@ class HyperAccessibilityService : AccessibilityService() {
         // the one control that silently deleted the praised icon morph from all four styles, which is precisely
         // the complaint. A property he has praised does not hide behind a checkbox he has to remember.
         morphIconRide = true
-        morphBlurPx = dp(GLASS_BLUR_DP).toFloat()
+        // The glass look used to defocus the labels while the box moved and sharpen them at the end. His verdict
+        // on b1415: "pill ko tap karo to smooth hai, but content starting mei blur rehta hai, fully expand pe
+        // clear, collapse mei bhi blur" - the smooth part is the style, the blur is a defect he has to look
+        // through. Apple's lensing bends the material *behind* a translucent panel; this island has nothing behind
+        // it, so the only thing my blur could bend was the text. Cut: the style keeps the timing he praised and
+        // stops touching the content views at all.
+        morphBlurPx = if (morphGlassOn) 0f else dp(GLASS_BLUR_DP).toFloat()
         morphContentDropPx = dp(AppSettings.getMorphContentDropDp(this)).toFloat()
         morphEntryDrop = AppSettings.getMorphEntry(this) == AppSettings.MORPH_ENTRY_DROP
         // The stagger fades the same views the blur is resolving; two entrances on one element is a third
@@ -4143,7 +4169,7 @@ class HyperAccessibilityService : AccessibilityService() {
             "toward=${if (morphTowardCard) "card" else "pill"} " +
                 "carry=${if (morphCarryOn) "on" else "off"} scale=${if (morphScaleOn) "%.2f".format(morphScaleFrom) else "off"} " +
                 "swap=${(morphSwapAt * 100).toInt()}% ride=classic(b1378) " +
-                "glass=${if (morphGlassOn) "on blur=${morphBlurPx.toInt()}px" else "off"} " +
+                "glass=${if (morphGlassOn) "on defocus=cut" else "off"} " +
                 "entry=${if (morphEntryDrop) "drop" else "centred"} drop=${AppSettings.getMorphContentDropDp(this)}dp " +
                 "stagger=${(morphStagger * 100).toInt()}% goneBy=${(morphOutBy * 100).toInt()}% " +
                 // The travel is still printed, as a fact about the box rather than a measured slot: 0 px means
@@ -4156,7 +4182,7 @@ class HyperAccessibilityService : AccessibilityService() {
             if (morphVariantOn) " variant=${AppSettings.getMorphStyleName(morphVariant)}" +
                 " profile=${MotionVariant.profileName(motionProfile)}" +
                 " response=${"%.2fs".format(morphResponseSec)} damping=${"%.2f".format(morphDamping)}" +
-                " overshoot=${morphOvershootPx}px gate=${(morphGate * 100).toInt()}%" +
+                " overshoot=${morphOvershootPx}px room=${if (morphRoomW == Int.MAX_VALUE) "-" else morphRoomW}px gate=${(morphGate * 100).toInt()}%" +
                 " magnet=${(morphMagnet * 100).toInt()}% squeeze=${(morphSqueeze * 100).toInt()}%" +
                 " cutout=${cutoutCenterX.toInt()}/${cutoutHalfW.toInt()}px bias=${morphCutoutBiasPx.toInt()}px" +
                 " excess=${morphViewExcessHalf()}px"
