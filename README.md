@@ -93,6 +93,8 @@ whole history and every fix so far went straight to `main`; branches only added 
 `62e1b5aed56d426472795aa3aea0654716243a4b34af3c55f79f5c6a2f15ec71`) is the build to judge the two new looks on:
 it is b1406 with the three defects his own trace exposed, all of them mine, plus the shade probe off the main
 thread. `docs/AI-MOTION-SHOWDOWN.md` §0.5 has the numbers.
+
+Frame-by-frame tables for both new looks, with each design's own wording next to the function that implements it and the pixels his device actually gets (366 x 104 pill, 1067 x 421 card, 60 Hz): **`docs/THE-TWO-MOTIONS.md`**. That doc is also where the two defects it exposed are written down - a spring sized against 720 ms on a 360 ms animator, and phases measured on a quantity that front-loads.
 **What his log said, against what I had claimed.** Frames were fine (median `avg=15ms`, `frames=24` on the new
 styles, identical to the accepted ones), so "glitchy" was geometry: (1) `cutout=540/40px` on a 1080 px screen with
 the island centred at 540 - Claude's rule as written demanded a 224 px shove there, the collapse obeyed, and the
