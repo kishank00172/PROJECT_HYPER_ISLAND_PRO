@@ -87,9 +87,53 @@ whole history and every fix so far went straight to `main`; branches only added 
 - `ci-<run>` tags accumulate; delete the old ones you no longer need (keep the one pointed at by
   `last-good`).
 
-## Current position - updated 2026-09-22 (read me first if you lost the plot)
+## Current position - updated 2026-09-23 (read me first if you lost the plot)
 
-`main` head carries the **b1396** round (release `ci-396`, code `befef0e`..`e04df63`, 107 JVM tests green; APK
+`main` head carries the **b1399** round (release `ci-399`, code `793b331`..`d246e3d`, 118 JVM tests green; APK
+2 845 414 B, sha256 `b0856bf75f17928cff77b52397354ee1dc47dc4b36126e144c123b6cdd612d05`). He did not judge the ride
+and the roll; he answered with two demands and three bugs, and all four are visible in his own capture
+(`hip-log-20260923-163536.txt`, 574 lines), which is now written up in `docs/ISLAND-LIFECYCLE.md`:
+
+- **"Abhi sirf 3 hai … research karke kuchh esme naya banao"** - true, and worth admitting plainly: the previous
+  round added a mechanism and five sliders, but the *style list* still had three entries. So the Lab has a fourth
+  form, **per-part flight** (`AppSettings.MORPH_STYLE_PER_PART`), copied from Apple's per-view content
+  transitions (`move(edge:)`, `push(from:)`, plain `opacity` - each element along one edge) and from the way M3's
+  container transform stages its inner views: the title pushes in on the pill's edge, the message fades through
+  with a short rise, the action tiles rise from the bottom edge last, and the row itself is neither faded nor
+  scaled - mixing a whole-row fade with per-element windows hides which element is doing what, which is the whole
+  point of the form. `MorphCarry.contentAlpha` became `contentOpen`: one number (exit deadline folded in) that
+  both the opacity and every part window read, so a collapse plays the windows backwards for free - the buttons
+  leave first, the title is the last thing standing.
+- **"quick action use kiya … island ko wapas pill banna chahiye tha, wo nahi hua"** - the path had no closing
+  trigger and no instrumentation (zero `[ACTION]` lines in 574). Two faults: an earlier round removed the hide
+  timer and never replaced the event it was waiting for, and the cancel that *did* arrive missed, because
+  removals carry the status-bar key while pages are filed under the conversation key
+  (`dismiss: no page for key=com.instagram.android|thread|kish.ank001 ring=1`). Now: the acting app's window coming
+  forward collapses the island (`STAGE2_PING`, or idle on an empty ring) with a 4 s bound for actions that open no
+  window - standing down if the card was already closed or moved to another page - the removal falls back to the
+  key stored with the page, and every step logs. Pages are still never deleted by us.
+- **His own reply came back at him as a card** (`send tapped text=hiii` -> 4.9 s later `new page 'You'`,
+  `COUNT 1->2`, `[MORPH] start notify->ping`): `isMatch` rejected the entry on `MIN_ECHO_TEXT` before any rule
+  could look at it, so the four-character reply never reached the two tiers that could catch it. A self marker
+  (title exactly `You`/`Me`) now suppresses at any length - it is the app announcing the sender, not a claim about
+  my sentence - whole-text equality is still required, the length floor stays for the text-only tiers, the
+  Instagram window went 2.5 s -> 6 s because 4.9 s is what the phone did, and every suppression writes
+  `[ECHO] dropped own reply ...` into the trace.
+- **The log itself** - he could not read it, and the noise had a source: my round-21 shelf probe, doing
+  `getWindows()` + `getRoot()` (binder, main thread) for every window change on the phone: 220 of 574 lines,
+  24-37 ms each, one of them at `t=0.76` *inside* the collapse it was measuring. It now runs only for events that
+  could be the shelf, at most twice a second, nested so the ingestion fallback still runs. The viewer no longer
+  fights a finger: the tail moves only while it is at the bottom, nothing touches the scroll between
+  `ACTION_DOWN` and `ACTION_UP` (the old swap + restored offset + `post`-delayed `fullScroll` is exactly the
+  "kabhi upar kabhi niche" teleport), identical consecutive lines read as `... (x9)`, and `[STALL]`/`[FRAME]`
+  hide behind `QUIET` - display only; the buffer and the export still carry every line.
+
+Answered in the same round, because it was asked: the trace is not a recorder that starts on a change. The
+service writes a line as it decides things, all the time it is alive; the only periodic lines are the sampler's,
+and those are now hidden by default. `docs/ISLAND-LIFECYCLE.md` is the reasoning for this round;
+`docs/MOTION-RESEARCH.md` gained the sources for the fourth form (and the `numericText` row is no longer a wish).
+
+Before that: **b1396** round (release `ci-396`, code `befef0e`..`e04df63`, 107 JVM tests green; APK
 2 834 810 B, sha256 `22fb68200ec6da89f377b56e867e0b348d98f73530e65275049729341b46eae4`). He noticed that the icon
 transformation had stopped being seamless - "pehle ekdum seamlessly tha ... abhi notice ho ja rha hai change" - and
 he was right for a structural reason: the ride had never owned anything. Its travel was a side effect of the row's
