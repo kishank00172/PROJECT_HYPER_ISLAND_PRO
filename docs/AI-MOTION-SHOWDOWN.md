@@ -130,10 +130,10 @@ again and nobody will be able to tell why from looking at it.
 | His claim | Verdict | Where it lives | What he can feel |
 |---|---|---|---|
 | Phase A "Compression: width 97 %, height 106 %, 30–45 ms" | **implemented, literally** | `compression/compressedWidth/compressedHeight` — a triangle over the first 15 % of travel, `1 − c` and `1 + 2c`, with the Lab's "phase A squeeze" slider at 3 % | the pill visibly loads tension before it opens, and only on the way out (see §5 of MOTION-RESEARCH for why a squeeze inside a clamp is a hitch) |
-| Phase B "Bloom: 220–280 ms, spring, damping 0.82–0.9, overshoot very small" | **implemented** | `responseFor(HYPERMORPH, …) = 0.26 s`, `dampingFor = 0.86` | a fast, fat, almost-critically-damped opening |
+| Phase B "Bloom: 220–280 ms, spring, damping 0.82–0.9, overshoot very small" | **implemented** | `responseScaleFor(HYPERMORPH) = 0.62` of the window = 236 ms at 380, `dampingFor = 0.86` | a fast, fat, almost-critically-damped opening |
 | "cornerRadius = height/2, radius ko independently animate mat karo" | **implemented, shared with style 4** | same `tensionRadius` | — |
 | Phase C "content migration — same element, same trajectory, no fade-replace" | **already the praised behaviour, kept as-is** | `applyMorphCarry`'s row offset + icon ride (b1378 mechanism) | the one phase where his design and the app agreed before I touched anything; content scale is deliberately OFF for this style so it *is* a migration and not a zoom |
-| Phase D "micro-settle 100→102→100, elastic not trampoline" | **implemented, but not as his spring's tail** | `microSettle(p, 18 %, amount)`: a sine pulse on the width over the last fifth of the bloom, ending at exactly zero | a visible "it landed" tap, no ringing. His two numbers are inconsistent - a spring at ζ 0.86 overshoots ~0.5 %, i.e. 4 px on a 900 px box, which is not the 100→102 he described - so the pulse is explicit and the pin is widened to fit it, since an un-clamped curve is the only place this app can show overshoot at all |
+| Phase D "micro-settle 100→102→100, elastic not trampoline" | **implemented, but not as his spring's tail** | `microSettle(t, 30 % of the clock, amount)`: a sine pulse on the width over the last fifth of the bloom, ending at exactly zero | a visible "it landed" tap, no ringing. His two numbers are inconsistent - a spring at ζ 0.86 overshoots ~0.5 %, i.e. 4 px on a 900 px box, which is not the 100→102 he described - so the pulse is explicit and the pin is widened to fit it, since an un-clamped curve is the only place this app can show overshoot at all |
 | Phase E "staged pill return: content exit 100–140 ms, container collapse 170–210 ms, settle 20–30 ms" | **implemented** | `morphOutBy = 0.65f` forced for this style on collapse, response 0.19 s | the card empties, *then* shrinks. His "contraction faster than expansion" is the test's name |
 | "Magnetic content: velocity ∝ attraction to the pill's anchors" | **implemented** | `magnetic(t, pull) = t^(1+pull)` applied to the row's own offset, Lab slider "pill pulls the content home by" | the content hangs, then is yanked into the pill. 0 % is exactly today's behaviour, which is the point of a knob |
 | "Energy ripple: scale + clip + slight blur, 40–70 ms, feel not see" | **implemented (borrowing the glass plumbing)** | `ripple()` drives a 1.2 % breath on the box and `setGlassBlur(rip * morphBlurPx)` | a wet flash across the surface as it opens; reuses the quantised `RenderEffect` so it costs no new per-frame work |
@@ -163,6 +163,44 @@ again and nobody will be able to tell why from looking at it.
    config service ever arrives, `responseFor`/`dampingFor` are already the seam — the delivery is plumbing, not
    a redesign. A build that phones home for its feel would also stop being testable offline, which is how he
    uses it.
+
+---
+
+## 6. Who asked for what - the ledger, since the question was asked directly
+
+Round 30 came with a fair question: *"etne jyada faltu animation, kya un AIs ne suggest kiye? Ya saara tumhara
+kiya dhara hai?"* Counting the two tables above, line by line:
+
+| | asked for | implemented as specified | adapted | refused / n-a |
+|---|---|---|---|---|
+| Claude (liquid capsule) | 11 claims | 6 | 2 (`SpringAnimation` -> closed-form; Firebase -> three prefs) | 3 (metaball, swipe-velocity handoff, "region update beech mein") |
+| ChatGPT (hyper morph) | 12 claims | 9 | 2 (Compose shared-bounds, the "protocol" format) | 1 (nothing refused; his Phase C was already shipped) |
+
+**Twenty-three items between them, and every one of them is a *look*: a curve, a gate, a squash, a blur, a radius
+rule, a staged return.** Nothing in either design mentions a slider, a ramp, a floor, a pin, an inset, a headroom
+correction, a stall meter, or a test. All of that is mine, and here is the honest classification of the biggest
+pieces:
+
+* **Repair of my own damage** - `setContentPinnedForMorph`'s width pin, `viewExcessHalf`, the `MIN_MORPH_WINDOW_MS`
+  floor, `morphWindowFor`, the ripple's expand-only rule, the cutout containment guard and its `dp(20)` cap, the
+  `avoidRamp`, and now `visibleExcessRoomPx`. Six of those nine exist because an earlier round of mine wrote a rule
+  that clipped, cut, snapped or slid something. They are load-bearing now, but they are not features, and calling
+  them "the animation" was misleading.
+* **What he explicitly asked for** - the TestLab knobs (squeeze, gate, magnet, bias, profile), the readable
+  `[MORPH]`/`[STALL]` trace, reasoning in a repo doc. The knobs are why the squeeze slider exists at all; the
+  specs never asked for a judgement surface, he did.
+* **Genuinely extra, and the ones I would defend** - `peakOvershoot` as a measured constant, the frame-count budget
+  from the real refresh rate, the shelf probe moving off the main thread. The last one passed in this round's log
+  with 0 shade-state calls on the main thread where b1406 had 80.
+* **Genuinely extra, and the ones that should go if he says so** - nothing in the motion path. If the two styles
+  still do not earn their place after this build, the right move is to delete styles 4 and 5 (one constant, five
+  radios, ~180 lines) rather than to keep tuning. That is a real option and it stays on the table.
+
+So: their ideas were few and specific; the volume he is reacting to is mostly my scaffolding, and the reason it
+grew is that the specs' numbers did not survive contact with a 1080 px screen, a wrap-content card and a 120 Hz
+panel that my code kept re-measuring. The fix for that is not more scaffolding; it is the two cuts in this round -
+draw the spring where the screen can show it, and stop blurring the text.
+
 
 ---
 

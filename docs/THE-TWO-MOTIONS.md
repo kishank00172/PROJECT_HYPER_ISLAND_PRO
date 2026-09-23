@@ -264,8 +264,74 @@ and it is the reason both are now asserted against the curve, not written in pro
   values instead of the 60 %-default's gentle lag.
 * The squeeze slider's stored value overrides the new default: if it reads 3, that is what runs.
 
-## 7. What is still unproven
+## 7. Round 30: the bounce had nowhere to go, and that was the whole complaint
 
-`style=glass settle` appears **0 times** in his b1406 log, so that look has never been judged by him - it
-is not confirmed working, only confirmed not-crashing. The b1401 ride verdict, the round-25 items and the
-A-vs-B comparison are also still owed by him. This doc claims what the frames do, not what he will feel.
+His second log (b1415, `model=21091116UI`, 1131 lines, 111 morphs: 68 glass settle, 29 liquid, 14 hyper) answered
+the question the frame tables could not. He wrote:
+
+> Liquid capsule mei jo spring effect hai wo sirf only icon pe hai (expanded)? And wo bhi left right?
+
+That is not him failing to notice it. That is the geometry:
+
+* his panel is **1080 px** wide and his expanded card is **1067 px**;
+* the bouncy profile's spring asks for 1157 px, and the log shows the machine dutifully preparing for it -
+  `overshoot=89px excess=44px`;
+* **13 px** of that exists on his screen. `visibleExcessRoomPx(1080, 1067) = 13`.
+
+So from about frame 16 the box was 1155 px wide inside a 1080 px window: not an overflow, a **clip**. Both vertical
+edges sat 37 px outside the display, where nothing can be seen. Meanwhile `applyMorphCarry` kept anchoring the
+content row to the box's left inner edge, and that edge *did* keep moving - off-screen and back. The result is a
+sentence I had no answer for until this log: **the box appears to hit a wall at full width and only the icon
+slides left-right.** Which is precisely what he saw, and it is why my tables were not enough: they described the
+curve, not the rectangle the display is allowed to show.
+
+The fix re-spends the impossible width as possible height (`WASTED_WIDTH_TO_HEIGHT_GAIN = 0.75`, expand-only,
+spring-styles-only, zero at t=1 so the box still lands exact). On his device, at the 120 Hz his panel reported for
+most of this trace (`at=120:355`, 46 frames in the 380 ms window):
+
+| frame | spring | box drawn, before | box drawn, after |
+|---|---|---|---|
+| 15 | 1.009 | 1074 x 424 | 1074 x 424 |
+| 18 | 1.070 | 1141 x 444 (61 px off-screen) | **1080 x 471** |
+| 20-21 | 1.083 | 1155 x 448 (75 px off each side) | **1080 x 482** |
+| 26 | 1.055 | 1134 x 446 | **1080 x 459** |
+| 33 | 1.008 | 1074 x 424 | 1074 x 424 |
+| 45 | 1.000 | 1067 x 421 | 1067 x 421 |
+
+The card thickens by **57 px** (13 % of 421) over ~14 frames and relaxes - the liquid look, in the one direction
+that has room. `excess=` drops from 44 px to 6 px per side, which also removes the sideways anchor shift he noticed
+as the icon's left-right. The hyper morph's settle tap gets the same treatment: 26 px of width it cannot show
+becomes a +12 px vertical tap on frames 34-42, and its phase-A squash was never affected (it *shrinks* width, so
+the screen cannot clip it - that is why 97 %/106 % survived while 102 % did not).
+
+Two honest notes on this. One: **silky still overshoots 11 px and gets no redirect** (11 < 13 px of room) - by
+design it is the subtle preset, and on this card it will still read as almost nothing. Use bouncy to judge the
+style. Two: the height-only bounce is a *consequence of his width choice* (407 dp expanded on a 411 dp screen). On a
+narrower card the width bounce comes back by itself and the redirect switches off - `wastedWidth` returns 0 and the
+test pins that as a no-op case, so nobody with a 700 px card gets a vertical substitute for a horizontal motion
+they could already see.
+
+## 8. Round 30: what his first `glass settle` run said
+
+68 morphs, and the verdict was: tap from the pill is **smooth**, but "content starting mei blur rehta hai, fully
+expand pe clear and collapse mei bhi blur". The blur was my addition, not a design requirement: I had read
+Apple's liquid-glass lensing as "defocus the island while it morphs", and implemented it on the views that
+*draw* - the header, title, message and action strip. But their lensing bends the material **behind** a
+translucent panel; this island has nothing behind it. The only thing my `RenderEffect` could bend was his text, so
+he spent the whole expand and the whole collapse reading a defocused label. `morphBlurPx` is now 0 for the glass
+style (`[MORPH] start` prints `glass=on defocus=cut`), the timing he praised is untouched, and the ripple keeps its
+blur because GPT asked for that one in words. This is the second time a "material" idea of mine had to be cut
+because on this surface material has nothing to be material about - the first was the metaball note in §3.
+
+**And one thing from this log that worked:** `checkNotificationShadeState` appears **0 times** in 1131 lines (it
+was 80 calls and 3 750 ms in b1406, inside 29 of 74 morph windows). The off-main-thread shelf probe passed its
+acceptance test with nobody watching it.
+
+## 9. What is still unproven
+
+
+The round-30 verdict on the two new looks is not in yet: the build that has the room clamp and the blur cut is
+being delivered against this log, so his next trace is the first one that tests it. What is still owed: whether the
+thickening reads as liquid or as a card that does not fit, whether hyper's tap is now distinct from it, the b1401
+ride verdict and the round-25 items. Everything in sections 1-3 is arithmetic from the shipped functions; this doc
+has been wrong three times in exactly the way that matters - it described the curve, and the device has an edge.
