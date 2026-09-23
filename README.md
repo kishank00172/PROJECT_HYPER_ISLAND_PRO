@@ -89,9 +89,17 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-23 (read me first if you lost the plot)
 
-`main` head carries the **b1402** round (release `ci-402`): the two outside designs he benchmarked this app
-against are now **two selectable looks**, side by side in the style list, plus the fix that explains his last
+**b1406** (release `ci-406`, code `361eef7`, 138 JVM tests green, APK 2 866 170 B, sha256
+`76c72e8cf2d94ec86e5b65a57b933a028f980a8a111467801173ccbc66280e1d`): the two outside designs he benchmarked this
+app against are now **two selectable looks**, side by side in the style list, plus the fix that explains his last
 verdict. Full claim-by-claim mapping: **`docs/AI-MOTION-SHOWDOWN.md`**.
+
+Four pushes stood between the plan and that APK, and every failure was mine rather than CI's: an unescaped `"`
+inside a `android:text="…"` attribute (aapt died before Kotlin even ran), then `android.view.animation
+.TimeInterpolator` when the type lives in `android.animation`, then a guessed `DisplayCutout.getBoundingBoxes()`
+where the SDK says `getBoundingRects()`. The house rule that the compiler is the cheap reviewer held again - and
+this round it caught them in 30 seconds instead of costing a build-and-flash cycle. This paragraph arrived after
+the APK was built, so the release tagged from *this* commit carries the same code; the file to install is `ci-406`.
 
 **First, the bug his complaint was actually about.** "4th mei kuchh to alag hai he nahi, 3rd jaisa he to hai"
 was not a tuning miss: `AppSettings` clamped `KEY_MORPH_STYLE` to 0..2 in *both* the getter and the setter, so
