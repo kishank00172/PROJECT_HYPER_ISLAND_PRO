@@ -172,16 +172,16 @@ object ReplyEchoSuppressor {
             if (matchIndex >= 0) {
                 val hit = pending[matchIndex]
                 pending.removeAt(matchIndex)
-                // Into the trace log as well as logcat: "my reply came back at me" is only debuggable if the
-                // drop appears in the same file as the ingest that tried to show it.
+                // One line per suppression, and into the trace buffer rather than straight to logcat: "a message
+                // vanished and nobody knew why" was the actual bug report, the trace is already mirrored to
+                // `logcat -s HIP_TRACE`, and a second logging path is one the tester cannot export. That also
+                // keeps this object testable - `android.util.Log` is not mocked on the JVM, and the first run of
+                // these tests found that out by throwing.
                 com.hyperisland.pro.core.TraceLog.line(
                     "ECHO",
-                    "dropped own reply from $pkg thread=\"$title\" text=\"${message.take(40)}\" age=${now - hit.createdAt}ms"
+                    "dropped own reply from $pkg thread=\"$title\" text=\"${message.take(60)}\" " +
+                        "sent=\"${hit.replyText.take(60)}\" age=${now - hit.createdAt}ms"
                 )
-                // One line per suppression, always on: "a message vanished and nobody knew why" was
-                // the actual bug report. Filtered out of release noise by level if that ever matters.
-                Log.i(TAG, "SUPPRESSED echo pkg=$pkg thread=\"$title\" text=\"${message.take(60)}\" " +
-                    "sent=\"${hit.replyText.take(60)}\" ageMs=${now - hit.createdAt}")
                 true
             } else {
                 false

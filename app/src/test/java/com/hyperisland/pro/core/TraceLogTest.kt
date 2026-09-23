@@ -118,8 +118,11 @@ class TraceLogTest {
         repeat(25) { TraceLog.line("TOUCH", "line$it") }
         val last = TraceLog.tailLines(5)
         assertEquals(5, last.size)
-        assertEquals("line21", last.first().substringAfter("] "))
-        assertEquals("line25", last.last().substringAfter("] "))
+        // 25 lines are line0..line24, so the last five start at line20: the tail is a slice off the end, not a
+        // count-up from 1. (This assertion was wrong, not the code - CI caught it, and the number matters because
+        // the whole point of the tail is that a reader can line it up against a sequence number in the log.)
+        assertEquals("line20", last.first().substringAfter("] "))
+        assertEquals("line24", last.last().substringAfter("] "))
         assertEquals(25, TraceLog.size())
         assertEquals(25, TraceLog.tailLines(100).size)
     }
