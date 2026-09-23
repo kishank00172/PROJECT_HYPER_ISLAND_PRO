@@ -38,10 +38,10 @@ instead of fading it in place.
 | the spec said | the code does | the phone shows |
 |---|---|---|
 | "morph 240-320 ms, response 0.20 s, damping 0.82-0.9" | `responseScaleFor(HYPERMORPH) = 0.62`, `dampingFor = 0.86` | arrives 0.90 on frame 7, lands 1067 on frame 10, +27 px of overshoot total - faster and flatter than the liquid capsule's arrival |
-| "Phase A: container compression 97 % W / 106 % H, 30-45 ms" | `compression(tc, COMPRESSION_WINDOW = 0.20, morphSqueeze)`, expand only, Lab 0-8 % (default 5) | frame 4 the box is **755 x 322** where the spring alone says 842 x 315: 87 px narrower, 7 px taller, then it opens out. At his stored 3 % it is 2.7 % - still ~50 px on this card, and this is the frame where the two styles genuinely differ |
+| "Phase A: container compression 97 % W / 106 % H, 30-45 ms" | `compression(tc, COMPRESSION_WINDOW = 0.20, morphSqueeze)`, expand only, Lab 0-8 % (default 5) | frame 4 the box is **756 x 324** where the same spring with no squeeze gives 788 x 294: **32 px narrower, 30 px taller**, peaking at 38 x 30 on frame 5, then it opens out. At the 3 % his Lab has stored the same frame is 772 x 312 - 16 x 18: still over the ~10 px threshold, half the default's |
 | "Phase B: energy ripple, blur pass, 40-70 ms" | `ripple(tc, RIPPLE_WINDOW = 0.20)` -> `setGlassBlur(rip x blur x 0.45)`, expand only | 4 frames of blur, peak 7.3 px, on the text only (the three content views + the action strip), quantised so it costs no extra pass |
 | "Phase D: micro-settle 100 -> 102 -> 100" | `microSettle(tc, SETTLE_WINDOW = 0.30, max(1.5 %, squeeze/2))` | frames 15-21: 1068 -> **1093** -> 1068 px, one visible tap on the container after the shape has arrived |
-| "collapse: content is *pulled* toward the pill, magnetic" | `magnetic(1 - open, morphMagnet)` at the default 0.6, `goneBy` forced to 0.65 | row Y 0 -> -9 -> -37 -> -84 -> -141 -> -205 while alpha drops 1.0 -> 0.74 -> 0.32 -> 0.00 at frame 3: the text moves as it leaves, it does not evaporate |
+| "collapse: content is *pulled* toward the pill, magnetic" | `magnetic(1 - open, morphMagnet)` at the default 0.6, `goneBy` forced to 0.65 | row Y 0 -> -11 -> -51 -> -100 -> -140 -> -205 across frames 1-6 while alpha drops 1.00 -> 0.76 -> 0.36 -> 0.02 over frames 1-3: the text moves as it leaves, it does not evaporate |
 | "no squash on the way back" | compression, ripple and settle are inside `if (morphCarryGrowing)` | the collapse is a clean fast shrink - and that asymmetry is what makes the two styles recognisably not the same feature |
 
 ## 3. The frames, all of them
@@ -258,7 +258,7 @@ and it is the reason both are now asserted against the curve, not written in pro
 
 * Motion style: **Liquid capsule (Claude)** vs **Hyper morph (ChatGPT)**, A/B them by switching once each.
 * Spring profile: **bouncy** (the only preset whose overshoot is unmissable at 60 Hz - 59 px).
-* Squeeze: **8** (the top). At 3-5 the squash is real but it is a nudge; 8 is 138 px of width on this card.
+* Squeeze: **8** (the top). 8 gives ~63 px narrower and ~48 px taller at the peak, against 32 x 30 at the default 5 and 16 x 18 at his stored 3 - the width part of a small squeeze is less than people expect, the height part (+106 % as specified) is what the eye catches.
 * Gate: **85** so the content visibly waits for the shape; 0 makes the two styles much harder to tell apart.
 * Magnet **150** and content drop **40** on the collapse - the magnetic pull is 205 px of travel at those
   values instead of the 60 %-default's gentle lag.
