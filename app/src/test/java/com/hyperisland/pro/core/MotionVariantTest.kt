@@ -174,25 +174,33 @@ class MotionVariantTest {
     }
 
     @Test
-    fun growthDodgesAnOffCentreCamera() {
-        val cutoutCenter = 700f
-        val cutoutHalf = 30f
-        // Box centred left of the lens and wide enough to reach it: push it left (negative), clear of it.
-        val left = MotionVariant.cutoutShift(600f, 140f, cutoutCenter, cutoutHalf, 0f)
+    fun growthDodgesAnOffCentreCameraOnlyWhereDodgingIsPossible() {
+        // CI run 407 failed the previous version of this test, and the failure was the lesson: I had written a
+        // case where dodging cannot work - a lens at 670..730 *inside* a box spanning 460..740 - and expected a
+        // leftward shove out of it. "expected a leftward dodge, got 0.0" was my test being wrong about the world
+        // in exactly the way the shipped rule was. So the cases are now stated the way the rule means them:
+        // overlapping an edge, move off that edge; contained, do nothing; nowhere near, do nothing.
+        val boxHalf = 140f
+        // A) the lens sits inside the box's span: uncapturable sideways, so inert. On his 11i (screen 1080,
+        // lens at 540, island centred at 540) this is every width the island ever reaches - which is precisely
+        // why b1406's 224 px "avoidance" was a jump and not an avoidance.
+        assertEquals(0f, MotionVariant.cutoutShift(600f, boxHalf, 700f, 30f, 0f), 1e-6f)
+        // B) the lens overlaps the box's RIGHT edge (box 460..740, lens 690..750): move left until the edges
+        // part, and they have to actually part - a nudge that leaves 1 px of overlap is not a fix.
+        val left = MotionVariant.cutoutShift(600f, boxHalf, 720f, 30f, 0f)
         assertTrue("expected a leftward dodge, got $left", left < 0f)
-        assertTrue("600 - ${abs(left)} must clear the lens", abs(600f + left - cutoutCenter) >= 140f + cutoutHalf)
-        // Box on the right of the lens: push right instead.
-        assertTrue(MotionVariant.cutoutShift(800f, 140f, cutoutCenter, cutoutHalf, 0f) > 0f)
-        // No overlap: the rule must be inert, not merely small. Most morphs are here, and a drift would be worse
-        // than the problem it is solving.
-        assertEquals(0f, MotionVariant.cutoutShift(100f, 140f, cutoutCenter, cutoutHalf, 0f), 1e-6f)
-        // No cutout reported (an emulator, or a phone with the band in the status bar): bias only, so the Lab
-        // slider still has an effect on the device he tests on.
-        assertEquals(18f, MotionVariant.cutoutShift(100f, 140f, 0f, 0f, 18f), 1e-6f)
+        assertTrue("right edge must clear the lens", 600f + left + boxHalf <= 690f)
+        // C) mirrored: the lens overlaps the LEFT edge (box 760..1040, lens 750..810), so push right.
+        val right = MotionVariant.cutoutShift(900f, boxHalf, 780f, 30f, 0f)
+        assertTrue("expected a rightward dodge, got $right", right > 0f)
+        assertTrue("left edge must clear the lens", 900f + right - boxHalf >= 810f)
+        // D) nothing near the island: inert, not merely small. Most morphs are here, and a drift would be worse
+        // than the problem this exists to solve.
+        assertEquals(0f, MotionVariant.cutoutShift(100f, boxHalf, 700f, 30f, 0f), 1e-6f)
+        // E) a device that reports no cutout band at all (emulator, or the band hidden in the status bar): the
+        // Lab's bias passes through, so the rule stays testable on the phone he actually has.
+        assertEquals(18f, MotionVariant.cutoutShift(100f, boxHalf, 0f, 0f, 18f), 1e-6f)
     }
-
-    // ---------------------------------------------------------------- ChatGPT's phases
-
     @Test
     fun compressionHitsHisNumbersAndIsGoneByTheBloom() {
         val w = MotionVariant.COMPRESSION_WINDOW
