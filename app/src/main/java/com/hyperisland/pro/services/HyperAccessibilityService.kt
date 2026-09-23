@@ -3758,7 +3758,12 @@ class HyperAccessibilityService : AccessibilityService() {
             // width the moment the morph lands - a text reflow in the last frame, which is b1343's "text finally
             // sets with a snap" walking back in through a door I had just opened. Pin the row to the final card
             // width and the two numbers are the same number at the hand-off.
-            val wantW = if (pinned) morphFinalW else ViewGroup.LayoutParams.MATCH_PARENT
+            // Note the `maxOf`: on a collapse the row is *supposed* to be measured at the card's width and
+            // re-measured at the pill's when the morph lands - that reflow is old, accepted, and hidden by the
+            // fade. The only re-measuring that has to be prevented is the one my own headroom introduces, so the
+            // row is pinned to the natural width of the surface (start and target, whichever is larger), and for
+            // the four classic styles that number is exactly the view's width: nothing changes for them.
+            val wantW = if (pinned) maxOf(morphFinalW, morphFromW) else ViewGroup.LayoutParams.MATCH_PARENT
             if (lp.height != want || lp.width != wantW) {
                 lp.height = want; lp.width = wantW
                 host.layoutParams = lp
