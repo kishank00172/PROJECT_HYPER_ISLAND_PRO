@@ -64,6 +64,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.PathInterpolator
+import android.view.animation.TimeInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -357,7 +358,7 @@ class HyperAccessibilityService : AccessibilityService() {
      * frame time instead. For the four original styles it *is* the house curve, unchanged - a new design must
      * never be able to rewrite a feel he has already judged, which is the rule that broke once before.
      */
-    private val morphCurve = android.view.animation.TimeInterpolator { f ->
+    private val morphCurve = TimeInterpolator { f: Float ->
         if (MotionVariant.isSpring(morphVariant))
             MotionVariant.spring(f, morphDurationMs, morphResponseSec, morphDamping)
         else morphInterpolator.getInterpolation(f)
@@ -3687,7 +3688,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val cut = root.rootWindowInsets?.displayCutout ?: return
         var left = Int.MAX_VALUE
         var right = 0
-        for (b in cut.boundingBoxes) {
+        for (b in cut.boundingRects) {
             if (b.top > dp(90)) continue // a bottom gesture inset is not a camera
             left = minOf(left, b.left)
             right = maxOf(right, b.right)
