@@ -214,7 +214,14 @@ object MotionVariant {
      * is not a feel, it is a dropped frame with a scale on it. 0.22 of 380 ms is 84 ms, five frames, and the
      * compression can actually be seen to happen.
      */
-    const val COMPRESSION_WINDOW = 0.22f
+    /**
+     * The three envelope windows are fractions of the CLOCK. This is a correction, not a preference: in b1411
+     * they were read off the shape's progress, and a spring's progress is front-loaded - 0 -> 0.11 -> 0.32 in
+     * the first two frames - so a "30-45 ms" compression got sampled once, past its peak, and the ripple became a
+     * single blurred frame. A duration is a duration; measure it on the clock. (The gate stays on the shape,
+     * because it is Claude's "~60% of target width" - a position, not a time.)
+     */
+    const val COMPRESSION_WINDOW = 0.25f
     const val DEFAULT_SQUEEZE = 0.05f
 
     /**
@@ -230,8 +237,8 @@ object MotionVariant {
         return amount * sin(PI.toFloat() * ((p - (1f - w)) / w))
     }
 
-    const val SETTLE_WINDOW = 0.18f
-    const val DEFAULT_SETTLE = 0.02f
+    const val SETTLE_WINDOW = 0.30f
+    const val DEFAULT_SETTLE = 0.025f
 
     /**
      * The signature idea from the second design: on the way back the content is not interpolated to the pill,
@@ -252,7 +259,7 @@ object MotionVariant {
         return sin(PI.toFloat() * t / w)
     }
 
-    const val RIPPLE_WINDOW = 0.22f
+    const val RIPPLE_WINDOW = 0.20f
     /** The ripple's blur as a fraction of the glass style's, because "feel it, not see it" is a fraction and not
      * a switch: at full glass strength the text visibly fogs, which is a second effect on the same element - and
      * running it on a collapse too, as b1406 did, is a blur flash at the start of every return. */
@@ -285,15 +292,35 @@ object MotionVariant {
      * collapse is deliberately quicker than an expansion in both: opening says "I am opening", closing says
      * "back to business".
      */
-    fun responseFor(style: Int, profile: Int, towardCard: Boolean): Float {
+    fun responseScaleFor(style: Int, profile: Int, towardCard: Boolean): Float {
         val p = clampProfile(profile)
-        if (style == AppSettings.MORPH_STYLE_HYPERMORPH) return if (towardCard) 0.20f else 0.145f
+        if (style == AppSettings.MORPH_STYLE_HYPERMORPH) {
+            // GPT's own ratio: 0.20 s of response inside his 320 ms morph, 0.145 s inside the collapse.
+            return if (towardCard) 0.62f else 0.45f
+        }
         return when (p) {
-            PROFILE_SNAPPY -> if (towardCard) 0.215f else 0.15f
-            PROFILE_BOUNCY -> if (towardCard) 0.24f else 0.19f
-            else -> if (towardCard) 0.23f else 0.16f
+            // Claude's three profiles, as his table gives them: reach and stop, one small settle, a real bounce.
+            // Not ordered the way Claude's response column is, and that is deliberate: his table pairs a longer
+            // response with a bouncier ratio, and the two together push the settle past the last frame (0.807 x
+            // response / damping is the settle, and 0.38 s at zeta 0.5 needs 0.62 s of animation). The invariant
+            // is "the spring comes home inside its window"; the response that satisfies it shrinks as the bounce
+            // grows, so the profiles are ordered by amplitude, which is what he can see, not by response.
+            PROFILE_SNAPPY -> if (towardCard) 0.85f else 0.45f
+            PROFILE_BOUNCY -> if (towardCard) 0.72f else 0.55f
+            else -> if (towardCard) 0.80f else 0.48f
         }
     }
+
+    /**
+     * [responseScaleFor] turned into seconds for the window this morph actually got, which is what [spring] wants.
+     *
+     * The scale, not a constant, because his duration slider runs 120-650 ms and the two designs' response numbers
+     * were written next to their own durations (Claude: 0.30-0.34 s in a 380-450 ms morph; GPT: 0.20 s in 320 ms).
+     * b1411 hard-coded the seconds and the window decided the rest; the ratio is the part that transfers, and a
+     * constant would break as soon as he moves the slider.
+     */
+    fun responseFor(style: Int, profile: Int, towardCard: Boolean, windowMs: Long): Float =
+        windowMs * responseScaleFor(style, profile, towardCard) / 1000f
 
     /**
      * Damping per trigger. Claude's table says a light bounce on arrival (0.7), a confident settle on a tap
@@ -307,9 +334,12 @@ object MotionVariant {
             // He wrote 0.85 for a tap-to-expand; 0.85 overshoots by 0.7 %, which on his 1067 px card is seven
             // pixels - invisible, and invisible is the complaint. The presets carry the amplitude instead of the
             // decimal, so the difference between them is a difference he can name: 1 px, 21 px, 68 px.
-            PROFILE_SNAPPY -> 0.92f
-            PROFILE_BOUNCY -> 0.66f
-            else -> 0.78f
+            // The presets are the amplitude, and the amplitude is what has to survive 60 Hz: 1 px, 20 px and
+            // 100 px of overshoot on his 1067 px card. b1406 shipped 1/7/68 and the verdict was "nothing"; the
+            // numbers were true and the sizes were not.
+            PROFILE_SNAPPY -> 0.95f
+            PROFILE_BOUNCY -> 0.62f
+            else -> 0.80f
         }
         style == AppSettings.MORPH_STYLE_HYPERMORPH -> if (towardCard) 0.86f else 0.95f
         else -> 1f

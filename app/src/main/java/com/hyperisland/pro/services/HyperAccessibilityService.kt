@@ -1478,11 +1478,11 @@ class HyperAccessibilityService : AccessibilityService() {
         val targetR = dp(getTargetRadius(IslandStage.STAGE2_PING)).toFloat()
 
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 360L
+            duration = morphWindowFor(360L)
             interpolator = morphCurve // the spring styles need this; the old four get the same curve as before
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t), t)
                 applyMorphCarry(t)
                 morphMeter?.frame(System.nanoTime(), t)
                 pillPreviewRoot?.alpha = t
@@ -1501,7 +1501,7 @@ class HyperAccessibilityService : AccessibilityService() {
             })
         }
         morphAnimator = anim
-        beginMorphPerf("notify->ping", 360L, curW, curH, targetW, targetH, targetR, towardCard = false)
+        beginMorphPerf("notify->ping", anim.duration, curW, curH, targetW, targetH, targetR, towardCard = false)
         anim.start()
     }
 
@@ -3151,7 +3151,7 @@ class HyperAccessibilityService : AccessibilityService() {
             duration = 120L
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(startW, pingW, t), startH, startR)
+                updateIslandLayoutForMorph(lerpEven(startW, pingW, t), startH, startR, t)
                 applyMorphCarry(0f) // the ping half still wears the pill's glyph and pill's icon size
                 morphMeter?.frame(System.nanoTime(), t)
             }
@@ -3161,11 +3161,11 @@ class HyperAccessibilityService : AccessibilityService() {
         //  - no gridRoot alpha ramp (the outline clips the content; a fade just looked like blur)
         //  - no islandView scaleY squash (that scaled the TEXT, which is what read as jitter)
         val expand = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 360L
+            duration = morphWindowFor(360L)
             interpolator = morphCurve // same reason as setStageAnimated: and the pin is widened so it is NOT eaten
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
+                updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t), t)
                 applyMorphCarry(0.5f + 0.5f * t) // the expand half finishes the travel the ping phase started
                 morphMeter?.frame(System.nanoTime(), t)
                 gridRoot?.visibility = View.VISIBLE
@@ -3178,7 +3178,12 @@ class HyperAccessibilityService : AccessibilityService() {
             playSequentially(ping, expand)
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationStart(a: Animator) {
-                    beginMorphPerf("notify->full", 720L, startW, startH, targetW, targetH, targetR, towardCard = true)
+                    // The EXPAND half's duration, not the pair's: this animator owns the shape, so it owns the
+                    // spring's window. 720L here is what made the auto-notification morph arrive short and snap.
+                    beginMorphPerf(
+                        "notify->full", expand.duration, startW, startH, targetW, targetH, targetR,
+                        towardCard = true,
+                    )
                 }
 
                 override fun onAnimationEnd(a: Animator) {
@@ -3241,7 +3246,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val targetH = dp(getTargetHeight(target))
         val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = when (target) { IslandStage.STAGE1_IDLE -> 320L; IslandStage.STAGE2_PING -> 340L; else -> 380L }
+            duration = morphWindowFor(when (target) { IslandStage.STAGE1_IDLE -> 320L; IslandStage.STAGE2_PING -> 340L; else -> 380L })
             // Was: expandInterpolator out (0.34,1.56,0.64,1) and collapse in (0.55,0,0.1,1). Both were wrong
             // for the *drawn* box, and the arithmetic is in the commit: the expand curve overshoots past 1.0,
             // IslandMorphFrame.compute clamps it to the final size, and 29 of 46 frames at 120 Hz moved the
@@ -3252,7 +3257,7 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = morphCurve
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
+                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t), t)
                 applyMorphCarry(t)
                 morphMeter?.frame(System.nanoTime(), t)
                 // One owner of the pill's fade for every stage change, notification or not. It used to be
@@ -3663,22 +3668,36 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun morphViewExcessHalf(): Int = MotionVariant.viewExcessHalf(morphPinW(), morphFinalW)
     private fun morphPinH(): Int = morphPinH ?: morphFinalH
 
-    private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float) {
+    /**
+     * The one funnel every morph animator writes its size through, and it is given the animator's own clock [t]
+     * as well as the geometry. Both are needed and they are not interchangeable: the content gate is a rule
+     * about the *box* (Claude's "~60 % of the target width"), while the compression, the ripple and the settle are
+     * rules about *time* (his "30-45 ms", his "40-70 ms"). Measuring the time-boxed ones on the box's progress is
+     * what made them vanish in b1411 - a spring's progress is 0.11 after one frame and 0.32 after two, so every
+     * window keyed to it is sampled once, past its peak.
+     */
+    private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float, t: Float) {
         var bw = w
         var bh = h
         var br = r
         if (morphVariantOn) {
             // Both designs redraw the box each frame and both do it in phases; this is the only place the drawn
-            // size is decided, so the phases go here rather than into the six animators that call it. Progress
-            // is measured on the box, not on the clock: a spring's clock reaches 1.0 while the shape is still
-            // on its way back, and a phase keyed to the clock would fire in the wrong place.
+            // size is decided, so the phases go here rather than into the six animators that call it. The two
+            // clocks are kept apart on purpose, because they are two different questions: where the *shape* is
+            // (p, read off the box - what the content gate is keyed to, since it was specified as a share of the
+            // target width) and how much *time* has gone (tc, the animator's own t - what the compression, the
+            // ripple and the settle are keyed to, since each was specified in milliseconds). Keying the timed ones
+            // to the shape is the bug that made them invisible: a spring is already at 0.11 after one frame.
             val p = MotionVariant.progressOf(morphFromW, morphFromH, morphToW, morphToH, w, h).coerceIn(0f, 1f)
             morphProgress = p
+            // The clock, clamped the same way: it is the animator's own 0..1, so a spring that overshoots does
+            // not run these windows past their end.
+            val tc = t.coerceIn(0f, 1f)
             if (morphHyperOn) {
                 // Phase A, only on the way OUT: during a collapse the box is already at the pin, so a squeeze
                 // there clamps to nothing and reads as a hitch instead of a compression.
                 if (morphCarryGrowing && morphSqueeze > 0f) {
-                    val c = MotionVariant.compression(p, MotionVariant.COMPRESSION_WINDOW, morphSqueeze)
+                    val c = MotionVariant.compression(tc, MotionVariant.COMPRESSION_WINDOW, morphSqueeze)
                     bw = (w * (1f - c)).toInt()
                     bh = (h * (1f + 2f * c)).toInt()
                 }
@@ -3687,7 +3706,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 // for the glass style, so the ripple costs no new render work beyond a radius write.
                 // Expand only. Running it on the return too (which is what b1406 did) puts a fog-and-unfog flash
                 // on the first five frames of every collapse, which neither design asked for.
-                val rip = if (morphCarryGrowing) MotionVariant.ripple(p, MotionVariant.RIPPLE_WINDOW) else 0f
+                val rip = if (morphCarryGrowing) MotionVariant.ripple(tc, MotionVariant.RIPPLE_WINDOW) else 0f
                 morphRipple = rip
                 if (rip > 0.01f) {
                     bw = (bw * (1f + 0.012f * rip)).toInt()
@@ -3698,7 +3717,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 // only, like the overshoot: the height leftover of the card is what centres the row.
                 if (morphCarryGrowing) {
                     val settle = MotionVariant.microSettle(
-                        p, MotionVariant.SETTLE_WINDOW, maxOf(0.01f, morphSqueeze * 0.6f)
+                        tc, MotionVariant.SETTLE_WINDOW, maxOf(0.015f, morphSqueeze * 0.5f)
                     )
                     if (settle > 0.0005f) bw = (bw * (1f + settle)).toInt()
                 }
@@ -4004,6 +4023,19 @@ class HyperAccessibilityService : AccessibilityService() {
         0f
     }
 
+    /**
+     * The length a morph animator gets. For the four original styles this is the caller's number untouched - the
+     * house curve has no window to respect, and nothing he has already judged may be resized by a new design.
+     * For the two spring styles it is that number with a floor, because a spring whose window is shorter than its
+     * own settle is cut off at the door and reads as an ease (round 27's "dono new options ek he hai").
+     */
+    private fun morphWindowFor(callerMs: Long): Long =
+        if (MotionVariant.isSpring(AppSettings.getMorphStyle(this))) {
+            callerMs.coerceAtLeast(MotionVariant.MIN_MORPH_WINDOW_MS)
+        } else {
+            callerMs
+        }
+
     private fun beginMorphPerf(
         label: String, durationMs: Long, fromW: Int, fromH: Int, toW: Int, toH: Int, toR: Float,
         towardCard: Boolean,
@@ -4021,9 +4053,16 @@ class HyperAccessibilityService : AccessibilityService() {
         morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
         morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH
         morphVariantOn = morphLiquidOn || morphHyperOn
+        // The window the spring is sized against. It must be the animator's own duration - and that pairing is a
+        // rule, not a coincidence: this path used to be told 720 ms (the whole sequential set, ping included) while
+        // the animator that owns the shape ran 360, so the spring reached ~0.86 of its travel and the last frame
+        // snapped. Every call site below now takes its number from the animator it belongs to.
         morphDurationMs = durationMs
         val motionProfile = AppSettings.getMotionProfile(this)
-        morphResponseSec = MotionVariant.responseFor(morphVariant, motionProfile, towardCard)
+        // Scaled against THIS morph's window: at the 380 ms default the spring should land its last pixel on its
+        // last frame, and at a 650 ms slider position it should still be a spring, not a 200 ms snap followed by
+        // 450 ms of nothing.
+        morphResponseSec = MotionVariant.responseFor(morphVariant, motionProfile, towardCard, durationMs)
         morphDamping = MotionVariant.dampingFor(morphVariant, motionProfile, towardCard)
         morphGate = AppSettings.getMotionGatePct(this) / 100f
         morphMagnet = AppSettings.getMotionMagnetPct(this) / 100f

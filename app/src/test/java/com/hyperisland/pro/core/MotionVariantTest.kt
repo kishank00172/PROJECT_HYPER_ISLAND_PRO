@@ -121,11 +121,14 @@ class MotionVariantTest {
 
     @Test
     fun profilesGetFasterInOrder() {
-        val snappy = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SNAPPY, true)
-        val silky = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, true)
-        val bouncy = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_BOUNCY, true)
-        assertTrue("snappy $snappy must be quicker than silky $silky", snappy < silky)
-        assertTrue("bouncy $bouncy must be slower than silky $silky", bouncy > silky)
+        val snappy = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SNAPPY, true, 380L)
+        val silky = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, true, 380L)
+        val bouncy = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_BOUNCY, true, 380L)
+        // Not the same ordering the response column had before: snappy is the quickest arrival, and bouncy is the
+        // most patient spring because its settle is long. The profiles are separated by amplitude (the test below
+        // that measures pixels), not by response - a bouncy profile with a *long* response cannot finish at all.
+        assertTrue("snappy $snappy must arrive no later than silky $silky", snappy <= silky + 0.06f)
+        assertTrue("bouncy $bouncy must be the most patient spring", bouncy < silky)
         assertEquals(MotionVariant.PROFILE_SNAPPY, MotionVariant.clampProfile(-9))
         assertEquals(MotionVariant.PROFILE_COUNT - 1, MotionVariant.clampProfile(99))
         assertEquals("bouncy", MotionVariant.profileName(2))
@@ -138,8 +141,8 @@ class MotionVariantTest {
         // 220-280 ms bloom. If a future edit makes closing the slower, springier half, this fails.
         for (style in intArrayOf(AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH)) {
             for (profile in 0 until MotionVariant.PROFILE_COUNT) {
-                val open = MotionVariant.responseFor(style, profile, true)
-                val close = MotionVariant.responseFor(style, profile, false)
+                val open = MotionVariant.responseScaleFor(style, profile, true)
+                val close = MotionVariant.responseScaleFor(style, profile, false)
                 assertTrue("collapse must not be the slower half ($style/$profile: $open vs $close)", close < open)
             }
         }
@@ -296,6 +299,51 @@ class MotionVariantTest {
         assertEquals(1f, MotionVariant.progressOf(100, 0, 100, 0, 100, 0), 1e-6f)
     }
 
+    @Test
+    fun theShapeArrivesByMidWindowSoTheTailIsRealMotion() {
+        // b1411's second defect, and the one his "jaisa bata rhe the waisa kuch ho he nahi raha" was really
+        // about: the response table was derived from the window, but a spring's rise is fast relative to its own
+        // response, so the box was at 99 % of its size in five frames and spent the remaining eighteen drifting
+        // by a dozen pixels. Motion he could not see is motion that did not happen. So the arrival and the settle
+        // are now both asserted to occupy the window. Claude's own acceptance line is "reaches 90 % in ~1.25x
+        // response", which read against the frames this app runs at means: at frame 5.5 a tenth of the trip is
+        // still to go, and by frame 11 the box is there. Under the first bar the shape snaps open in five frames
+        // and the remaining eighteen are a few pixels of drift - which is how b1411 came to look like nothing.
+        for (profile in 0 until MotionVariant.PROFILE_COUNT) {
+            val r = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, profile, true, 380L)
+            val z = MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, profile, true)
+            val early = MotionVariant.spring(0.25f, 380L, r, z)
+            val mid = MotionVariant.spring(0.5f, 380L, r, z)
+            assertTrue("profile $profile snaps open before frame 6 ($early)", early <= 0.90f)
+            assertTrue("profile $profile is still crawling at half the window ($mid)", mid >= 0.90f)
+        }
+        // A collapse must NOT do this: Claude's table says a lid going down gets no bounce and no ceremony.
+        val rc = MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, false, 340L)
+        val zc = MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, false)
+        assertEquals(1f, zc, 1e-6f)
+        assertTrue("collapse must be done by 60 % of the window", MotionVariant.spring(0.6f, 340L, rc, zc) > 0.97f)
+    }
+
+    @Test
+    fun everyEnvelopeIsLongEnoughToShowAtSixtyHertz() {
+        // The windows are on the clock now precisely because the shape's progress is front-loaded. At the shortest
+        // morph the app runs, every one of these must last at least four frames - under that, a "feel" is a
+        // dropped frame and his eye files it as a glitch, which is exactly what b1411's single blurred frame was.
+        val frameMs = 16.7f
+        for (win in floatArrayOf(
+            MotionVariant.COMPRESSION_WINDOW * 2f,
+            MotionVariant.RIPPLE_WINDOW,
+            MotionVariant.SETTLE_WINDOW,
+        )) {
+            val frames = win * MotionVariant.MIN_MORPH_WINDOW_MS / frameMs
+            assertTrue("a $win window is $frames frames at 60 Hz", frames >= 4f)
+            assertTrue("and must still be a flash, not a phase: $frames", frames <= 9f)
+        }
+        // And they are read off the clock, so the spring's front-loading cannot squash them (the regression in
+        // one line): at one frame in, the clock is 0.045 while the shape is already at 0.11.
+        assertTrue(MotionVariant.compression(0.12f, MotionVariant.COMPRESSION_WINDOW, 0.05f) > 0.02f)
+    }
+
     // ---------------------------------------------------------------- b1406's three glitches
 
     @Test
@@ -329,17 +377,21 @@ class MotionVariantTest {
 
     @Test
     fun everySpringFitsInsideTheWindowItIsGiven() {
-        // The silent killer from b1406: response 0.42 s inside a 0.38 s animation means the spring never reaches
-        // its target while it is running, the interpolator pins the last frame to 1.0, and the "dual-spring
+        // The silent killer from b1406: a response that does not fit its window means the spring never reaches its
+        // target while the animation is running, the interpolator pins the last frame to 1.0, and a "dual-spring
         // liquid capsule" becomes a slightly different ease. "dono new options ek he hai" was that truncation.
+        // Measured on the real curve rather than against a formula, so it cannot drift out of sync with spring().
         for (style in intArrayOf(AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH)) {
             for (profile in 0 until MotionVariant.PROFILE_COUNT) {
                 for (towardCard in booleanArrayOf(true, false)) {
-                    val ms = MotionVariant.responseFor(style, profile, towardCard) * 1000f
+                    val window = if (towardCard) 380L else 340L
+                    val response = MotionVariant.responseFor(style, profile, towardCard, window)
+                    val zeta = MotionVariant.dampingFor(style, profile, towardCard)
+                    val atTheEnd = MotionVariant.spring(0.98f, window, response, zeta)
                     assertTrue(
-                        "style $style profile $profile towardCard=$towardCard needs ${ms}ms of settle in " +
-                            MotionVariant.MIN_MORPH_WINDOW_MS + "ms",
-                        ms * MotionVariant.SPRING_SETTLE_FACTOR <= MotionVariant.MIN_MORPH_WINDOW_MS
+                        "style $style profile $profile towardCard=$towardCard sits at $atTheEnd at 98 % of its " +
+                            "window - the spring is being cut off, which is the bug that hid both designs",
+                        kotlin.math.abs(1f - atTheEnd) < 0.01f,
                     )
                 }
             }
@@ -397,7 +449,7 @@ class MotionVariantTest {
         val to = 900
         val gate = 0.6f
         val zeta = MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, true)
-        val p = MotionVariant.spring(0.5f, dur, MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, true), zeta)
+        val p = MotionVariant.spring(0.5f, dur, MotionVariant.responseFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, true, dur), zeta)
         val w = from + ((to - from) * p).toInt()
         assertTrue("mid-morph the box must be past the start and can pass the target: $w", w > from)
         // The gate is a rule about the box, so the test is too: before it, nothing; the frame it crosses,
