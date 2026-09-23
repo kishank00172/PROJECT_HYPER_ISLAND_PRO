@@ -22,11 +22,11 @@ rides in from the pill's edge. Radius is `height / 2`, never animated on its own
 | the spec said | the code does | the phone shows (366 -> 1067 px, 60 Hz) |
 |---|---|---|
 | "single continuous morph, 380-450 ms" | `morphWindowFor` floors the spring styles at `MIN_MORPH_WINDOW_MS = 340`, expand runs the stage's 380 | 23 frames, no phase cuts |
-| "one spring, response 0.30-0.34 s" | `responseScaleFor(LIQUID, *) = 0.72..0.85` of the window -> 274-323 ms at 380 | the box is at 5-25 % of its size on frame 1, not 60 % - the travel is spread over the window instead of dumped in its first third |
+| "one spring, response 0.30-0.34 s" | `responseScaleFor(LIQUID, *) = 0.72..0.85` of the window -> 274-323 ms at 380 | the box is at 5-7 % of its size on frame 1 (b1411: 18 % there, 60 % by frame 3) - the travel is spread over the window instead of dumped in its first third |
 | "overshoot 1.02-1.08, then settle" | `dampingFor` 0.95 / 0.80 / 0.62 per profile | snappy +1 px, silky +11 px, **bouncy +59 px past 1067** then back over 12 frames |
-| "content fades in at ~60 % of target width" | `gated(shapeProgress, morphGate)`, gate slider 0-90 % (default 60) | alpha 0.00 through frame 4, 0.33 at 5, 1.00 at 8 on bouncy - the shape visibly leads the content |
+| "content fades in at ~60 % of target width" | `gated(shapeProgress, morphGate)`, gate slider 0-90 % (default 60) | alpha 0.00 through frame 4, 0.41 at 5, 0.74 at 6, 1.00 at 8 on bouncy - the shape visibly leads the content |
 | "content translates along the shared edge" | `applyMorphCarry` -> row Y = -(leftover x (1 - shape)) | -205 px on frame 0 up to 0, tracking the box's bottom edge, not a clock |
-| "radius = height / 2, clamp, do not animate independently" | `tensionRadius(bh, r)` capped at 66 px | 52 px on the pill, 66 from frame 2 on, 66 held through the overshoot |
+| "radius = height / 2, clamp, do not animate independently" | `tensionRadius(bh, r)` capped at 66 px | 52 px on the pill, 61 on frame 1, 66 from frame 2 on and held through the overshoot |
 | "collapse: zeta 1.0, no bounce, content exits early" | `dampingFor(*, false) = 1.0`, `goneBy = 0.45` | content at 0.69 / 0.17 / 0.00 by frame 3 while the box is still 970 px wide; box lands on frame ~12, no wobble |
 
 ## 2. Hyper morph - style 5, "ChatGPT's design"
@@ -37,7 +37,7 @@ instead of fading it in place.
 
 | the spec said | the code does | the phone shows |
 |---|---|---|
-| "morph 240-320 ms, response 0.20 s, damping 0.82-0.9" | `responseScaleFor(HYPERMORPH) = 0.62`, `dampingFor = 0.86` | arrives 0.90 on frame 7, lands 1067 on frame 10, +27 px of overshoot total - faster and flatter than the liquid capsule's arrival |
+| "morph 240-320 ms, response 0.20 s, damping 0.82-0.9" | `responseScaleFor(HYPERMORPH) = 0.62`, `dampingFor = 0.86` | 0.90 on frame 7, crosses the 1067 target on frame 12, and its +27 px peak (1094 on frame 18) is the settle tap rather than the spring - faster and flatter than the liquid capsule's arrival |
 | "Phase A: container compression 97 % W / 106 % H, 30-45 ms" | `compression(tc, COMPRESSION_WINDOW = 0.20, morphSqueeze)`, expand only, Lab 0-8 % (default 5) | frame 4 the box is **756 x 324** where the same spring with no squeeze gives 788 x 294: **32 px narrower, 30 px taller**, peaking at 38 x 30 on frame 5, then it opens out. At the 3 % his Lab has stored the same frame is 772 x 312 - 16 x 18: still over the ~10 px threshold, half the default's |
 | "Phase B: energy ripple, blur pass, 40-70 ms" | `ripple(tc, RIPPLE_WINDOW = 0.20)` -> `setGlassBlur(rip x blur x 0.45)`, expand only | 4 frames of blur, peak 7.3 px, on the text only (the three content views + the action strip), quantised so it costs no extra pass |
 | "Phase D: micro-settle 100 -> 102 -> 100" | `microSettle(tc, SETTLE_WINDOW = 0.30, max(1.5 %, squeeze/2))` | frames 15-21: 1068 -> **1093** -> 1068 px, one visible tap on the container after the shape has arrived |
