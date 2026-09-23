@@ -34,7 +34,8 @@ data class MorphFrame(
 object IslandMorphFrame {
 
     /**
-     * Box for a card drawn inside a view of [boundW] x [boundH], currently [w] x [h]. The clamp keeps the box
+     * Box for a card drawn inside a view of [boundW] x [boundH] (+ [headH] of vertical headroom),
+     * currently [w] x [h]. The clamp keeps the box
      * inside that view - outside it there is no surface, and the tester would see a black edge over the
      * wallpaper - but the bound is the **view**, which during a morph is the larger of start and target.
      *
@@ -45,12 +46,26 @@ object IslandMorphFrame {
      * hz=120`, i.e. thirty-nine perfectly delivered frames drawing the *same* box. The animation was not
      * slow; the shape was never asked for.
      */
-    fun compute(boundW: Int, boundH: Int, w: Int, h: Int): MorphFrame {
+    fun compute(boundW: Int, boundH: Int, w: Int, h: Int, headH: Int = 0): MorphFrame {
         val boxW = w.coerceIn(0, boundW.coerceAtLeast(0))
-        val boxH = h.coerceIn(0, boundH.coerceAtLeast(0))
+        val boxH = h.coerceIn(0, (boundH + headH).coerceAtLeast(0))
         val left = (boundW - boxW) / 2
+        // The centring is deliberately against [boundH] and not against the bound plus its headroom: the content
+        // has to sit where the *card* will be, so that when the spring comes home the offset passes through zero
+        // on its own and the last frame needs no correction. Centring against the widened surface instead is how a
+        // bounce ends up snapping the text by half the headroom, which is the oldest bug in this file.
         return MorphFrame(left, 0, left + boxW, boxH, (boxH - boundH) / 2)
     }
+
+    /**
+     * Why [headH] exists. The same clamp that silently flattened a horizontal overshoot - the tester's
+     * "39 frames drawing the same box", and later his "spring sirf icon pe hai" - also sits on the vertical
+     * axis, and the two spring styles now spend all of their elastic travel there. A view whose height is the
+     * card's cannot draw a card that is 40 px taller than itself. So the view gets exactly as much extra
+     * height as the curve is expected to need, and this argument says how much the box may use of it. Default
+     * zero: the four classic styles, and every other caller, get the arithmetic they have always had.
+     */
+    fun naturalBoundH(pinH: Int, headH: Int): Int = (pinH - headH).coerceAtLeast(0)
 
     /** The dirty area a frame change needs: the union of the two boxes, not the whole screen. */
     fun dirtyBounds(a: MorphFrame?, b: MorphFrame?): IntArray {

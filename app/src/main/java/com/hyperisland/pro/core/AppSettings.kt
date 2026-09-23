@@ -18,7 +18,6 @@ object AppSettings {
     private const val KEY_MOTION_SQUEEZE = "motion_squeeze_pct"
     private const val KEY_MOTION_GATE = "motion_gate_pct"
     private const val KEY_MOTION_MAGNET = "motion_magnet_pct"
-    private const val KEY_MOTION_CUTOUT_BIAS = "motion_cutout_bias_dp"
     private const val KEY_MORPH_CONTENT_SCALE = "morph_content_scale_pct"
     private const val KEY_MORPH_GLYPH_SWAP = "morph_glyph_swap_pct"
     private const val KEY_SHADE_POLICY = "shade_open_policy"
@@ -262,11 +261,6 @@ object AppSettings {
     fun getMotionMagnetPct(context: Context) = MotionVariant.clampPct(prefs(context).getInt(KEY_MOTION_MAGNET, 60), 0, 150)
     fun setMotionMagnetPct(context: Context, v: Int) = prefs(context).edit()
         .putInt(KEY_MOTION_MAGNET, MotionVariant.clampPct(v, 0, 150)).apply()
-
-    /** Manual horizontal bias for the cutout rule, in dp: how to test edge-awareness on a phone with no cutout. */
-    fun getMotionCutoutBiasDp(context: Context) = prefs(context).getInt(KEY_MOTION_CUTOUT_BIAS, 0).coerceIn(-40, 40)
-    fun setMotionCutoutBiasDp(context: Context, v: Int) = prefs(context).edit()
-        .putInt(KEY_MOTION_CUTOUT_BIAS, v.coerceIn(-40, 40)).apply()
 
     /** How much smaller the card content starts, as a percent: 12 means it opens at 88% and grows in. */
     fun getMorphContentScalePct(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_SCALE, DEFAULT_MORPH_CONTENT_SCALE_PCT)

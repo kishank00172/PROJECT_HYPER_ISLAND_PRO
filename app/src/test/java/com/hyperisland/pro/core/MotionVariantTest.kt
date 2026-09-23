@@ -95,15 +95,20 @@ class MotionVariantTest {
     }
 
     @Test
-    fun underdampedSpringOvershootsByExactlyWhatThePinAllowsFor() {
-        val zeta = 0.7f
-        val peak = MotionVariant.peakOvershoot(zeta)
-        assertTrue("a 0.7-damped spring must overshoot at all", peak > 0.04f)
-        var observed = 0f
-        for (i in 0..200) observed = max(observed, MotionVariant.spring(i / 200f, 620L, 0.48f, zeta))
-        // The analytic peak and the sampled peak have to agree, because the pin is widened by the analytic one:
-        // if the curve went higher than the bound, IslandMorphFrame clamps it and the bounce is silently eaten.
-        assertEquals(1f + peak, observed, 0.02f)
+    fun theTracePrintsTheTravelTheCurveActuallyAdds() {
+        // The number in `[MORPH] start` is the whole reason his next log can confirm or refute this round without
+        // me describing it, so it has to be the curve's own peak on the axis the motion uses - height - and not a
+        // claim about a pin that no longer exists.
+        for (style in intArrayOf(AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH)) {
+            for (profile in 0 until MotionVariant.PROFILE_COUNT) {
+                val z = MotionVariant.dampingFor(style, profile, true)
+                val predicted = (421f * MotionVariant.peakOvershoot(z)).toInt()
+                var seen = 0f
+                for (k in 0..200) seen = maxOf(seen, MotionVariant.spring(k / 200f, 380L, 0.30f, z) - 1f)
+                assertEquals("style $style profile $profile: the curve and the log disagree",
+                    (421f * seen).toInt(), predicted)
+            }
+        }
     }
 
     @Test
@@ -176,34 +181,6 @@ class MotionVariantTest {
         assertTrue(MotionVariant.tensionRadius(40f, 200f) < MotionVariant.tensionRadius(120f, 200f))
     }
 
-    @Test
-    fun growthDodgesAnOffCentreCameraOnlyWhereDodgingIsPossible() {
-        // CI run 407 failed the previous version of this test, and the failure was the lesson: I had written a
-        // case where dodging cannot work - a lens at 670..730 *inside* a box spanning 460..740 - and expected a
-        // leftward shove out of it. "expected a leftward dodge, got 0.0" was my test being wrong about the world
-        // in exactly the way the shipped rule was. So the cases are now stated the way the rule means them:
-        // overlapping an edge, move off that edge; contained, do nothing; nowhere near, do nothing.
-        val boxHalf = 140f
-        // A) the lens sits inside the box's span: uncapturable sideways, so inert. On his 11i (screen 1080,
-        // lens at 540, island centred at 540) this is every width the island ever reaches - which is precisely
-        // why b1406's 224 px "avoidance" was a jump and not an avoidance.
-        assertEquals(0f, MotionVariant.cutoutShift(600f, boxHalf, 700f, 30f, 0f), 1e-6f)
-        // B) the lens overlaps the box's RIGHT edge (box 460..740, lens 690..750): move left until the edges
-        // part, and they have to actually part - a nudge that leaves 1 px of overlap is not a fix.
-        val left = MotionVariant.cutoutShift(600f, boxHalf, 720f, 30f, 0f)
-        assertTrue("expected a leftward dodge, got $left", left < 0f)
-        assertTrue("right edge must clear the lens", 600f + left + boxHalf <= 690f)
-        // C) mirrored: the lens overlaps the LEFT edge (box 760..1040, lens 750..810), so push right.
-        val right = MotionVariant.cutoutShift(900f, boxHalf, 780f, 30f, 0f)
-        assertTrue("expected a rightward dodge, got $right", right > 0f)
-        assertTrue("left edge must clear the lens", 900f + right - boxHalf >= 810f)
-        // D) nothing near the island: inert, not merely small. Most morphs are here, and a drift would be worse
-        // than the problem this exists to solve.
-        assertEquals(0f, MotionVariant.cutoutShift(100f, boxHalf, 700f, 30f, 0f), 1e-6f)
-        // E) a device that reports no cutout band at all (emulator, or the band hidden in the status bar): the
-        // Lab's bias passes through, so the rule stays testable on the phone he actually has.
-        assertEquals(18f, MotionVariant.cutoutShift(100f, boxHalf, 0f, 0f, 18f), 1e-6f)
-    }
     @Test
     fun compressionHitsHisNumbersAndIsGoneByTheBloom() {
         val w = MotionVariant.COMPRESSION_WINDOW
@@ -344,67 +321,11 @@ class MotionVariantTest {
         assertTrue(MotionVariant.compression(0.12f, MotionVariant.COMPRESSION_WINDOW, 0.05f) > 0.02f)
     }
 
-    @Test
-    fun theBounceNeverDrawsOffHisScreen() {
-        // The device that matters, from his own trace: a 1080 px panel with a 1067 px card. There were two bugs in
-        // one here - the box was widened into headroom the display does not have, so the bounce was clipped (the
-        // box appeared to hit a wall at full width), and the content row, anchored to that box's left edge, kept
-        // sliding sideways off-screen. That is "spring sirf icon pe, wo bhi left right".
-        val room = MotionVariant.visibleExcessRoomPx(1080, 1067)
-        assertEquals(13, room)
-        assertEquals(1080, MotionVariant.clampedWidth(1157, 1067, room))
-        assertEquals(77, MotionVariant.wastedWidth(1157, 1067, room))
-        // A card with room of its own keeps a plain width bounce - no redirection, no new behaviour for anyone
-        // whose expanded width is smaller than the screen.
-        val wide = MotionVariant.visibleExcessRoomPx(1080, 700)
-        assertEquals(380, wide)
-        assertEquals(0, MotionVariant.wastedWidth(780, 700, wide))
-        assertEquals(780, MotionVariant.clampedWidth(780, 700, wide))
-        // And the clamp is a no-op at the ends of the curve, which is what lets the box land exact.
-        assertEquals(0, MotionVariant.wastedWidth(1067, 1067, room))
-        assertEquals(0, MotionVariant.wastedWidth(366, 1067, room))
-    }
 
-    @Test
-    fun wastedWidthBecomesHeightTheEyeCanCatch() {
-        // Redirection is only a fix if what it buys is visible. On his card the bouncy profile wastes 77 px of
-        // width, and the gain turns that into 57 px of height on a 421 px card - 13 % - which at his 120 Hz is a
-        // dozen-plus frames of thickening and relaxing instead of nothing at all.
-        val thick = (77 * MotionVariant.WASTED_WIDTH_TO_HEIGHT_GAIN).toInt()
-        assertTrue("only $thick px of height for a clipped bounce", thick >= 25)
-        assertTrue("and too much is a stretch, not a liquid: $thick", thick <= 421 * 4 / 10)
-    }
 
     // ---------------------------------------------------------------- b1406's three glitches
 
-    @Test
-    fun theCutoutRuleIsInertOnACentredLens() {
-        // b1406's own numbers, off his trace: a 1080 px screen, `cutout=540/40px`, the island centred at 540.
-        // The rule as Claude wrote it asked for a 224 px shove there and the collapse obeyed, which is what he
-        // saw as "pill kabhi right shift ho ja rha hai collapsing mei". A hole you are sitting on top of cannot
-        // be dodged sideways, so the answer is now 0 - at the pill's width AND at the card's.
-        assertEquals(0f, MotionVariant.cutoutShift(540f, 183f, 540f, 40f, 0f, 60f), 1e-6f)
-        assertEquals(0f, MotionVariant.cutoutShift(540f, 533f, 540f, 40f, 0f, 60f), 1e-6f)
-        // The Lab's bias still passes through, because that slider exists so this can be tested at all.
-        assertEquals(30f, MotionVariant.cutoutShift(540f, 183f, 540f, 40f, 30f, 60f), 1e-6f)
-    }
 
-    @Test
-    fun theCutoutRuleStillDodgesWhereDodgingWorks() {
-        // A lens at the left edge of the island's span: a small push right uncovers it.
-        val shift = MotionVariant.cutoutShift(600f, 183f, 420f, 40f, 0f, 60f)
-        assertTrue("expected a rightward nudge, got $shift", shift > 0f)
-        assertTrue("600 + $shift must clear the lens", 600f + shift - 183f > 460f)
-        // And when clearing it would take a jump, the cap takes what is allowed and accepts partial avoidance -
-        // an island that teleports to dodge a lens is worse than one that sits near it.
-        val capped = MotionVariant.cutoutShift(600f, 183f, 455f, 40f, 0f, 20f)
-        assertTrue("cap ignored: $capped", abs(capped) <= 20f + 1e-3f)
-        // Ramped to nothing at both ends, so a rest position is never drawn where the layout will not put it.
-        assertEquals(0f, MotionVariant.avoidRamp(0f), 1e-6f)
-        assertEquals(0f, MotionVariant.avoidRamp(1f), 1e-6f)
-        assertEquals(1f, MotionVariant.avoidRamp(0.5f), 1e-6f)
-        assertTrue("the ramp must be smooth at the ends", MotionVariant.avoidRamp(0.02f) < 0.08f)
-    }
 
     @Test
     fun everySpringFitsInsideTheWindowItIsGiven() {
@@ -430,23 +351,29 @@ class MotionVariantTest {
     }
 
     @Test
-    fun theTwoSignaturesAreBigEnoughToSeeAtHisRefreshRate() {
-        // His panel was at 60 Hz in that trace (`hz=60`), so anything under ~3 frames is not a feel. Both of
-        // these were shipped below that threshold in b1406: Claude's 0.85 damping overshot 7 px on a 1067 px
-        // card, and ChatGPT's 30-45 ms compression was two frames of nothing.
-        val card = 1067f
-        val silky = MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, true)
-        val bouncy = MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_BOUNCY, true)
-        assertTrue("silky bounce invisible: ${MotionVariant.peakOvershoot(silky) * card}px",
-            MotionVariant.peakOvershoot(silky) * card >= 15f)
-        assertTrue("bouncy must be a different animal", MotionVariant.peakOvershoot(bouncy) * card >
-            MotionVariant.peakOvershoot(silky) * card * 2f)
-        assertTrue("snappy is the one that barely lands",
-            MotionVariant.peakOvershoot(MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SNAPPY, true)) * card < 5f)
-        val frames = MotionVariant.COMPRESSION_WINDOW * MotionVariant.MIN_MORPH_WINDOW_MS / 16.7f
-        assertTrue("phase A is ${frames} frames at 60 Hz, must be at least 3", frames >= 3f)
-        assertTrue("the ripple would fog the text for a whole second",
-            MotionVariant.RIPPLE_WINDOW * MotionVariant.MIN_MORPH_WINDOW_MS <= 120f)
+    fun theTwoSignaturesAreBigEnoughToSeeOnTheAxisHeCanWatch() {
+        // The yardstick changed with the axis, and the bars had to follow or the test would have been theatre: the
+        // card is 1067 px wide but only 421 px tall, so a ratio that overshot 11 px sideways overshoots 4 px down.
+        // These are the ratios that buy 0 / 8 / 40 px of *vertical* travel on his panel at 120 Hz, which is where
+        // "you can see it" starts to live for a 380 ms morph.
+        val cardH = 421f
+        fun travel(profile: Int) = cardH * MotionVariant.peakOvershoot(
+            MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, profile, true)
+        )
+        val snappy = travel(MotionVariant.PROFILE_SNAPPY)
+        val silky = travel(MotionVariant.PROFILE_SILKY)
+        val bouncy = travel(MotionVariant.PROFILE_BOUNCY)
+        assertTrue("snappy must not bounce at all on a lid going either way: $snappy", snappy <= 3f)
+        assertTrue("silky's settle is only $silky px of height", silky >= 6f)
+        assertTrue("bouncy must be at least twice silky, got $bouncy vs $silky", bouncy >= 2f * silky)
+        assertTrue("and bouncy has to be a visible thickness change: $bouncy", bouncy >= 25f)
+        // The width, meanwhile, must never move past the target at all - that is the axis rule, not a tuning.
+        for (profile in 0 until MotionVariant.PROFILE_COUNT) {
+            assertEquals("width may not overshoot: profile $profile", 1067,
+                MotionVariant.axisWidth(1157, 1067, growing = true))
+            assertEquals("and may not undershoot on the way back", 366,
+                MotionVariant.axisWidth(355, 366, growing = false))
+        }
     }
 
     @Test

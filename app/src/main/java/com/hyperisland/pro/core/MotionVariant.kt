@@ -82,31 +82,6 @@ object MotionVariant {
      */
     fun viewExcessHalf(pinW: Int, finalW: Int): Int = ((pinW - finalW) / 2).coerceAtLeast(0)
 
-    /**
-     * How much wider than the target the drawn box may get before it is OFF THE SCREEN. The box grows
-     * symmetrically, so the window's edge is the limit, not the card's own size - and on the tester's device
-     * (21091116UI, 1080 px wide, expanded card 1067 px) that limit is 13 px in total while the bouncy profile
-     * asks for 89. Every frame of the promised bounce was being drawn 37 px past each edge of his display:
-     * invisible on the box, and visible only as the content row sliding sideways with the box's left edge. His
-     * round-30 report - "spring effect sirf icon pe hai, aur wo bhi left right" - is that, exactly.
-     */
-    fun visibleExcessRoomPx(screenW: Int, targetW: Int): Int = (screenW - targetW).coerceAtLeast(0)
-
-    /** The part of an overshoot the screen cannot show. Zero whenever there is room, so a narrow card keeps a
-     * real width bounce untouched. */
-    fun wastedWidth(w: Int, targetW: Int, roomW: Int): Int = (w - targetW - roomW).coerceAtLeast(0)
-
-    /** The width that is left after that part is taken back. */
-    fun clampedWidth(w: Int, targetW: Int, roomW: Int): Int = minOf(w, targetW + roomW)
-
-    /**
-     * Where the wasted width goes: into height, at this share. A liquid capsule that cannot get wider is still a
-     * liquid capsule - it thickens and relaxes - and the height has room on every phone, because the card hangs
-     * from the top of the screen. 0.75 rather than 1.0 so a 76 px width waste reads as 57 px of thickening on a
-     * 421 px card (13 %), clearly seen and not so much that the box looks like it is stretching.
-     */
-    const val WASTED_WIDTH_TO_HEIGHT_GAIN = 0.75f
-
     /** A percent slider that cannot smuggle in a nonsense value; shared by every new knob in the Lab. */
     fun clampPct(v: Int, lo: Int, hi: Int): Int = v.coerceIn(lo, hi)
 
@@ -144,6 +119,15 @@ object MotionVariant {
      * design dies inside this app (a previous round measured 29 of 46 frames moving the box by 0.0 % because
      * the curve's work was being clamped).
      */
+    /**
+     * The axis rule, as a function so it can be tested instead of trusted: the box's width only ever *arrives*.
+     * On the way out it stops at the card's width, on the way back at the pill's - so no frame of a morph can put
+     * the island's edge where the eye cannot follow it, and the content row anchored to that edge cannot be made
+     * to slide sideways. The curve still overshoots; the width simply does not spend it. [SPRING_AXIS].
+     */
+    fun axisWidth(w: Int, targetW: Int, growing: Boolean): Int =
+        if (growing) minOf(w, targetW) else maxOf(w, targetW)
+
     fun peakOvershoot(damping: Float): Float {
         if (damping >= 0.999f) return 0f
         val z = damping.coerceIn(0.05f, 0.999f)
@@ -171,42 +155,6 @@ object MotionVariant {
      */
     fun tensionRadius(heightPx: Float, wantedPx: Float): Float = minOf(heightPx / 2f, wantedPx)
 
-    /**
-     * Claude's "edge-aware asymmetric growth", and the shape that rule had to be given to survive contact with a
-     * real phone. His idea is right for the device he was describing and wrong as written: on a phone whose hole
-     * IS centred - which is what b1406's trace showed, `cutout=540/40px` on a 1080 px screen with the island
-     * centred at 540 as well - "shift away from the lens" has no direction that helps, and the formula exactly as
-     * he gave it asked for a 224 px push, which the collapse then applied in full. His words for the result:
-     * "pill kabhi right shift ho ja rha hai collapsing mei". Three guards, each one measured:
-     *
-     *  - **containment**: if the hole sits inside the box's span, no sideways move uncovers it, so return the
-     *    bias and be inert. This alone zeroes the rule on his device at every width the island ever reaches.
-     *  - **a cap**: a shift that would need `maxShiftPx` or more to "work" is a jump, so take what is allowed and
-     *    accept partial avoidance - an island that teleports to dodge a lens is worse than one that sits near it.
-     *  - the caller multiplies the result by [avoidRamp], which is zero at both ends of the travel, so a rest
-     *    position - pill or card - is never drawn somewhere the layout will not agree with one frame later.
-     */
-    fun cutoutShift(
-        boxCenter: Float, boxHalf: Float, cutoutCenter: Float, cutoutHalf: Float, biasPx: Float,
-        maxShiftPx: Float = 0f,
-    ): Float {
-        if (cutoutHalf <= 0f) return biasPx
-        val d = abs(boxCenter - cutoutCenter)
-        if (d + cutoutHalf <= boxHalf) return biasPx // the lens is inside the box: uncapturable by moving
-        val overlap = (boxHalf + cutoutHalf) - d
-        if (overlap <= 0f) return biasPx
-        val away = if (boxCenter >= cutoutCenter) 1f else -1f
-        var need = away * (overlap + 1f)
-        if (maxShiftPx > 0f) need = need.coerceIn(-maxShiftPx, maxShiftPx)
-        return need + biasPx
-    }
-
-    /**
-     * Zero at both ends of the travel, one in the middle: the only shape a mid-flight offset may take without
-     * either jumping at the settle or arriving before the box does. A parabola, so its slope at the two ends
-     * matches - no kink where the morph hands the box back to the layout.
-     */
-    fun avoidRamp(p: Float): Float = (4f * p * (1f - p)).coerceIn(0f, 1f)
 
     // ---------------------------------------------------------------- ChatGPT: the phases
 
@@ -331,7 +279,7 @@ object MotionVariant {
             // is "the spring comes home inside its window"; the response that satisfies it shrinks as the bounce
             // grows, so the profiles are ordered by amplitude, which is what he can see, not by response.
             PROFILE_SNAPPY -> if (towardCard) 0.85f else 0.45f
-            PROFILE_BOUNCY -> if (towardCard) 0.72f else 0.55f
+            PROFILE_BOUNCY -> if (towardCard) 0.70f else 0.55f
             else -> if (towardCard) 0.80f else 0.48f
         }
     }
@@ -353,20 +301,36 @@ object MotionVariant {
      * wants 0.82-0.9 and its collapse 0.9-ish. The classic styles stay 1.0, which is another way of saying
      * "nothing about them changes".
      */
+    /**
+     * The only axis an island can spring on: **down**. The surface is pinned to the top edge of the screen and
+     * grows into the space below it, so it has thousands of pixels of room one way and, on a phone whose card is
+     * 1067 px wide on a 1080 px panel, thirteen px the other way. A horizontal overshoot is not a style choice
+     * here - it is a rectangle drawn off-screen. Both outside designs asked for it anyway (Claude's 1.02-1.08 on
+     * the capsule, ChatGPT's 100 -> 102 -> 100 on the container), because both were written for a Dynamic Island
+     * that floats with air on all four sides. Their timing, gate, squash and staged return all transfer; the
+     * horizontal bounce does not, and this constant is where that decision lives.
+     */
+    const val SPRING_AXIS = "down"
+
     fun dampingFor(style: Int, profile: Int, towardCard: Boolean): Float = when {
         style == AppSettings.MORPH_STYLE_LIQUID && !towardCard -> 1f
         style == AppSettings.MORPH_STYLE_LIQUID -> when (clampProfile(profile)) {
-            // He wrote 0.85 for a tap-to-expand; 0.85 overshoots by 0.7 %, which on his 1067 px card is seven
-            // pixels - invisible, and invisible is the complaint. The presets carry the amplitude instead of the
-            // decimal, so the difference between them is a difference he can name: 1 px, 21 px, 68 px.
-            // The presets are the amplitude, and the amplitude is what has to survive 60 Hz: 1 px, 20 px and
-            // 100 px of overshoot on his 1067 px card. b1406 shipped 1/7/68 and the verdict was "nothing"; the
-            // numbers were true and the sizes were not.
-            PROFILE_SNAPPY -> 0.95f
-            PROFILE_BOUNCY -> 0.62f
-            else -> 0.80f
+            // Claude wrote 0.85 for a tap-to-expand, which overshoots by 0.7 % - and the axis decides whether
+            // that is a feel or a rounding error. The box's width may not overshoot at all now (see
+            // [SPRING_AXIS]), so the whole amplitude lives on the height, where his card is 421 px instead of
+            // 1067: the same ratios would have shrunk the motion threefold. These are the ratios that put the
+            // three presets back at 1 px, 8 px and 40 px of vertical travel, which at 120 Hz are ~0, ~2 and
+            // ~14 frames of visible movement. The presets are the amplitude, and the amplitude is what he has
+            // to be able to name.
+            // The axis moved (see `SPRING_AXIS` in the service), so the yardstick moved: the overshoot is now
+            // measured against a 421 px height instead of a 1067 px width, which means the same damping ratios
+            // would produce a third of the pixels. These are the ratios that put the three presets back at
+            // 0 / 8 / 40 px of *vertical* travel on his card, and they still settle inside his window.
+            PROFILE_SNAPPY -> 0.94f
+            PROFILE_BOUNCY -> 0.60f
+            else -> 0.78f
         }
-        style == AppSettings.MORPH_STYLE_HYPERMORPH -> if (towardCard) 0.86f else 0.95f
+        style == AppSettings.MORPH_STYLE_HYPERMORPH -> if (towardCard) 0.84f else 0.95f
         else -> 1f
     }
 }

@@ -533,8 +533,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private val GLASS_BLUR_DP = 6
     private var morphBlurPx = 0f
     private var lastBlurPx = -1f
-    /** The horizontal nudge Claude's cutout rule settled on for this morph, in px, applied to the drawn box. */
-    private var morphBoxShiftPx = 0
     /** This frame's shape progress, kept for the log and for anyone who wants to see what a frame thought. */
     private var morphProgress = 0f
     /**
@@ -555,15 +553,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphDamping = 1f
     private var morphDurationMs = 360L
     private var morphOvershootPx = 0
-    /** Total extra width the screen can show beyond the card's own width; see [MotionVariant.visibleExcessRoomPx]. */
-    private var morphRoomW = Int.MAX_VALUE
+    /** The card's own height, without the spring's headroom: what the content is centred against. */
+    private var morphNaturalH = 0
+    /** The thickness the curve is expected to add at its peak, in px. Printed in the trace; see `travelV=`. */
+    private var morphTravelV = 0
     private var morphFromH = 0
     private var morphToH = 0
-    /** Claude's "asymmetric growth never covers the lens": the band the punch hole occupies, measured per morph. */
-    private var morphCutoutBiasPx = 0f
-    private var cutoutCenterX = 0f
-    private var cutoutHalfW = 0f
-    private var morphCenterPx = 0f
     private var lastShelfCheckAt = 0L
     /**
      * One daemon thread for the shelf probe, and a single-flight flag. The thread exists because a binder round
@@ -3608,7 +3603,6 @@ class HyperAccessibilityService : AccessibilityService() {
         morphCarryOn = false
         morphScaleOn = false
         morphGlassOn = false
-        morphRoomW = Int.MAX_VALUE
         // The two designs' geometry is a per-morph property, not a setting that leaks into the next draw: an
         // eased offset or a ripple blur still applied outside a morph is a card that has stopped obeying the
         // stage it is in.
@@ -3616,7 +3610,6 @@ class HyperAccessibilityService : AccessibilityService() {
         morphLiquidOn = false
         morphHyperOn = false
         morphRipple = 0f
-        morphBoxShiftPx = 0
         setGlassBlur(0f)
         // A blur that survives the morph is a card nobody can read, and it would stay until the next text
         // change. -1 forces the next morph to write its first step whatever this one ended on.
@@ -3669,7 +3662,6 @@ class HyperAccessibilityService : AccessibilityService() {
      * Zero for the four classic styles, because they never widen the pin: nothing already accepted moves.
      */
     private fun morphViewExcessHalf(): Int = MotionVariant.viewExcessHalf(morphPinW(), morphFinalW)
-    private fun morphPinH(): Int = morphPinH ?: morphFinalH
 
     /**
      * The one funnel every morph animator writes its size through, and it is given the animator's own clock [t]
@@ -3712,8 +3704,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 val rip = if (morphCarryGrowing) MotionVariant.ripple(tc, MotionVariant.RIPPLE_WINDOW) else 0f
                 morphRipple = rip
                 if (rip > 0.01f) {
-                    bw = (bw * (1f + 0.012f * rip)).toInt()
-                    bh = (bh * (1f + 0.012f * rip)).toInt()
+                    bh = (bh * (1f + 0.012f * rip)).toInt()   // height only: [MotionVariant.SPRING_AXIS]
                 }
                 // Phase D, "micro-settle" on the container (100 -> 102 -> 100): the content is deliberately not
                 // scaled in this style - Phase C forbids a fade-replace - so the box is what settles. Width
@@ -3722,48 +3713,21 @@ class HyperAccessibilityService : AccessibilityService() {
                     val settle = MotionVariant.microSettle(
                         tc, MotionVariant.SETTLE_WINDOW, maxOf(0.015f, morphSqueeze * 0.5f)
                     )
-                    if (settle > 0.0005f) bw = (bw * (1f + settle)).toInt()
+                    if (settle > 0.0005f) bh = (bh * (1f + settle)).toInt()   // and so does his 100 -> 102 -> 100
                 }
                 setGlassBlur(rip * morphBlurPx * MotionVariant.RIPPLE_BLUR_FRACTION)
             }
-            // The overshoot the screen cannot show is re-spent where there IS room: downward. Only on the way out
-            // (a collapse comes back inward and is never clipped), and only for the spring styles, so the four
-            // classics and any card with room take no change at all. At the end of the morph the excess is zero by
-            // definition, so the box still lands on exactly the size the settings asked for.
-            if (morphCarryGrowing && morphRoomW != Int.MAX_VALUE) {
-                val wasted = MotionVariant.wastedWidth(bw, morphToW, morphRoomW)
-                if (wasted > 0) {
-                    bw = MotionVariant.clampedWidth(bw, morphToW, morphRoomW)
-                    bh += (wasted * MotionVariant.WASTED_WIDTH_TO_HEIGHT_GAIN).toInt()
-                }
-            }
+            // The axis rule. Width may not overshoot, in either direction: on the way out it stops at the card's
+            // own width, on the way back it stops at the pill's. Everything elastic - the spring's settle, the
+            // ripple's breath, the tap at the end - is spent on the height instead, because that is the direction
+            // this surface has room in (see [MotionVariant.SPRING_AXIS]). Horizontal bounce is not a smaller
+            // motion here, it is a rectangle drawn off-screen and a content row sliding sideways, which is what
+            // b1415 shipped and what he reported: "left right spring effect kon dalta hai island mei?"
+            bw = MotionVariant.axisWidth(bw, morphToW, morphCarryGrowing)
             // Both: "cornerRadius = height / 2, radius ko independently animate mat karo". One rule instead of
             // a second animator, and it is what keeps a growing capsule a capsule; the final value is whatever
             // the style asked for, so a card with 22 dp corners still lands on 22 dp.
             br = MotionVariant.tensionRadius(bh.toFloat(), r)
-            // Claude's edge-awareness: the box widens evenly and is then nudged away from the lens, so an
-            // off-centre punch hole never gets covered by an island that only knows how to grow symmetrically.
-            // The card view sits in a screen-wide overlay, horizontally centred with the Lab's x offset on top
-            // (the same arithmetic `updateOutlineForIsland` uses), so its centre on screen is one number per
-            // morph and all that is left here is a subtraction.
-            // Only on the way OUT, only as much as a nudge can actually fix, and ramped to nothing at both ends of
-            // the travel. All three are load-bearing: applied flat, as in b1406, the rule asked for 224 px on a
-            // phone whose lens is centred (no sideways move uncovers a hole you are sitting on), the collapse
-            // applied the whole of it, and one frame later the layout put the island back where it belonged.
-            // That is a jump, not an avoidance.
-            if (morphCarryGrowing) {
-                val shift = MotionVariant.cutoutShift(
-                    morphCenterPx, bw / 2f, cutoutCenterX, cutoutHalfW, morphCutoutBiasPx, dp(20).toFloat()
-                ) * MotionVariant.avoidRamp(p)
-                // A box can only be nudged as far as the surface around it: past the pinned view there is nothing
-                // to draw on, and a clipped edge is the black border this whole mechanism exists to avoid.
-                // `compute` centres the box, so the free room on either side is exactly this arithmetic.
-                val room = ((morphPinW() - bw) / 2f).coerceAtLeast(0f)
-                morphBoxShiftPx = shift.coerceIn(-room, room).toInt()
-            } else morphBoxShiftPx = 0
-        } else {
-            // A morph of one of the four established styles must not inherit the nudge the last one left behind.
-            morphBoxShiftPx = 0
         }
         islandBackground?.cornerRadius = br
         outlineRadius = br
@@ -3771,18 +3735,9 @@ class HyperAccessibilityService : AccessibilityService() {
         if (host != null) {
             // The card is not resized at all during a morph: this frame is one small invalidate inside the
             // view, which is why the overlay window stops being laid out 60 times a second.
-            val frame = IslandMorphFrame.compute(morphPinW(), morphPinH(), bw, bh)
-            // The nudge is kept OUT of `lastMorphBoxLeft` on purpose. That number is how the content rules
-            // recover the shape's progress - `MorphCarry.shapeProgress` reads the box width back out of the
-            // centring arithmetic - and a left edge that has been shifted sideways would be read as a box that
-            // is wider than it is, putting the fade ahead of the shape it exists to follow. The shift is where
-            // the box is DRAWN, not how far the morph has come.
+            val frame = IslandMorphFrame.compute(morphPinW(), morphNaturalH, bw, bh, morphOvershootPx)
             lastMorphBoxLeft = frame.left
-            host.applyMorphFrame(
-                if (morphBoxShiftPx == 0) frame
-                else frame.copy(left = frame.left + morphBoxShiftPx, right = frame.right + morphBoxShiftPx),
-                br
-            )
+            host.applyMorphFrame(frame, br)
             return
         }
         if (bw == morphLayoutW && bh == morphLayoutH) return
@@ -3790,28 +3745,6 @@ class HyperAccessibilityService : AccessibilityService() {
         updateIslandLayout(bw, bh, br)
     }
 
-    /**
-     * Where the punch hole actually is, as a horizontal band across the top of the screen, measured from the
-     * window insets rather than from a model name. A device that reports no cutout gets a half-width of 0 and
-     * the rule returns just the Lab's bias, which is how this stays testable on a phone with a centred hole.
-     */
-    private fun measureMorphCutout() {
-        cutoutCenterX = 0f
-        cutoutHalfW = 0f
-        morphCenterPx = resources.displayMetrics.widthPixels / 2f + dp(AppSettings.getIslandXDp(this)).toFloat()
-        val root = visualRoot ?: return
-        val cut = root.rootWindowInsets?.displayCutout ?: return
-        var left = Int.MAX_VALUE
-        var right = 0
-        for (b in cut.boundingRects) {
-            if (b.top > dp(90)) continue // a bottom gesture inset is not a camera
-            left = minOf(left, b.left)
-            right = maxOf(right, b.right)
-        }
-        if (left >= right) return
-        cutoutCenterX = (left + right) / 2f
-        cutoutHalfW = (right - left) / 2f
-    }
 
     /**
      * What the morph costs per frame, made explicit. Two things are pinned for the animation and restored
@@ -3841,9 +3774,12 @@ class HyperAccessibilityService : AccessibilityService() {
             // fade. The only re-measuring that has to be prevented is the one my own headroom introduces, so the
             // row is pinned to the natural width of the surface (start and target, whichever is larger), and for
             // the four classic styles that number is exactly the view's width: nothing changes for them.
-            val wantW = if (pinned) maxOf(morphFinalW, morphFromW) else ViewGroup.LayoutParams.MATCH_PARENT
-            if (lp.height != want || lp.width != wantW) {
-                lp.height = want; lp.width = wantW
+            // Height only, as it was before the spring styles: the width pin existed solely because the view was
+            // widened for horizontal headroom. With the surface no broader than the widest state, MATCH_PARENT
+            // *is* the expanded content width - so the row still cannot be re-measured mid-morph (b1343's snap
+            // stays fixed) and there is one correction less standing between the two new styles and the four.
+            if (lp.height != want) {
+                lp.height = want
                 host.layoutParams = lp
             }
         }
@@ -4083,8 +4019,6 @@ class HyperAccessibilityService : AccessibilityService() {
         morphSqueeze = if (morphHyperOn) AppSettings.getMotionSqueezePct(this) / 100f else 0f
         morphRipple = 0f
         morphProgress = 0f
-        morphCutoutBiasPx = AppSettings.getMotionCutoutBiasDp(this) * resources.displayMetrics.density
-        measureMorphCutout()
         val startR = islandBackground?.cornerRadius ?: toR
         // One layout for the whole morph, and the growth or shrink is drawn from here on. Starting the box
         // at the *old* size in the same call is what keeps this from flashing a full-size black card for a frame.
@@ -4092,27 +4026,33 @@ class HyperAccessibilityService : AccessibilityService() {
         // shrink is the card we are leaving, not the pill we are heading to. Pinning to the target instead is
         // what made every collapse frame clamp to the final size, so the shape never moved at all.
         morphPinW = maxOf(fromW, toW); morphPinH = maxOf(fromH, toH)
-        // A spring that overshoots needs somewhere to overshoot INTO. `IslandMorphFrame` clamps the drawn box to
-        // the view's size, and that clamp is what ate the last elastic attempt: 29 of 46 frames measured moving
-        // the box 0.0 %. So the view is widened by the analytic peak of THIS curve, and by nothing else - width
-        // only, because the height leftover of a wrap-content card is what centres the row, and touching that
-        // re-opens the vertical drift `lerpEven` was invented to close.
-        morphRoomW = if (MotionVariant.isSpring(morphVariant)) {
-            MotionVariant.visibleExcessRoomPx(resources.displayMetrics.widthPixels, maxOf(fromW, toW))
-        } else Int.MAX_VALUE
+        // Measured on the axis the motion uses now: the vertical travel this curve is expected to add, printed
+        // in the trace so the claim is checkable. It no longer sizes the view - a card pinned to the top edge
+        // has the whole screen below it, which is the entire reason the axis changed - so the pin widening and
+        // the anchor correction it forced are gone with it.
         morphOvershootPx = if (MotionVariant.isSpring(morphVariant)) {
-            val peak = maxOf(fromW, toW) * MotionVariant.peakOvershoot(morphDamping)
-            // His 100 -> 102 -> 100 is bigger than a 0.86-damped spring's tail, and the pulse that supplies it
-            // needs the same headroom: clamp it and the settle is gone, silently, as before.
-            val settle = maxOf(fromW, toW) * MotionVariant.DEFAULT_SETTLE
-            // And the headroom is capped at what his display can actually show, because a view wider than the
-            // window does not overflow the screen - it is clipped by it. The box then looks stuck at full width
-            // while the content, riding the box's off-screen left edge, keeps moving. That is what he saw.
-            minOf(maxOf(peak, settle).toInt(), morphRoomW)
+            maxOf(
+                maxOf(fromH, toH) * MotionVariant.peakOvershoot(morphDamping),
+                maxOf(fromH, toH) * MotionVariant.DEFAULT_SETTLE,
+            ).toInt()
         } else 0
-        if (morphOvershootPx > 4) morphPinW = morphPinW!! + morphOvershootPx
+        // The view gets the headroom the curve will use, because `IslandMorphFrame.compute` clamps the drawn box
+        // to the view - a card pinned at 421 px can never be drawn 461 px tall, and the bounce would be eaten
+        // exactly the way the horizontal one was. The box's own centring still uses `morphNaturalH` (the card's
+        // real height), so the extra surface is only ever room to draw in, never a layout the content has to
+        // match, and the last frame lands with a zero offset instead of a snap.
+        morphNaturalH = maxOf(fromH, toH)
+        // The number worth checking with his eyes is not the sizing bound above but the actual change in
+        // thickness: the curve overshoots the *travel*, so on a 104 -> 421 card the peak is 317 x 9.5 % and not
+        // 421 x 9.5 %. Printing the bigger figure would be another claim he could not verify.
+        morphTravelV = maxOf(
+            (kotlin.math.abs(toH - fromH) * MotionVariant.peakOvershoot(morphDamping)).toInt(),
+            // Only the second design taps on purpose; the first one's spring is the whole story.
+            if (morphHyperOn) (maxOf(fromH, toH) * MotionVariant.DEFAULT_SETTLE).toInt() else 0,
+        )
+        if (morphOvershootPx > 0) morphPinH = morphPinH!! + morphOvershootPx
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
-        val startFrame = IslandMorphFrame.compute(morphPinW!!, morphPinH!!, fromW, fromH)
+        val startFrame = IslandMorphFrame.compute(morphPinW!!, morphNaturalH, fromW, fromH, morphOvershootPx)
         lastMorphBoxLeft = startFrame.left
         islandMorph?.applyMorphFrame(startFrame, startR)
         morphTowardCard = towardCard
@@ -4182,9 +4122,9 @@ class HyperAccessibilityService : AccessibilityService() {
             if (morphVariantOn) " variant=${AppSettings.getMorphStyleName(morphVariant)}" +
                 " profile=${MotionVariant.profileName(motionProfile)}" +
                 " response=${"%.2fs".format(morphResponseSec)} damping=${"%.2f".format(morphDamping)}" +
-                " overshoot=${morphOvershootPx}px room=${if (morphRoomW == Int.MAX_VALUE) "-" else morphRoomW}px gate=${(morphGate * 100).toInt()}%" +
+                " gate=${(morphGate * 100).toInt()}%" +
                 " magnet=${(morphMagnet * 100).toInt()}% squeeze=${(morphSqueeze * 100).toInt()}%" +
-                " cutout=${cutoutCenterX.toInt()}/${cutoutHalfW.toInt()}px bias=${morphCutoutBiasPx.toInt()}px" +
+                " axis=${MotionVariant.SPRING_AXIS} travelV=${morphTravelV}px down" +
                 " excess=${morphViewExcessHalf()}px"
             else "" 
         )
@@ -4200,6 +4140,8 @@ class HyperAccessibilityService : AccessibilityService() {
         updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
         islandMorph?.clearMorphFrame()
         morphPinW = null; morphPinH = null
+        morphNaturalH = 0
+        morphTravelV = 0
         val meter = morphMeter
         morphMeter = null
         // Armed again on purpose: the settle is where the teardown lands and where the reported jumps sit,

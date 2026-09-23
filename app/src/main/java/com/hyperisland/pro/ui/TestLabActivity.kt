@@ -267,13 +267,10 @@ class TestLabActivity : Activity() {
             R.id.seekMotionMagnet, R.id.tvMotionMagnetLabel, "pill pulls the content home by (needs drop entry)", 0, 150,
             { AppSettings.getMotionMagnetPct(it) }, { c, v -> AppSettings.setMotionMagnetPct(c, v) }
         )
-        // -40..40 in 1 dp steps: a SeekBar has no negative range, so the offset lives in the mapping, not in the
-        // stored value. He can only test "grows away from the camera" if he can put the camera anywhere.
-        bindMorphSeek(
-            R.id.seekMotionCutout, R.id.tvMotionCutoutLabel, "grow away from the camera by", -40, 40,
-            { AppSettings.getMotionCutoutBiasDp(it) }, { c, v -> AppSettings.setMotionCutoutBiasDp(c, v) },
-            unit = "dp"
-        )
+        // The "grow away from the camera" slider went in with b1411 and is gone now. Two reasons, and the second
+        // is his: on a phone whose lens sits in the middle of the island that rule can only ever return 0 (a
+        // sideways nudge cannot uncover a hole you are sitting on), and the direction was wrong to begin with - an
+        // island is pinned to the top edge of the screen, so sideways is not a motion this surface can make.
         findViewById<Button>(R.id.btnReplayMorph).setOnClickListener {
             // Both directions on one press: "opens nicely, closes wrong" is a real answer he could not
             // otherwise give me without timing two taps against a 320 ms morph.

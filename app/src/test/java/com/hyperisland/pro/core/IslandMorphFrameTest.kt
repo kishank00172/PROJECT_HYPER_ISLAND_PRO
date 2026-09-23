@@ -97,4 +97,28 @@ class IslandMorphFrameTest {
         assertEquals(716, IslandMorphFrame.compute(1067, 421, 716, 264).width)
         assertEquals(264, IslandMorphFrame.compute(1067, 421, 716, 264).height)
     }
+    @Test
+    fun verticalHeadroomIsRoomToDrawInAndNotALayout() {
+        // The clamp that flattened the horizontal bounce also sits on the vertical axis, so the headroom has to
+        // let the box out *without* moving what the content is centred against. Two failures to guard: a box that
+        // cannot exceed the card (bounce eaten), and a content offset that follows the widened surface (a snap at
+        // the settle, which is this file's oldest bug).
+        val bounce = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 447, headH = 39)
+        assertEquals(447, bounce.height)
+        assertEquals("the content rides half the thickness change, not the whole headroom", 13, bounce.contentOffsetY)
+        val atRest = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 421, headH = 39)
+        assertEquals(0, atRest.contentOffsetY)
+        assertEquals(421, atRest.height)
+        // Without the headroom the box is eaten, which is the regression this exists to prevent.
+        val eaten = IslandMorphFrame.compute(1080, 421, 1067, 447)
+        assertEquals(421, eaten.height)
+        // A collapse still keeps its own centring: the box shrinks inside the card-sized surface and the content
+        // rides up to stay in it.
+        val pill = IslandMorphFrame.compute(boundW = 1067, boundH = 421, w = 366, h = 104, headH = 0)
+        assertEquals(-158, pill.contentOffsetY)
+        assertEquals((1067 - 366) / 2, pill.left)
+        // And `naturalBoundH` is how a caller recovers that number from a view it had to grow.
+        assertEquals(421, IslandMorphFrame.naturalBoundH(460, 39))
+    }
+
 }

@@ -330,21 +330,6 @@
             android:max="150" />
 
         <TextView
-            android:id="@+id/tvMotionCutoutLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="grow away from the camera by: 0dp"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <SeekBar
-            android:id="@+id/seekMotionCutout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="80" />
-
-        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
