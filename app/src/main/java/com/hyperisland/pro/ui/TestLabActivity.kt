@@ -184,19 +184,10 @@ class TestLabActivity : Activity() {
             R.id.seekMorphSwap, R.id.tvMorphSwapLabel, "icon becomes the app badge at", 10, 90,
             { AppSettings.getMorphGlyphSwapPct(it) }, { c, v -> AppSettings.setMorphGlyphSwapPct(c, v) }
         )
-        // The ride is separate from the style because he asked to feel "scale + fade" WITH the travelling icon,
-        // and because a bundled switch is a switch he cannot actually test.
-        findViewById<CheckBox>(R.id.chkMorphRide).apply {
-            isChecked = AppSettings.getMorphIconRide(this@TestLabActivity)
-            setOnCheckedChangeListener { _, checked ->
-                AppSettings.setMorphIconRide(this@TestLabActivity, checked)
-                Toast.makeText(
-                    this@TestLabActivity,
-                    if (checked) "Icon ride on" else "Icon ride off",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
+        // The icon ride's checkbox is GONE, deliberately: his capture of the last build had `ride=off` on every
+        // single morph, i.e. the one control that could silently delete the icon morph he has praised was sitting
+        // in the Lab, unchecked. A property he has accepted does not hide behind a switch he has to remember;
+        // if he wants the comparison back, it comes back as a style, not as a foot-gun.
         // Which axis the content enters on. The box grows evenly left-right and downward from the pill, so the
         // two choices are "follow that axis" and "the old way, where the row was re-centred in the box every
         // frame" - and his own description of the old way is why this is a choice instead of my opinion:
@@ -283,14 +274,14 @@ class TestLabActivity : Activity() {
     private fun idForMorphStyle(style: Int): Int = when (style) {
         AppSettings.MORPH_STYLE_CARRY -> R.id.radioMorphCarry
         AppSettings.MORPH_STYLE_SHAPE_ONLY -> R.id.radioMorphScaleOnly
-        AppSettings.MORPH_STYLE_PER_PART -> R.id.radioMorphPerPart
+        AppSettings.MORPH_STYLE_GLASS -> R.id.radioMorphGlass
         else -> R.id.radioMorphBalanced
     }
 
     private fun morphStyleForId(id: Int): Int = when (id) {
         R.id.radioMorphCarry -> AppSettings.MORPH_STYLE_CARRY
         R.id.radioMorphScaleOnly -> AppSettings.MORPH_STYLE_SHAPE_ONLY
-        R.id.radioMorphPerPart -> AppSettings.MORPH_STYLE_PER_PART
+        R.id.radioMorphGlass -> AppSettings.MORPH_STYLE_GLASS
         else -> AppSettings.MORPH_STYLE_BALANCED
     }
 

@@ -17,7 +17,6 @@ object AppSettings {
     private const val KEY_MORPH_CONTENT_SCALE = "morph_content_scale_pct"
     private const val KEY_MORPH_GLYPH_SWAP = "morph_glyph_swap_pct"
     private const val KEY_SHADE_POLICY = "shade_open_policy"
-    private const val KEY_MORPH_ICON_RIDE = "morph_icon_ride"
     private const val KEY_MORPH_CONTENT_DROP_DP = "morph_content_drop_dp"
     private const val KEY_MORPH_COUNT_ROLL = "morph_count_roll"
     private const val KEY_MORPH_ENTRY = "morph_content_entry"
@@ -88,12 +87,16 @@ object AppSettings {
     const val MORPH_STYLE_BALANCED = 0     // rides the shape, scales, opacity follows the shape
     const val MORPH_STYLE_CARRY = 1        // rides the shape only (what b1378 shipped)
     const val MORPH_STYLE_SHAPE_ONLY = 2   // scales and fades with the shape, no travel
-    /** The fourth form: no whole-row effect at all, every element flies on its own. */
-    const val MORPH_STYLE_PER_PART = 3
+    /**
+     * The fourth form: the content arrives out of focus and sharpens as the box lands. Apple's glass material is
+     * defined by exactly this - its lensing is what iOS's own "Reduce Motion" switch exists to remove - and
+     * Android has had a GPU-side effect for it since 12 (`RenderEffect`). The icon rides through it sharp,
+     * because the icon is the element that carries the app's identity.
+     */
+    const val MORPH_STYLE_GLASS = 3
     const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
-    const val DEFAULT_MORPH_ICON_RIDE = true
     /** Extra travel on top of the geometry, in dp. 0 means: let the row arrive on the box's own math alone. */
     const val DEFAULT_MORPH_CONTENT_DROP_DP = 20
     const val DEFAULT_MORPH_STAGGER_PCT = 35
@@ -116,8 +119,6 @@ object AppSettings {
      * icon separately - "scale plus fade bhi mast hai lekin ... upar se icon ride hoti to aur mast lagti" - and
      * bundling the two meant he could not have both. One switch, combinable with any style.
      */
-    fun getMorphIconRide(context: Context) = prefs(context).getBoolean(KEY_MORPH_ICON_RIDE, DEFAULT_MORPH_ICON_RIDE)
-    fun setMorphIconRide(context: Context, v: Boolean) = prefs(context).edit().putBoolean(KEY_MORPH_ICON_RIDE, v).apply()
 
     fun getMorphContentDropDp(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_DROP_DP, DEFAULT_MORPH_CONTENT_DROP_DP)
     fun setMorphContentDropDp(context: Context, v: Int) =
@@ -212,7 +213,7 @@ object AppSettings {
     fun getMorphStyleName(context: Context): String = when (getMorphStyle(context)) {
         MORPH_STYLE_CARRY -> "ride only (b1378)"
         MORPH_STYLE_SHAPE_ONLY -> "scale + fade only"
-        MORPH_STYLE_PER_PART -> "per-part flight"
+        MORPH_STYLE_GLASS -> "glass settle"
         else -> "balanced"
     }
 

@@ -161,46 +161,62 @@ class MorphCarryTest {
         assertTrue(MorphCarry.showsPillGlyph(t = 0.9f, growing = false, swapAt = 0.2f))
     }
 
-    @Test fun `one element means one icon, and the pill owns it again the moment the row is done`() {
-        assertFalse(MorphCarry.pillIconVisible(rideOn = true, rowShown = true))
-        assertTrue(MorphCarry.pillIconVisible(rideOn = false, rowShown = true))
-        assertTrue(MorphCarry.pillIconVisible(rideOn = true, rowShown = false))
-        assertTrue(MorphCarry.pillIconVisible(rideOn = false, rowShown = false))
-        // A pill pop from idle has no row on screen at all, so the rider must not be able to switch the pill's
-        // own icon off for the whole pop - that is how "hidden while the row is visible" is keyed on the row's
-        // real visibility rather than on a fade it no longer owns.
-        for (open in 0..100) {
-            val o = open / 100f
-            assertTrue("both copies at once while riding at open $o", !(MorphCarry.pillIconVisible(true, true) && o < 1f))
+    /**
+     * What he praised, pinned. b1378's ride is one object: the glyph scales from the pill's relative size to
+     * the launcher's about its own centre, swaps its drawable once at the midpoint, and its travel is the box's
+     * own left edge - which is zero where the row rests. The second property is the one every "fixed" version
+     * lost: an offset that has to be reset at the end is an offset that can snap, so the travel must end at
+     * nothing by arithmetic rather than by a cleanup.
+     */
+    @Test fun `the ride is one element - scaled from the pill's size, travelling to zero`() {
+        val ratio = 32f / 38f
+        assertEquals(ratio, MorphCarry.iconScale(0f, ratio), 1e-6f)
+        assertEquals(1f, MorphCarry.iconScale(1f, ratio), 1e-6f)
+        var previous = -1f
+        for (i in 0..100) {
+            val t = i / 100f
+            val s2 = MorphCarry.iconScale(t, ratio)
+            assertTrue("the glyph shrank on the way in at $t", previous <= s2 + 1e-6f)
+            previous = s2
         }
+        // The travelling offset is the box's edge, unchanged: no division, no compensation, no second owner.
+        assertEquals(0f, MorphCarry.translationX(0), 1e-6f)
+        assertEquals(-156f, MorphCarry.translationX(-156), 1e-6f)
+        // And the glyph swap is still exactly one event per direction, or the badge changes twice in a ride.
+        assertFalse(MorphCarry.showsPillGlyph(t = 0.6f, growing = true, swapAt = 0.5f))
+        assertTrue(MorphCarry.showsPillGlyph(t = 0.4f, growing = true, swapAt = 0.5f))
     }
 
     /**
-     * The rider shares its parent's transform, and the parent scales in two of the three styles. Without this
-     * compensation the travel lands short and the glyph is sized twice, which is exactly how a transformation he
-     * called "ekdum seamless" became one he could see: "abhi notice ho ja rha hai change".
+     * The fourth form is a look, not a timing difference - that is what "4th mei kuchh to alag hai he nahi,
+     * 3rd jaisa he to hai" was about - so the property that matters is that the blur is gone at rest and the
+     * text is readable before it is sharp.
      */
-    @Test fun `the rider's path is true even while the row itself is scaled`() {
-        assertEquals(350f, MorphCarry.riderShift(350f, 1f), 1e-4f)
-        // 0.88 is the scale floor he leaves the slider at by default: 350 px of travel must still arrive at 350.
-        assertEquals(397.7f, MorphCarry.riderShift(350f, 0.88f), 0.1f)
-        assertEquals(350f, MorphCarry.riderShift(350f, 0.88f) * 0.88f, 1e-3f)
-        // With nothing scaled above it, the ride's own curve is exactly what is drawn.
-        assertEquals(0.88f, MorphCarry.riderScale(0.88f, 1f), 1e-6f)
-        // And the compensation cancels the parent: the drawn size is the ride's, not the row's times the ride's.
-        assertEquals(1f, MorphCarry.riderScale(0.84f, 0.84f), 1e-6f)
-        // A degenerate parent scale must not turn into an infinite translation.
-        assertTrue(MorphCarry.riderShift(350f, 0f) < 1e4f)
-        // Exact above the guard, bounded below it - the guard exists so a broken frame cannot fling the icon off
-        // the screen, so the two regimes are asserted separately instead of one of them being wished away.
-        for (i in 5..100) {
-            val s = i / 100f
-            val drawn = MorphCarry.riderShift(350f, s) * s
-            assertEquals(350f, drawn, 1e-2f) // travel distorted at parent scale $s
+    @Test fun `the glass form sharpens to nothing and is readable before it is sharp`() {
+        val maxPx = 18f // dp(6) at a 3x screen, the largest the Lab's form will ever ask for
+        // A settled card has no blur at all: that is what keeps the last frame of a morph from leaving a soft
+        // edge behind, and what lets the effect be cleared instead of being "faded down to nearly nothing".
+        assertEquals(0f, MorphCarry.blurRadiusPx(1f, maxPx), 1e-6f)
+        assertEquals(maxPx, MorphCarry.blurRadiusPx(0f, maxPx), 1e-6f)
+        var previous = maxPx + 1f
+        for (i in 0..100) {
+            val open = i / 100f
+            val blur = MorphCarry.blurRadiusPx(open, maxPx)
+            assertTrue("blur grew while opening at $open", blur <= previous + 1e-6f)
+            previous = blur
+            // Readable well before the box lands, so there is a stretch where he can actually see the text
+            // come into focus - the whole look of the form. Past 60 % of the travel the fade is finished.
+            val alpha = MorphCarry.partProgress(open, 0f, 0.6f)
+            assertTrue("invisible while blurring at $open", alpha > 0f || open < 0.02f)
+            if (open >= 0.6f) assertEquals(1f, alpha, 1e-6f)
+            if (blur < 0.6f) assertTrue("still fading at $open", alpha >= 0.99f)
         }
-        for (i in 0..4) {
-            val tiny = i / 100f
-            assertTrue("unbounded shift at parent scale $tiny", MorphCarry.riderShift(350f, tiny) <= 350f / 0.05f + 1e-3f)
+        // Collapsing, one number drives both: contentOpen folds the exit deadline in, so by the time the box is
+        // pill-sized the content is invisible AND fully blurred again - nothing soft can be left on the pill.
+        for (i in 45..100) {
+            val c = MorphCarry.contentOpen(1f - i / 100f, towardCard = false, goneBy = 0.45f)
+            assertEquals(0f, c, 1e-6f)
+            assertEquals(maxPx, MorphCarry.blurRadiusPx(c, maxPx), 1e-4f)
         }
     }
 
@@ -254,37 +270,5 @@ class MorphCarryTest {
         }
         assertEquals(1f, MorphCarry.childOpen(0, n, 1f, stagger), 1e-6f)
         assertEquals(1f, MorphCarry.childOpen(n - 1, n, 1f, stagger), 1e-6f)
-    }
-
-
-    @Test fun `per-part windows are ordered, clamped, and reverse on the way out`() {
-        val windows = listOf(0f to 0.62f, 0.2f to 0.78f, 0.45f to 1f, 0.12f to 0.6f)
-        // At the content's start nothing is up yet and at its end everything is, whatever the window: the form
-        // can never leave a half-drawn title over a closed pill, which is the class of bug his reports keep
-        // circling.
-        for (w in windows) {
-            assertEquals("window $w at open 0", 0f, MorphCarry.partProgress(0f, w.first, w.second), 1e-6f)
-            assertEquals("window $w at open 1", 1f, MorphCarry.partProgress(1f, w.first, w.second), 1e-6f)
-        }
-        // Reading order is the point: at half travel the title is further along than the message, and the
-        // message than the buttons. All four at the same progress would just be the old whole-row fade with
-        // extra code, so that is asserted against too.
-        val title = MorphCarry.partProgress(0.5f, 0f, 0.62f)
-        val message = MorphCarry.partProgress(0.5f, 0.2f, 0.78f)
-        val actions = MorphCarry.partProgress(0.5f, 0.45f, 1f)
-        assertTrue("title $title must lead message $message", title > message)
-        assertTrue("message $message must lead actions $actions", message > actions)
-        // Collapsing, the exit deadline is folded into contentOpen first, so every part is at exactly zero by
-        // the time the box is pill-sized - and the last element to arrive is the first to leave.
-        for (i in 40..100) {
-            val c = MorphCarry.contentOpen(1f - i / 100f, towardCard = false, goneBy = 0.4f)
-            for (w in windows) {
-                assertEquals("part $w still visible at collapse step $i", 0f, MorphCarry.partProgress(c, w.first, w.second), 1e-6f)
-            }
-        }
-        val titleLeaving = MorphCarry.partProgress(0.34f, 0f, 0.62f)
-        val actionsLeaving = MorphCarry.partProgress(0.34f, 0.45f, 1f)
-        assertEquals("buttons are already gone while the title is still fading out", 0f, actionsLeaving, 1e-6f)
-        assertTrue("the title is the last thing standing", titleLeaving > 0f)
     }
 }

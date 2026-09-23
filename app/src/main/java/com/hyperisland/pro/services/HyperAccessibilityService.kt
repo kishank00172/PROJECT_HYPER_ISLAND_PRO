@@ -23,6 +23,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.RenderEffect
 import android.graphics.Region
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -513,8 +514,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphScaleFrom = 0.88f
     private var morphSwapAt = 0.5f
     private var morphOutBy = 0.4f
-    /** The per-part form: every element flies on its own and the row itself neither fades nor scales. */
-    private var morphPerPartOn = false
+    /** The glass form: the content arrives blurred and sharpens with the box; the icon stays sharp. */
+    private var morphGlassOn = false
+    /** How out of focus the glass form starts, in dp. Small on purpose: text must stay readable throughout. */
+    private val GLASS_BLUR_DP = 6
+    private var morphBlurPx = 0f
+    private var lastBlurPx = -1f
     private var lastShelfCheckAt = 0L
     /** Which app we are waiting to take the foreground after a quick action, and since when. */
     private var actionTakeoverPkg: String? = null
@@ -535,7 +540,6 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphContentDropPx = 0f
     private var morphEntryDrop = true
     private var morphStagger = 0f
-    private var morphRiderDy = 0f
     private var morphOpenFrame = 0f
     private var lastMorphBoxLeft = 0
     private var morphIconLauncher: android.graphics.drawable.Drawable? = null
@@ -3296,17 +3300,6 @@ class HyperAccessibilityService : AccessibilityService() {
      * cross-fading in different corners.
      */
     /** The rider's vertical travel, in window coordinates, from the card's icon box to the pill's icon box. */
-    private fun riderSlotDeltaY(): Float {
-        val a = appIconView ?: return 0f
-        val b = pillPreviewIcon ?: return 0f
-        if (a.width == 0 || b.width == 0) return 0f
-        val pa = IntArray(2)
-        val pb = IntArray(2)
-        a.getLocationInWindow(pa)
-        b.getLocationInWindow(pb)
-        return (pb[1] - pa[1]).toFloat()
-    }
-
     private fun morphShapeProgress(): Float =
         MorphCarry.shapeProgress(lastMorphBoxLeft, morphFromW, morphToW, morphPinW())
 
@@ -3315,9 +3308,9 @@ class HyperAccessibilityService : AccessibilityService() {
         // styles whose fade is written by the stage animator, so both owners read the same number.
         val open = MorphCarry.openProgress(morphShapeProgress(), morphTowardCard)
         morphOpenFrame = open
-        if (!morphCarryOn && !morphScaleOn && !morphIconRide && !morphPerPartOn) return
+        if (!morphCarryOn && !morphScaleOn && !morphIconRide && !morphGlassOn) return
         val g = gridRoot
-        if (morphEntryDrop && !morphPerPartOn) {
+        if (morphEntryDrop) {
             // No sideways travel: the box widens evenly on both sides, so any x movement reads as the content
             // arriving from one side. The row hangs from the box's top edge - where the pill is - and settles
             // into its centred rest place as the box completes, so the entry is on the axis the shape grows on
@@ -3350,25 +3343,34 @@ class HyperAccessibilityService : AccessibilityService() {
             g.scaleY = rowScale
         }
         if (morphOpacityFollowsShape) {
-            // Per-part leaves the ROW at full strength on purpose: the row is the sheet, and the sheet does not
-            // fade in this form - each element fades itself, one window later than the one above it.
-            setMorphContentAlpha(
-                if (morphPerPartOn) 1f else MorphCarry.contentOpen(open, morphTowardCard, morphOutBy)
-            )
+            if (morphGlassOn) {
+                // The blur is the entrance here, so the fade must not eat it: readable (though out of focus)
+                // from about a third of the travel onward, and sharpening all the way to the box's final size.
+                setMorphContentAlpha(MorphCarry.partProgress(open, 0f, 0.6f))
+                applyMorphBlur(open)
+            } else {
+                setMorphContentAlpha(MorphCarry.contentOpen(open, morphTowardCard, morphOutBy))
+            }
         }
-        if (morphPerPartOn) applyMorphParts(open)
         // The ride is its own switch now, so it can sit on top of any style - he asked for exactly that
         // combination once he had felt "scale + fade" without it.
         if (!morphIconRide) return
         val icon = appIconView ?: return
         val pill = pillPreviewIcon
-        // One element, one copy in flight. The rider lands on the pill's slot (it rides the box's own left edge,
-        // so the two positions coincide by construction), which is why standing the pill's copy down and taking
-        // it back at the end is a swap of identical pixels rather than the pop his report is about.
-        if (pill != null) {
-            val row = gridRoot
-            pill.alpha = if (MorphCarry.pillIconVisible(true, row != null && row.visibility == View.VISIBLE)) 1f else 0f
-        }
+        // RECOVERED, mechanism for mechanism, from b1378 (`5d54874`) - the build whose icon ride is the first
+        // visual change he ever praised ("wo icon morph jo tha kaafi mast hai, ekdum badhiya feel deta hai") and
+        // the thing he asked back this round: "baki ke jo do the unka icon morph pichhle do-teen build se kharab
+        // kar diya … jo ek maine praise kiya tha usko recover karo". Three of my own improvements cost him that,
+        // and each one is a lesson worth keeping in words:
+        //   * a vertical travel measured between the two icon slots. `riderY=-150px` in his log: 150 px of drift
+        //     inside a 260 ms morph is literally "notice ho ja rha hai change", and b1378 never moved the glyph
+        //     up or down at all - the two rows sit on one line.
+        //   * standing the pill's own copy down for the ride's whole duration, so the badge appeared mid-flight
+        //     instead of being one continuous object.
+        //   * dividing the shift and the size by the row's scale, which re-derived a path the row was already
+        //     drawing. The row IS the traveller; the icon is part of it, and that is what "one element" means.
+        // The price, so nobody "fixes" it again: in the styles that scale the row, the icon's travel is scaled
+        // with it (about 12 % short early on, exact where it lands). Riding is not being driven separately.
         val ratio = if (icon.width > 0 && pill != null && pill.width > 0) {
             (pill.width.toFloat() / icon.width.toFloat()).coerceIn(0.4f, 1f)
         } else {
@@ -3377,15 +3379,13 @@ class HyperAccessibilityService : AccessibilityService() {
         val scale = MorphCarry.iconScale(if (morphCarryGrowing) t else 1f - t, ratio)
         icon.pivotX = icon.width / 2f
         icon.pivotY = icon.height / 2f
-        icon.scaleX = MorphCarry.riderScale(scale, rowScale)
-        icon.scaleY = MorphCarry.riderScale(scale, rowScale)
-        // The travel belongs to the rider, not to the row's x policy. It used to ride on the row's translation
-        // by accident, so making the drop the default (which is what he asked for: no sideways content) quietly
-        // removed the icon's movement - his log line is the proof, carry=on entry=drop, and what was left was a
-        // glyph resizing in place. Dividing by the row's own scale keeps the drawn path true in the styles that
-        // scale the content, where 350 px at 0.88 would otherwise land 42 px short of the slot.
-        icon.translationX = MorphCarry.riderShift(if (morphEntryDrop) MorphCarry.translationX(lastMorphBoxLeft) else 0f, rowScale)
-        icon.translationY = MorphCarry.riderShift(morphRiderDy * (1f - open), rowScale)
+        icon.scaleX = scale
+        icon.scaleY = scale
+        // The box's own left edge, undivided: 0 at the card's rest size and the pill's edge at pill size, so the
+        // travel ends by itself - nothing to reset, nothing to snap. When the row travels too (entry=centred) the
+        // icon writes no offset at all, because the row is already carrying it.
+        icon.translationX = if (morphEntryDrop) MorphCarry.translationX(lastMorphBoxLeft) else 0f
+        icon.translationY = 0f
         val launcher = morphIconLauncher
         val glyph = morphIconPill
         if (launcher != null && glyph != null) {
@@ -3408,49 +3408,42 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun setMorphContentAlpha(a: Float) {
         val g = gridRoot ?: return
-        if (!morphIconRide) {
-            g.alpha = a
-            if (morphStagger > 0f) applyMorphStagger(1f)
-            return
-        }
-        g.alpha = 1f
-        val rider = appIconView?.parent as? View
-        for (i in 0 until g.childCount) {
-            val child = g.getChildAt(i)
-            child.alpha = if (child === rider) 1f else a
-        }
-        applyMorphStagger(a)
+        // One writer, one number, on the ROW - and therefore on everything inside it, the icon included. That is
+        // what made b1378 read as a single object moving. The per-child version of this function (round 24)
+        // existed to stop a rider being faded by the container it was leaving; with the rider gone there is
+        // nothing to protect, and writing children instead of the row was itself part of what he felt.
+        g.alpha = a
+        if (morphStagger > 0f) applyMorphStagger(a)
     }
 
     /**
-     * Per-part flight, the fourth form. Apple's content transitions are per view and each one runs along one
-     * edge (`move(edge:)`, `.push(from: .top)`, plain `opacity`); Material's container transform stages the
-     * inner views the same way instead of cross-fading a sheet. So: the title pushes in from the edge the pill
-     * sits on, the message fades through with a short rise, and the action tiles - the last thing a reader
-     * looks at - come up from the bottom edge, arriving after the text they belong to. Collapsing, the same
-     * windows run backwards, so the buttons leave first and the title is the last thing standing, which is the
-     * order the content became readable in. No whole-row alpha and no whole-row scale: that is what makes this
-     * a different form rather than the same one with more knobs.
+     * Glass settle, the fourth form - and the reason it is a LOOK and not a timing difference, which is what his
+     * verdict on the last one was ("4th mei kuchh to alag hai he nahi, 3rd jaisa he to hai").
+     *
+     * Apple's glass material is defined by its lensing: iOS 26 exposes "Reduce Motion" partly because the glass
+     * distorts as elements move, and the material is described as responding to what is under it and morphing
+     * between states. Android has carried the same idea as a GPU-side node property since API 12
+     * (`RenderEffect.createBlurEffect`), which is applied on the render thread rather than by us on the main
+     * one. So the content arrives legible-but-out-of-focus and sharpens exactly as the box completes; on the way
+     * out it blurs back out instead of only dimming. The icon is never blurred - it rides through in focus,
+     * because it is the element that carries the app's identity.
+     *
+     * Two rules keep it cheap and keep it honest: the radius is quantised to half-pixel steps, so one effect is
+     * built per step and not per frame (a frame in this morph is 8 ms at 120 Hz); and anything under half a
+     * pixel clears the effect entirely, so a settled card has no render effect attached to it at all - the last
+     * frames of a morph cannot leave a soft edge behind, and the next redraw is the plain one.
      */
-    private fun applyMorphParts(open: Float) {
+    private fun applyMorphBlur(open: Float) {
         val c = MorphCarry.contentOpen(open, morphTowardCard, morphOutBy)
-        val d = resources.displayMetrics.density
-        headerLine?.let { it.alpha = MorphCarry.partProgress(c, 0.12f, 0.6f) }
-        titleText?.let {
-            val p = MorphCarry.partProgress(c, 0f, 0.62f)
-            it.alpha = p
-            it.translationX = -(1f - p) * 26f * d
-        }
-        messageText?.let {
-            val p = MorphCarry.partProgress(c, 0.2f, 0.78f)
-            it.alpha = p
-            it.translationY = (1f - p) * 10f * d
-        }
-        actionScroll?.let {
-            val p = MorphCarry.partProgress(c, 0.45f, 1f)
-            it.alpha = p
-            it.translationY = (1f - p) * 18f * d
-        }
+        val raw = MorphCarry.blurRadiusPx(c, morphBlurPx)
+        val q = if (raw < 0.6f) 0f else (Math.round(raw * 2f) / 2f)
+        if (q == lastBlurPx) return
+        lastBlurPx = q
+        val effect = if (q > 0f) RenderEffect.createBlurEffect(q, q, Shader.TileMode.CLAMP) else null
+        headerLine?.setRenderEffect(effect)
+        titleText?.setRenderEffect(effect)
+        messageText?.setRenderEffect(effect)
+        actionScroll?.setRenderEffect(effect)
     }
 
     /** Header, title, message, actions - each with its own slice of the shape's travel, reading order first. */
@@ -3488,13 +3481,19 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun clearMorphCarry() {
         morphCarryOn = false
         morphScaleOn = false
-        morphPerPartOn = false
+        morphGlassOn = false
+        // A blur that survives the morph is a card nobody can read, and it would stay until the next text
+        // change. -1 forces the next morph to write its first step whatever this one ended on.
+        lastBlurPx = -1f
+        headerLine?.setRenderEffect(null)
+        titleText?.setRenderEffect(null)
+        messageText?.setRenderEffect(null)
+        actionScroll?.setRenderEffect(null)
         gridRoot?.scaleX = 1f
         gridRoot?.scaleY = 1f
         gridRoot?.translationX = 0f
         pillPreviewRoot?.translationX = 0f
         gridRoot?.translationY = 0f // the host resets its own centring right after; this is the drop term
-        morphRiderDy = 0f
         morphOpenFrame = 0f
         // The row's alpha is the settle path's business; these four are ours and must never stay faded, or the
         // next card is drawn with a half-transparent message and no explanation in the log.
@@ -3503,8 +3502,8 @@ class HyperAccessibilityService : AccessibilityService() {
         titleText?.alpha = 1f
         messageText?.alpha = 1f
         actionScroll?.alpha = 1f
-        // The per-part form leaves its own offsets behind too; a title still carrying -26dp of translation
-        // draws the next card's first line under the icon, with nothing in the log to say why.
+        // The glass form leaves no offsets, but the ride does: an icon still holding the box's left edge draws
+        // the next card's badge outside the row, which is the same class of bug as a stale alpha.
         titleText?.translationX = 0f
         messageText?.translationY = 0f
         actionScroll?.translationY = 0f
@@ -3784,40 +3783,46 @@ class HyperAccessibilityService : AccessibilityService() {
         val style = AppSettings.getMorphStyle(this)
         morphCarryOn = islandMorph != null &&
             (style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_CARRY)
-        morphScaleOn = style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_SHAPE_ONLY
-        // Per-part owns its alphas inside the shape-driven pass, so it needs that pass to run; and it
-        // deliberately takes the whole-row scale and the whole-row entry offset away, because with both on the
-        // row he cannot tell which element is moving - the point of the form is that each one moves.
-        morphPerPartOn = style == AppSettings.MORPH_STYLE_PER_PART
-        morphOpacityFollowsShape = morphScaleOn || morphPerPartOn
+        // The glass form scales with the shape as well: size and focus are the same idea - content settling into
+        // place - and without the scale it differs from "scale + fade" only by the blur, which is the one thing
+        // he would not see at the end of a 260 ms morph.
+        morphScaleOn = style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_SHAPE_ONLY ||
+            style == AppSettings.MORPH_STYLE_GLASS
+        // The glass form needs the shape-driven pass (the blur is written there), and it keeps the row's scale:
+        // focus and size are the same idea - the content settling into place.
+        morphGlassOn = style == AppSettings.MORPH_STYLE_GLASS
+        morphOpacityFollowsShape = morphScaleOn || morphGlassOn
         morphScaleFrom = (100 - AppSettings.getMorphContentScalePct(this)) / 100f
         morphSwapAt = AppSettings.getMorphGlyphSwapPct(this) / 100f
-        morphIconRide = AppSettings.getMorphIconRide(this)
+        // Not a switch any more. His log had `ride=off` on every morph of this session - the Lab checkbox was
+        // the one control that silently deleted the praised icon morph from all four styles, which is precisely
+        // the complaint. A property he has praised does not hide behind a checkbox he has to remember.
+        morphIconRide = true
+        morphBlurPx = dp(GLASS_BLUR_DP).toFloat()
         morphContentDropPx = dp(AppSettings.getMorphContentDropDp(this)).toFloat()
         morphEntryDrop = AppSettings.getMorphEntry(this) == AppSettings.MORPH_ENTRY_DROP
-        // The stagger is a whole-row effect on the same axis the parts use; two of them at once is not a
-        // stronger version of either, it is a third thing nobody can name.
-        morphStagger = if (morphPerPartOn) 0f else AppSettings.getMorphStaggerPct(this) / 100f
+        // The stagger fades the same views the blur is resolving; two entrances on one element is a third
+        // thing nobody can name, so the glass form runs on focus alone.
+        morphStagger = if (morphGlassOn) 0f else AppSettings.getMorphStaggerPct(this) / 100f
         morphOutBy = AppSettings.getMorphGoneByPct(this) / 100f
         morphCarryGrowing = toW + toH >= fromW + fromH
         morphFromW = fromW; morphToW = toW
         morphIconLauncher = appIconView?.drawable
         morphIconPill = pillPreviewIcon?.drawable
-        // How far the pill's slot sits from the card's, measured once while both are laid out where they rest.
-        morphRiderDy = riderSlotDeltaY()
         applyMorphCarry(0f)
         TraceLog.morph(
             "start $label dur=${durationMs}ms style=${AppSettings.getMorphStyleName(this)} " +
             "toward=${if (morphTowardCard) "card" else "pill"} " +
                 "carry=${if (morphCarryOn) "on" else "off"} scale=${if (morphScaleOn) "%.2f".format(morphScaleFrom) else "off"} " +
-                "parts=${if (morphPerPartOn) "on" else "off"} " +
-                "swap=${(morphSwapAt * 100).toInt()}% ride=${if (morphIconRide) "on" else "off"} " +
+                "swap=${(morphSwapAt * 100).toInt()}% ride=classic(b1378) " +
+                "glass=${if (morphGlassOn) "on blur=${morphBlurPx.toInt()}px" else "off"} " +
                 "entry=${if (morphEntryDrop) "drop" else "centred"} drop=${AppSettings.getMorphContentDropDp(this)}dp " +
                 "stagger=${(morphStagger * 100).toInt()}% goneBy=${(morphOutBy * 100).toInt()}% " +
-                // The travel is printed because it is the thing that silently disappeared once already: a line
-                // with ride=on and riderY=0px means the two slots are on one line (correct), and ride=on with no
-                // travel at all would mean the ride is again being carried by someone else's transform.
-                "riderY=${morphRiderDy.toInt()}px roll=${if (AppSettings.getMorphCountRoll(this)) "on" else "off"}"
+                // The travel is still printed, as a fact about the box rather than a measured slot: 0 px means
+                // the two rows are on one line, and any non-zero entry there would mean a vertical drift that
+                // b1378 never had. If "ride=classic" ever shows up with the drop off and a box edge of 0, the
+                // icon is again being carried by someone else's transform.
+                "boxLeft=${lastMorphBoxLeft}px roll=${if (AppSettings.getMorphCountRoll(this)) "on" else "off"}"
         )
     }
 

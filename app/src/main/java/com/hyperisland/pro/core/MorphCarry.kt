@@ -88,35 +88,18 @@ object MorphCarry {
     }
 
     /**
-     * The riding icon is THE element, so while it is in flight the pill's own copy is not drawn at all - one
-     * copy on screen, never a cross-fade of two, which is what `matchedGeometryEffect` gets by interpolating a
-     * single element instead of dissolving two views. It takes the slot back on the frame the row is done with
-     * it, and because the rider rides the box's own left edge it lands ON that slot, so the hand-back is a swap
-     * of identical pixels rather than a fade.
-     *
-     * This used to be `rowAlpha > 0.02`, and that is what made the transformation look broken: the row's fade
-     * reaches 0 at [goneBy] (25-45% in his own log), so the pill's icon popped in a third of the way through
-     * while the rider still had most of its travel to go. The fade is on the content views now, so the row's
-     * alpha is no longer a proxy for "the rider is on screen" - its real visibility is.
-     */
-    fun pillIconVisible(rideOn: Boolean, rowShown: Boolean): Boolean = !(rideOn && rowShown)
-
-    /**
-     * The rider's shift, converted into its parent's space so the DRAWN position is the box's own edge however
-     * the parent is transformed. Without the compensation the row's own scale shortens the travel - 350 px at
-     * 0.88 lands 42 px short of the pill's slot, which is a visible mis-fit at the hand-back - and the icon's
-     * size would be scaled twice, once by the row and once by its own curve.
-     */
-    fun riderShift(shiftPx: Float, parentScale: Float): Float = shiftPx / parentScale.coerceAtLeast(0.05f)
-
-    /**
      * The card content's own scale: it opens with the island instead of standing still inside it. [open] comes
      * from [openProgress], so both directions are already sorted out - this is one line and cannot be inverted.
      */
     fun contentScale(open: Float, from: Float): Float = from + (1f - from) * open
 
-    /** The size the rider is drawn at, with its parent's scale divided back out (see [riderShift]). */
-    fun riderScale(scale: Float, parentScale: Float): Float = scale / parentScale.coerceAtLeast(0.05f)
+    /**
+     * How out of focus the content is, in pixels, at a given [open]. The glass form's whole mechanism: the text
+     * arrives legible but blurred and sharpens exactly as the box reaches its final size, so a collapse blurs it
+     * back out instead of only dimming it. Zero at open = 1 by construction, which is what keeps a settled card
+     * pixel-identical to a card that was never animated at all.
+     */
+    fun blurRadiusPx(open: Float, maxPx: Float): Float = (1f - open) * maxPx
 
     /**
      * The content's own progress - one number that every content property reads, opacity first. Expanding, it
@@ -135,10 +118,10 @@ object MorphCarry {
         if (towardCard) open else (1f - (1f - open) / goneBy).coerceIn(0f, 1f)
 
     /**
-     * How far one element of the card has come, given the content's own [contentOpen]. The per-part form gives
-     * every element its own window - the title `[0, .6]`, the buttons `[.45, 1]` - so the elements are in
-     * reading order without a second clock to keep in step, and a collapse plays the same windows backwards:
-     * whatever arrived last is the first thing to go.
+     * How far one element of the card has come, given the content's own [contentOpen]: a window inside the
+     * travel rather than the whole of it. The glass form uses `[0, .6]` so the text is legible while it is still
+     * out of focus; a window's endpoints are inclusive and clamped, so a value outside it is 0 or 1 and nothing
+     * can be drawn at a fraction nobody asked for.
      */
     fun partProgress(open: Float, start: Float, end: Float): Float {
         val span = (end - start).coerceAtLeast(0.01f)

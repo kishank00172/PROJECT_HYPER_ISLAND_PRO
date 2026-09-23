@@ -80,10 +80,10 @@
                 android:textSize="14sp" />
 
             <RadioButton
-                android:id="@+id/radioMorphPerPart"
+                android:id="@+id/radioMorphGlass"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Per-part flight - title pushes in, message fades through, buttons rise last. No whole-row fade, no whole-row scale"
+                android:text="Glass settle - the text arrives OUT OF FOCUS and sharpens as the box lands; the icon rides in sharp (Apple's glass material, Android RenderEffect)"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
@@ -196,15 +196,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="65" />
-
-        <CheckBox
-            android:id="@+id/chkMorphRide"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Icon ride (works with any style: the pill icon travels into the card slot and becomes the badge)"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
 
         <CheckBox
             android:id="@+id/chkMorphRoll"
