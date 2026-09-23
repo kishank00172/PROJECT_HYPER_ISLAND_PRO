@@ -513,6 +513,21 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphScaleFrom = 0.88f
     private var morphSwapAt = 0.5f
     private var morphOutBy = 0.4f
+    /** The per-part form: every element flies on its own and the row itself neither fades nor scales. */
+    private var morphPerPartOn = false
+    private var lastShelfCheckAt = 0L
+    /** Which app we are waiting to take the foreground after a quick action, and since when. */
+    private var actionTakeoverPkg: String? = null
+    private var actionTakeoverAt = 0L
+    /**
+     * How long the card waits for the app it acted on to come forward before the wait itself closes the card.
+     * The takeover is the precise trigger and this is only its bound: "the action landed, the tick is visible
+     * for four seconds, and then the island is done with it" - leaving the card up indefinitely because the app
+     * chose not to cancel its own notification is what he reported.
+     */
+    private val ACTION_TAKEOVER_FALLBACK_MS = 4_000L
+    /** Minimum spacing between two shelf-state probes; each one costs binder round trips on the main thread. */
+    private val SHELF_CHECK_MIN_INTERVAL_MS = 500L
     private var morphFromW = 0
     private var morphToW = 0
     private var lastRingOp = "init"
@@ -623,17 +638,48 @@ class HyperAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            val shadeOpen = checkNotificationShadeState()
-            if (shadeOpen != isShadeOpen) {
-                // What decided it, not only that it changed: a heads-up tall enough to read as a pulled shade
-                // used to wipe the count on its own, and the log could not tell a real pull from that.
-                TraceLog.gesture(
-                    "shade -> ${if (shadeOpen) "OPEN" else "closed"} ($lastShadeEvidence) " +
-                        "policy=${AppSettings.getShadeOpenPolicyName(this)}"
-                )
-                isShadeOpen = shadeOpen
-                this@HyperAccessibilityService.visualRoot?.animate()?.alpha(1f)?.setDuration(120)?.start()
-                if (isShadeOpen) markIslandNotificationsSeenFromShade()
+            val eventPkg = event.packageName?.toString().orEmpty()
+            // A quick action leaves the card up on purpose - the tick used to be followed by a 500 ms timer that
+            // hid the island before it could be seen - but "on purpose" was only half a rule, and the other half
+            // is what he is reporting now: nothing ever brought it back down. What brings it down is the app
+            // taking over. The action asked that app to do something, so its window coming forward IS the moment
+            // the island has done its job; no delay we have to guess, and a page whose notification gets
+            // cancelled still closes through the ring's own path. Not every action brings a window - "mark as
+            // read" is the obvious one - so the wait has a bounded fallback too, see markActionTakeoverWait.
+            val awaiting = actionTakeoverPkg
+            if (awaiting != null && eventPkg == awaiting) {
+                val waitedFor = System.currentTimeMillis() - actionTakeoverAt
+                actionTakeoverPkg = null
+                TraceLog.line("ACTION", "$awaiting took the foreground ${waitedFor}ms after the action - back to the pill")
+                returnToPillAfterAction()
+            }
+            // Whether the shelf is down decides one thing: the pill hides. Getting that answer costs two binder
+            // round trips (`windows`, then each system window's root), and this event fires for every window
+            // change on the phone - the IME, an app coming forward, a heads-up. His b1396 capture had 220 STALL
+            // lines from this call alone at 24-37 ms each, and one of them landed inside the collapse he was
+            // judging (`[MORPH] end ... max=24ms@t=0.76` with checkNotificationShadeState on the stack at
+            // t=0.4). Instrumentation that eats the frames it measures is worse than none, so: ask only when the
+            // event could even be the shelf, and at most twice a second.
+            val cls = event.className?.toString().orEmpty()
+            val couldBeShelf = eventPkg.isEmpty() || eventPkg == "com.android.systemui" ||
+                cls.contains("shade", true) || cls.contains("notification", true) || cls.contains("panel", true)
+            val shelfNow = System.currentTimeMillis()
+            // (nested on purpose: an early return from onAccessibilityEvent here would also skip the
+            // ingestion fallback below it, which is a behaviour change dressed up as a performance fix.)
+            if (couldBeShelf && shelfNow - lastShelfCheckAt >= SHELF_CHECK_MIN_INTERVAL_MS) {
+                lastShelfCheckAt = shelfNow
+                val shadeOpen = checkNotificationShadeState()
+                if (shadeOpen != isShadeOpen) {
+                    // What decided it, not only that it changed: a heads-up tall enough to read as a pulled shade
+                    // used to wipe the count on its own, and the log could not tell a real pull from that.
+                    TraceLog.gesture(
+                        "shade -> ${if (shadeOpen) "OPEN" else "closed"} ($lastShadeEvidence) " +
+                            "policy=${AppSettings.getShadeOpenPolicyName(this)}"
+                    )
+                    isShadeOpen = shadeOpen
+                    this@HyperAccessibilityService.visualRoot?.animate()?.alpha(1f)?.setDuration(120)?.start()
+                    if (isShadeOpen) markIslandNotificationsSeenFromShade()
+                }
             }
         }
         // Notification ingestion used to have a second source: this event's CharSequence list,
@@ -867,6 +913,68 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postHideIsland() = mainHandler.post { hideIslandInternal() }
     private fun postUpdateIsland() = mainHandler.post { if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
+    /** Remember which app should take the foreground after a quick action, so the card comes down when it does. */
+    private fun markActionTakeoverWait(pkg: String?) {
+        if (pkg.isNullOrBlank()) {
+            TraceLog.line("ACTION", "action sent but the package is unknown - no takeover to wait for")
+            return
+        }
+        actionTakeoverPkg = pkg
+        actionTakeoverAt = System.currentTimeMillis()
+        val actedOnKey = currentNotificationKey
+        TraceLog.line(
+            "ACTION",
+            "$pkg acted on - card stays open, ring=${notificationRing.size}, page=$actedOnKey; waiting for its " +
+                "window, bound ${ACTION_TAKEOVER_FALLBACK_MS}ms"
+        )
+        mainHandler.postDelayed({ maybeCloseAfterActionWait(pkg, actedOnKey) }, ACTION_TAKEOVER_FALLBACK_MS)
+    }
+
+    /**
+     * The bound on [markActionTakeoverWait]. It only closes the card when nothing better has happened in the
+     * meantime: if the page that was acted on is no longer the one on screen, a new message has arrived and it
+     * has earned its own time on the island, so the wait is dropped rather than acted on.
+     */
+    private fun maybeCloseAfterActionWait(pkg: String, actedOnKey: String?) {
+        if (actionTakeoverPkg != pkg) return
+        if (currentStage != IslandStage.STAGE3_FULL) {
+            // Somebody already put the island away - a reply's own collapse, a swipe, a tap. Re-opening the
+            // pill from a timer would be worse than the bug this whole path exists to fix.
+            actionTakeoverPkg = null
+            TraceLog.line("ACTION", "the card was closed while waiting for $pkg - wait cleared")
+            return
+        }
+        if (currentNotificationKey != actedOnKey) {
+            actionTakeoverPkg = null
+            TraceLog.line("ACTION", "the card moved on to another page while waiting for $pkg - wait dropped, nothing to close")
+            return
+        }
+        actionTakeoverPkg = null
+        TraceLog.line(
+            "ACTION",
+            "$pkg did not take the foreground within ${ACTION_TAKEOVER_FALLBACK_MS}ms - the action is done, so back to the pill"
+        )
+        returnToPillAfterAction()
+    }
+
+    /**
+     * The island's own answer to "maine quick action use kiya, island ko wapas pill banna chahiye tha": back to
+     * the pill when the app has taken over, and all the way to idle when the ring has nothing left in it. The
+     * page itself is deliberately NOT deleted here - if the app cancels its notification the ring drops that
+     * page in the same moment, and a page removed because we *hoped* the action worked is a chat the user loses
+     * when it did not.
+     */
+    private fun returnToPillAfterAction() {
+        if (isReplyMode) exitReplyMode()
+        if (notificationRing.isEmpty()) {
+            TraceLog.line("ACTION", "ring is empty after the action - idle")
+            setStageAnimated(IslandStage.STAGE1_IDLE, expandReason)
+        } else {
+            TraceLog.line("ACTION", "${notificationRing.size} page(s) still in the ring - back to the pill")
+            setStageAnimated(IslandStage.STAGE2_PING, expandReason)
+        }
+    }
+
     private fun postCollapseIsland() = mainHandler.post { if (isReplyMode) exitReplyMode() else setStageAnimated(IslandStage.STAGE1_IDLE, expandReason) }
     private fun postToggleExpanded() = mainHandler.post {
         // Tap expands/collapses the island shell only.
@@ -1143,10 +1251,21 @@ class HyperAccessibilityService : AccessibilityService() {
      * badge only ever went up.
      */
     private fun dismissConversationFromRing(conversationKey: String, reason: Int = -1) {
-        val index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
+        var index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
         if (index < 0) {
-            ringEvent("dismiss: no page for key=$conversationKey ring=${notificationRing.size}")
-            return
+            // A cancel arrives with the status-bar key (`pkg|tag|id`), while pages are filed under the
+            // conversation key the extractor derived (`pkg|sender|NAME`). They only match when the extractor
+            // happens to produce the same shape - and when it does not, the cancel is dropped on the floor. His
+            // log has exactly that, 96 ms after a reply: `dismiss: no page for key=com.instagram.android
+            // |thread|kish.ank001 ring=1`, and the read chat then stayed on the island for the rest of the
+            // session - which is also part of why the card never went back to being a pill. Fall back to the key
+            // that was stored WITH the page: the same string, a different field name.
+            index = notificationRing.indexOfFirst { it.notificationKey == conversationKey }
+            if (index < 0) {
+                ringEvent("dismiss: no page for key=$conversationKey ring=${notificationRing.size}")
+                return
+            }
+            ringEvent("dismiss: matched the stored notification key, not a conversation key ($conversationKey)")
         }
         val gone = notificationRing[index].title
         notificationRing.removeAt(index)
@@ -1439,6 +1558,11 @@ class HyperAccessibilityService : AccessibilityService() {
         lastTitleShown = null; lastUnreadShown = -1 // the gate must not conclude the title is already right
             messageText?.text = replyText
             exitReplyMode()
+            // A reply is the one case where waiting for the app is wrong: sending does not bring the chat app
+            // forward, it leaves us looking at the island, and the 420 ms collapse is behaviour he has already
+            // accepted. The takeover wait is armed as well so a reply fired while the app is still in the
+            // background comes down the same way the quick actions do.
+            markActionTakeoverWait(currentPackageName)
             mainHandler.postDelayed({ postCollapseIsland() }, 420)
         } catch (e: Exception) {
             ReplyEchoSuppressor.clear(echoId)
@@ -1592,10 +1716,11 @@ class HyperAccessibilityService : AccessibilityService() {
                         TraceLog.gesture("action tapped: '$oldT' sent immediately, card stays open")
                         try {
                             action.actionIntent.send()
+                            markActionTakeoverWait(currentPackageName)
                         } catch (_: Exception) {
                             text = oldT
                             setTextColor(Color.WHITE)
-                            TraceLog.gesture("action send FAILED - label reverted")
+                            TraceLog.line("ACTION", "action '$oldT' send FAILED - label reverted, nothing to wait for")
                         }
                     }
                 }
@@ -3190,9 +3315,9 @@ class HyperAccessibilityService : AccessibilityService() {
         // styles whose fade is written by the stage animator, so both owners read the same number.
         val open = MorphCarry.openProgress(morphShapeProgress(), morphTowardCard)
         morphOpenFrame = open
-        if (!morphCarryOn && !morphScaleOn && !morphIconRide) return
+        if (!morphCarryOn && !morphScaleOn && !morphIconRide && !morphPerPartOn) return
         val g = gridRoot
-        if (morphEntryDrop) {
+        if (morphEntryDrop && !morphPerPartOn) {
             // No sideways travel: the box widens evenly on both sides, so any x movement reads as the content
             // arriving from one side. The row hangs from the box's top edge - where the pill is - and settles
             // into its centred rest place as the box completes, so the entry is on the axis the shape grows on
@@ -3225,8 +3350,13 @@ class HyperAccessibilityService : AccessibilityService() {
             g.scaleY = rowScale
         }
         if (morphOpacityFollowsShape) {
-            setMorphContentAlpha(MorphCarry.contentAlpha(open, morphTowardCard, morphOutBy))
+            // Per-part leaves the ROW at full strength on purpose: the row is the sheet, and the sheet does not
+            // fade in this form - each element fades itself, one window later than the one above it.
+            setMorphContentAlpha(
+                if (morphPerPartOn) 1f else MorphCarry.contentOpen(open, morphTowardCard, morphOutBy)
+            )
         }
+        if (morphPerPartOn) applyMorphParts(open)
         // The ride is its own switch now, so it can sit on top of any style - he asked for exactly that
         // combination once he had felt "scale + fade" without it.
         if (!morphIconRide) return
@@ -3292,6 +3422,37 @@ class HyperAccessibilityService : AccessibilityService() {
         applyMorphStagger(a)
     }
 
+    /**
+     * Per-part flight, the fourth form. Apple's content transitions are per view and each one runs along one
+     * edge (`move(edge:)`, `.push(from: .top)`, plain `opacity`); Material's container transform stages the
+     * inner views the same way instead of cross-fading a sheet. So: the title pushes in from the edge the pill
+     * sits on, the message fades through with a short rise, and the action tiles - the last thing a reader
+     * looks at - come up from the bottom edge, arriving after the text they belong to. Collapsing, the same
+     * windows run backwards, so the buttons leave first and the title is the last thing standing, which is the
+     * order the content became readable in. No whole-row alpha and no whole-row scale: that is what makes this
+     * a different form rather than the same one with more knobs.
+     */
+    private fun applyMorphParts(open: Float) {
+        val c = MorphCarry.contentOpen(open, morphTowardCard, morphOutBy)
+        val d = resources.displayMetrics.density
+        headerLine?.let { it.alpha = MorphCarry.partProgress(c, 0.12f, 0.6f) }
+        titleText?.let {
+            val p = MorphCarry.partProgress(c, 0f, 0.62f)
+            it.alpha = p
+            it.translationX = -(1f - p) * 26f * d
+        }
+        messageText?.let {
+            val p = MorphCarry.partProgress(c, 0.2f, 0.78f)
+            it.alpha = p
+            it.translationY = (1f - p) * 10f * d
+        }
+        actionScroll?.let {
+            val p = MorphCarry.partProgress(c, 0.45f, 1f)
+            it.alpha = p
+            it.translationY = (1f - p) * 18f * d
+        }
+    }
+
     /** Header, title, message, actions - each with its own slice of the shape's travel, reading order first. */
     private fun applyMorphStagger(base: Float) {
         val kids = arrayOf<android.view.View?>(headerLine, titleText, messageText, actionScroll)
@@ -3327,6 +3488,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun clearMorphCarry() {
         morphCarryOn = false
         morphScaleOn = false
+        morphPerPartOn = false
         gridRoot?.scaleX = 1f
         gridRoot?.scaleY = 1f
         gridRoot?.translationX = 0f
@@ -3341,6 +3503,11 @@ class HyperAccessibilityService : AccessibilityService() {
         titleText?.alpha = 1f
         messageText?.alpha = 1f
         actionScroll?.alpha = 1f
+        // The per-part form leaves its own offsets behind too; a title still carrying -26dp of translation
+        // draws the next card's first line under the icon, with nothing in the log to say why.
+        titleText?.translationX = 0f
+        messageText?.translationY = 0f
+        actionScroll?.translationY = 0f
         appIconView?.translationX = 0f
         appIconView?.translationY = 0f
         pillPreviewIcon?.alpha = 1f
@@ -3618,13 +3785,19 @@ class HyperAccessibilityService : AccessibilityService() {
         morphCarryOn = islandMorph != null &&
             (style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_CARRY)
         morphScaleOn = style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_SHAPE_ONLY
-        morphOpacityFollowsShape = morphScaleOn
+        // Per-part owns its alphas inside the shape-driven pass, so it needs that pass to run; and it
+        // deliberately takes the whole-row scale and the whole-row entry offset away, because with both on the
+        // row he cannot tell which element is moving - the point of the form is that each one moves.
+        morphPerPartOn = style == AppSettings.MORPH_STYLE_PER_PART
+        morphOpacityFollowsShape = morphScaleOn || morphPerPartOn
         morphScaleFrom = (100 - AppSettings.getMorphContentScalePct(this)) / 100f
         morphSwapAt = AppSettings.getMorphGlyphSwapPct(this) / 100f
         morphIconRide = AppSettings.getMorphIconRide(this)
         morphContentDropPx = dp(AppSettings.getMorphContentDropDp(this)).toFloat()
         morphEntryDrop = AppSettings.getMorphEntry(this) == AppSettings.MORPH_ENTRY_DROP
-        morphStagger = AppSettings.getMorphStaggerPct(this) / 100f
+        // The stagger is a whole-row effect on the same axis the parts use; two of them at once is not a
+        // stronger version of either, it is a third thing nobody can name.
+        morphStagger = if (morphPerPartOn) 0f else AppSettings.getMorphStaggerPct(this) / 100f
         morphOutBy = AppSettings.getMorphGoneByPct(this) / 100f
         morphCarryGrowing = toW + toH >= fromW + fromH
         morphFromW = fromW; morphToW = toW
@@ -3637,6 +3810,7 @@ class HyperAccessibilityService : AccessibilityService() {
             "start $label dur=${durationMs}ms style=${AppSettings.getMorphStyleName(this)} " +
             "toward=${if (morphTowardCard) "card" else "pill"} " +
                 "carry=${if (morphCarryOn) "on" else "off"} scale=${if (morphScaleOn) "%.2f".format(morphScaleFrom) else "off"} " +
+                "parts=${if (morphPerPartOn) "on" else "off"} " +
                 "swap=${(morphSwapAt * 100).toInt()}% ride=${if (morphIconRide) "on" else "off"} " +
                 "entry=${if (morphEntryDrop) "drop" else "centred"} drop=${AppSettings.getMorphContentDropDp(this)}dp " +
                 "stagger=${(morphStagger * 100).toInt()}% goneBy=${(morphOutBy * 100).toInt()}% " +

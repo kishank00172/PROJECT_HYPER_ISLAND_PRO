@@ -88,6 +88,8 @@ object AppSettings {
     const val MORPH_STYLE_BALANCED = 0     // rides the shape, scales, opacity follows the shape
     const val MORPH_STYLE_CARRY = 1        // rides the shape only (what b1378 shipped)
     const val MORPH_STYLE_SHAPE_ONLY = 2   // scales and fades with the shape, no travel
+    /** The fourth form: no whole-row effect at all, every element flies on its own. */
+    const val MORPH_STYLE_PER_PART = 3
     const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
@@ -210,6 +212,7 @@ object AppSettings {
     fun getMorphStyleName(context: Context): String = when (getMorphStyle(context)) {
         MORPH_STYLE_CARRY -> "ride only (b1378)"
         MORPH_STYLE_SHAPE_ONLY -> "scale + fade only"
+        MORPH_STYLE_PER_PART -> "per-part flight"
         else -> "balanced"
     }
 

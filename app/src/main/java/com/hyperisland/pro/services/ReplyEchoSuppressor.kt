@@ -34,7 +34,11 @@ object ReplyEchoSuppressor {
     // The old rule was "Instagram + my text appears anywhere inside the incoming message, within
     // 10s" -> reply "ok" and every incoming chat containing "ok" ("look at this") was deleted.
     // That is why whole stretches of Instagram DMs never reached the island.
-    private const val PERSONAL_INSTAGRAM_ECHO_WINDOW_MS = 2_500L
+    // Measured, not guessed: in the b1396 log my own reply came back 4 921 ms after the send went down, and a
+    // 2.5 s window rejected it. 6 s still cannot reach a normal conversation - two people do not send each other
+    // the same whole sentence inside six seconds, and the exact-text plus same-thread rule below is what makes
+    // that true.
+    private const val PERSONAL_INSTAGRAM_ECHO_WINDOW_MS = 6_000L
 
     /** Below this many characters, text is not evidence of anything. Never suppress on it. */
     private const val MIN_ECHO_TEXT = 6
@@ -168,6 +172,12 @@ object ReplyEchoSuppressor {
             if (matchIndex >= 0) {
                 val hit = pending[matchIndex]
                 pending.removeAt(matchIndex)
+                // Into the trace log as well as logcat: "my reply came back at me" is only debuggable if the
+                // drop appears in the same file as the ingest that tried to show it.
+                com.hyperisland.pro.core.TraceLog.line(
+                    "ECHO",
+                    "dropped own reply from $pkg thread=\"$title\" text=\"${message.take(40)}\" age=${now - hit.createdAt}ms"
+                )
                 // One line per suppression, always on: "a message vanished and nobody knew why" was
                 // the actual bug report. Filtered out of release noise by level if that ever matters.
                 Log.i(TAG, "SUPPRESSED echo pkg=$pkg thread=\"$title\" text=\"${message.take(60)}\" " +
@@ -196,14 +206,28 @@ object ReplyEchoSuppressor {
         if (age !in 0L..RETAIN_WINDOW_MS) return false
 
         val sentText = entry.replyText
-        if (sentText.length < MIN_ECHO_TEXT) return false // "ok", "hi", "\ud83d\udc4d" match half the language
         val latestTextMatches = latestMessagingMessage?.text == sentText
         val normalTextMatches = cleanMessage == sentText || cleanTitle == sentText
+        if (!latestTextMatches && !normalTextMatches) return false
         // Same thread guard: an echo rides the notification of the thread I replied from. If the
         // incoming notification belongs to a different thread, it is a real message, not my echo.
         val sameThread = entry.conversationTitle.isBlank() || baseTitle == entry.conversationTitle
 
-        if (!latestTextMatches && !normalTextMatches) return false
+        // Tier 0: the app told me, in so many words, that this one is mine.
+        //
+        // The length guard used to run before every rule, and that ordering is the bug: a four-character reply
+        // ("hiii") whose echo arrived titled "You" 4.9 s later was refused on length alone, so my own message
+        // came back at me as a card - new page, count 1 -> 2, and the pill re-lit after it had already
+        // collapsed. A self marker does not need my text to be long, because the app is not being asked to
+        // identify my sentence, it is announcing the sender as me. It still has to match the text exactly
+        // (containment is not enough), which is what keeps an unrelated "You" conversation safe.
+        val incomingLooksSelf = baseTitle == "you" || baseTitle == "me" ||
+            baseMessage.startsWith("you:") || baseMessage.startsWith("you ") ||
+            baseMessage.startsWith("me:") || baseMessage.startsWith("me ")
+        if (incomingLooksSelf) return true
+
+        // From here down a match rests on my text alone, so it needs text that means something.
+        if (sentText.length < MIN_ECHO_TEXT) return false // "ok", "hi", "\ud83d\udc4d" match half the language
 
         // Personal-build Instagram override:
         // If I replied from Instagram notification and the exact same text comes back within 10 seconds,

@@ -283,12 +283,14 @@ class TestLabActivity : Activity() {
     private fun idForMorphStyle(style: Int): Int = when (style) {
         AppSettings.MORPH_STYLE_CARRY -> R.id.radioMorphCarry
         AppSettings.MORPH_STYLE_SHAPE_ONLY -> R.id.radioMorphScaleOnly
+        AppSettings.MORPH_STYLE_PER_PART -> R.id.radioMorphPerPart
         else -> R.id.radioMorphBalanced
     }
 
     private fun morphStyleForId(id: Int): Int = when (id) {
         R.id.radioMorphCarry -> AppSettings.MORPH_STYLE_CARRY
         R.id.radioMorphScaleOnly -> AppSettings.MORPH_STYLE_SHAPE_ONLY
+        R.id.radioMorphPerPart -> AppSettings.MORPH_STYLE_PER_PART
         else -> AppSettings.MORPH_STYLE_BALANCED
     }
 

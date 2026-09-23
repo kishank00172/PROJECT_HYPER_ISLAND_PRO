@@ -1,6 +1,7 @@
 package com.hyperisland.pro.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -78,5 +79,48 @@ class TraceLogTest {
         TraceLog.line("TOUCH", "live")
         assertEquals(4, TraceLog.size())
         assertEquals("live", TraceLog.snapshot().lineSequence().last().substringAfter("[TOUCH] "))
+    }
+
+
+    @Test fun `a run of identical lines reads as one line with a count`() {
+        val lines = listOf(
+            "12:00:01 #10 [STALL] 30ms main thread in getRoot",
+            "12:00:02 #11 [STALL] 30ms main thread in getRoot",
+            "12:00:03 #12 [STALL] 30ms main thread in getRoot",
+            "12:00:04 #13 [MORPH] start pill->card",
+            "12:00:05 #14 [MORPH] start pill->card"
+        )
+        val collapsed = TraceLog.collapseRuns(lines)
+        assertEquals(2, collapsed.size)
+        // The FIRST line of a run keeps its own stamp and sequence number: time order survives the merge, so a
+        // collapsed log can still be lined up against a morph that started at #13.
+        assertTrue(collapsed[0], collapsed[0].startsWith("12:00:01 #10"))
+        assertTrue(collapsed[0], collapsed[0].endsWith("(x3)"))
+        assertTrue(collapsed[1], collapsed[1].endsWith("(x2)"))
+        assertEquals(1, TraceLog.collapseRuns(listOf(lines[0])).size)
+        assertEquals(0, TraceLog.collapseRuns(emptyList()).size)
+    }
+
+    @Test fun `hiding noise is a tag decision and can never swallow an event`() {
+        assertTrue(TraceLog.isChatter("12:00:01 #1 [STALL] 30ms in getRoot"))
+        assertTrue(TraceLog.isChatter("12:00:01 #1 [FRAME] window=120fps max=8ms"))
+        assertFalse(TraceLog.isChatter("12:00:01 #1 [MORPH] start pill->card"))
+        assertFalse(TraceLog.isChatter("12:00:01 #1 [INGEST] show com.instagram.android 'You' hiii"))
+        // A line that merely mentions the word is an event. Hiding an event is exactly the thing a log viewer
+        // is not allowed to do, which is why this is a tag test and not a text filter.
+        assertFalse(TraceLog.isChatter("12:00:01 #1 [ACTION] the FRAME was dropped during the morph"))
+        assertFalse(TraceLog.isChatter("a line with no brackets at all"))
+        assertEquals("STALL", TraceLog.tagOf("12:00:01 #1 [STALL] x"))
+        assertEquals("", TraceLog.tagOf("no tag"))
+    }
+
+    @Test fun `reading the tail does not consume it`() {
+        repeat(25) { TraceLog.line("TOUCH", "line$it") }
+        val last = TraceLog.tailLines(5)
+        assertEquals(5, last.size)
+        assertEquals("line21", last.first().substringAfter("] "))
+        assertEquals("line25", last.last().substringAfter("] "))
+        assertEquals(25, TraceLog.size())
+        assertEquals(25, TraceLog.tailLines(100).size)
     }
 }

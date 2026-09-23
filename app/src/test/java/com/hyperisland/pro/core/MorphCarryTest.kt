@@ -124,23 +124,23 @@ class MorphCarryTest {
 
     @Test fun `opacity has one ramp per direction and never overshoots`() {
         // Expanding: invisible while the box is a pill, solid when it is a card.
-        assertEquals(0f, MorphCarry.contentAlpha(0f, towardCard = true), 1e-6f)
-        assertEquals(0.5f, MorphCarry.contentAlpha(0.5f, towardCard = true), 1e-6f)
-        assertEquals(1f, MorphCarry.contentAlpha(1f, towardCard = true), 1e-6f)
+        assertEquals(0f, MorphCarry.contentOpen(0f, towardCard = true), 1e-6f)
+        assertEquals(0.5f, MorphCarry.contentOpen(0.5f, towardCard = true), 1e-6f)
+        assertEquals(1f, MorphCarry.contentOpen(1f, towardCard = true), 1e-6f)
         // Collapsing: the two ends of the rule his report is about. The row must still be solid while the card
         // is a card, and must be GONE by [goneBy] of the shape's travel - b1382 had this backwards (faded at the
         // start, back to full opacity at the end), and being visible at the end is what drew the card's row and
         // its icon on top of the closed pill: "icon duplicate hoke thoda right shift hoke original wale pe draw
         // ho jata hai", "pill bhi duplicate".
-        assertEquals(1f, MorphCarry.contentAlpha(1f, towardCard = false, goneBy = 0.4f), 1e-6f)
-        assertEquals(0.5f, MorphCarry.contentAlpha(0.8f, towardCard = false, goneBy = 0.4f), 1e-6f)
-        assertEquals(0f, MorphCarry.contentAlpha(0.6f, towardCard = false, goneBy = 0.4f), 1e-6f)
+        assertEquals(1f, MorphCarry.contentOpen(1f, towardCard = false, goneBy = 0.4f), 1e-6f)
+        assertEquals(0.5f, MorphCarry.contentOpen(0.8f, towardCard = false, goneBy = 0.4f), 1e-6f)
+        assertEquals(0f, MorphCarry.contentOpen(0.6f, towardCard = false, goneBy = 0.4f), 1e-6f)
         // Exactly zero past the deadline, not merely small: a half-faded row hanging inside a pill is the bug.
-        for (i in 40..100) assertEquals(0f, MorphCarry.contentAlpha(1f - i / 100f, false, 0.4f), 1e-6f)
+        for (i in 40..100) assertEquals(0f, MorphCarry.contentOpen(1f - i / 100f, false, 0.4f), 1e-6f)
         for (i in 0..100) {
             val p = i / 100f
             for (toward in booleanArrayOf(true, false)) {
-                val a = MorphCarry.contentAlpha(MorphCarry.openProgress(p, toward), toward, 0.45f)
+                val a = MorphCarry.contentOpen(MorphCarry.openProgress(p, toward), toward, 0.45f)
                 assertTrue("alpha out of range: $a", a in 0f..1f)
                 if (!toward && p >= 0.45f) assertEquals("drawn over a closed pill at $p", 0f, a, 1e-6f)
             }
@@ -254,5 +254,37 @@ class MorphCarryTest {
         }
         assertEquals(1f, MorphCarry.childOpen(0, n, 1f, stagger), 1e-6f)
         assertEquals(1f, MorphCarry.childOpen(n - 1, n, 1f, stagger), 1e-6f)
+    }
+
+
+    @Test fun `per-part windows are ordered, clamped, and reverse on the way out`() {
+        val windows = listOf(0f to 0.62f, 0.2f to 0.78f, 0.45f to 1f, 0.12f to 0.6f)
+        // At the content's start nothing is up yet and at its end everything is, whatever the window: the form
+        // can never leave a half-drawn title over a closed pill, which is the class of bug his reports keep
+        // circling.
+        for (w in windows) {
+            assertEquals("window $w at open 0", 0f, MorphCarry.partProgress(0f, w.first, w.second), 1e-6f)
+            assertEquals("window $w at open 1", 1f, MorphCarry.partProgress(1f, w.first, w.second), 1e-6f)
+        }
+        // Reading order is the point: at half travel the title is further along than the message, and the
+        // message than the buttons. All four at the same progress would just be the old whole-row fade with
+        // extra code, so that is asserted against too.
+        val title = MorphCarry.partProgress(0.5f, 0f, 0.62f)
+        val message = MorphCarry.partProgress(0.5f, 0.2f, 0.78f)
+        val actions = MorphCarry.partProgress(0.5f, 0.45f, 1f)
+        assertTrue("title $title must lead message $message", title > message)
+        assertTrue("message $message must lead actions $actions", message > actions)
+        // Collapsing, the exit deadline is folded into contentOpen first, so every part is at exactly zero by
+        // the time the box is pill-sized - and the last element to arrive is the first to leave.
+        for (i in 40..100) {
+            val c = MorphCarry.contentOpen(1f - i / 100f, towardCard = false, goneBy = 0.4f)
+            for (w in windows) {
+                assertEquals("part $w still visible at collapse step $i", 0f, MorphCarry.partProgress(c, w.first, w.second), 1e-6f)
+            }
+        }
+        val titleLeaving = MorphCarry.partProgress(0.34f, 0f, 0.62f)
+        val actionsLeaving = MorphCarry.partProgress(0.34f, 0.45f, 1f)
+        assertEquals("buttons are already gone while the title is still fading out", 0f, actionsLeaving, 1e-6f)
+        assertTrue("the title is the last thing standing", titleLeaving > 0f)
     }
 }

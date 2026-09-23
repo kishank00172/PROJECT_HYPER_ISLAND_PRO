@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
@@ -43,6 +44,19 @@ class TraceLogActivity : Activity() {
     private lateinit var body: TextView
     private lateinit var status: TextView
     private var followTail = true
+
+    /**
+     * True between ACTION_DOWN and ACTION_UP. Writing a scroll position while a gesture is running is how a log
+     * screen ends up fighting a finger, and that is exactly what he reported ("swipe karta hu to force swipe ho
+     * jata hai"), so no code path is allowed to move this view while it is true.
+     */
+    private var userTouching = false
+
+    /** The viewer's own filter: on by default, so the story is readable; the export always holds everything. */
+    private var quiet = true
+
+    /** How many lines were on screen when the tail last moved. Its difference is what the status line reports. */
+    private var shownTotal = -1
 
     /** The last tail handed to the TextView; identical text must not touch the view again. */
     private var renderedTail = ""
@@ -97,13 +111,31 @@ class TraceLogActivity : Activity() {
         // Horizontal scroll off, wrapping on: a dropped-swipe reason is a sentence, and sideways
         // scrolling through 600 lines is how a log stops being read.
         scroll = ScrollView(this).apply {
-            // He should not have to press TOP to stop being dragged around: the moment the view is
-            // anywhere but at the bottom, the user is reading, and the tail stops pulling.
+            // Following is a promise about the bottom, and the bottom is where new lines appear. Anywhere else
+            // the user is reading, and reading means the text does not move under him: b1396's log had 239
+            // sampler lines per session arriving while he was trying to find four events in it, and every swap
+            // re-laid the child out, let the ScrollView clamp his offset, and then ran a corrective scroll a
+            // frame later - up, down, up again, which is what he means by "kabhi upar ja rha hai kabhi niche".
             setOnScrollChangeListener { _, _, y, _, _ ->
                 // The listener hands out a View, which has no children; the ScrollView itself is the apply
                 // receiver here, so read the one child off that.
                 val child = getChildAt(0)
                 if (child != null) followTail = y + height >= child.bottom - 8
+            }
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> userTouching = true
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        userTouching = false
+                        // Decided at the end of the drag, once: releasing at the bottom picks the tail back up,
+                        // releasing anywhere else leaves the view exactly where he put it.
+                        scroll?.let { s ->
+                            val c = s.getChildAt(0)
+                            if (c != null) followTail = s.scrollY + s.height >= c.bottom - 8
+                        }
+                    }
+                }
+                false // observe, never consume - the ScrollView has to see the gesture or it stops scrolling
             }
             addView(body, LinearLayout.LayoutParams(-1, -2))
             isVerticalScrollBarEnabled = true
@@ -113,7 +145,7 @@ class TraceLogActivity : Activity() {
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8f), 0, 0) }
         row1.addView(Button(this).apply {
             text = "TAIL"; setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(24, 26, 32))
-            isAllCaps = false; setOnClickListener { followTail = true; render(); scrollBottom() }
+            isAllCaps = false; setOnClickListener { followTail = true; render(force = true); scrollBottom() }
         }, lp())
         row1.addView(Button(this).apply {
             text = "TOP"; setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(24, 26, 32))
@@ -126,6 +158,20 @@ class TraceLogActivity : Activity() {
                 auto = !auto
                 text = if (auto) "LIVE" else "PAUSED"
                 if (auto) ticker.postDelayed(tick, 0L) else ticker.removeCallbacks(tick)
+            }
+        }, lp())
+        row1.addView(Button(this).apply {
+            text = if (quiet) "QUIET" else "NOISY"; setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(24, 26, 32))
+            isAllCaps = false
+            setOnClickListener {
+                quiet = !quiet
+                text = if (quiet) "QUIET" else "NOISY"
+                render(force = true)
+                Toast.makeText(
+                    this@TraceLogActivity,
+                    if (quiet) "sampler lines hidden - the export still has them all" else "showing every line",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }, lp())
         root.addView(row1)
@@ -247,27 +293,45 @@ class TraceLogActivity : Activity() {
      * island is smooth. A tool that eats the frames it is measuring is not a tool, so the screen keeps a tail
      * and the export keeps everything.
      */
-    private fun render() {
-        val n = TraceLog.size()
-        val text = TraceLog.tail(VISIBLE_LINES)
+    private fun render(force: Boolean = false) {
+        val total = TraceLog.size()
+        if (!followTail && !force) {
+            // Reading, not following: the text stays exactly where it is and nothing else touches this view.
+            // Lines still arrive in the buffer (and the export takes all of them); the status says how many are
+            // waiting, because "is it still logging?" is the first question a frozen screen raises.
+            if (total != shownTotal) {
+                status.text = "frozen for reading · ${total - maxOf(0, shownTotal)} new line(s) since · TAIL follows again"
+            }
+            return
+        }
+        // Filtering happens over a wider window than the one shown, so hiding 4 sampler lines in 5 does not
+        // leave a half-empty screen; collapseRuns then turns a run of identical lines into one line with a count.
+        val window = if (quiet) VISIBLE_LINES * 5 else VISIBLE_LINES
+        val picked = TraceLog.tailLines(window)
+        val kept = if (quiet) picked.filterNot { TraceLog.isChatter(it) } else picked
+        val collapsed = TraceLog.collapseRuns(kept).takeLast(VISIBLE_LINES)
+        val text = collapsed.joinToString("\n")
         // Nothing new, so do not touch the TextView. Re-assigning identical text rebuilt a StaticLayout every
         // 700 ms and his sampler caught that 204 times in one session: the log screen was the single biggest
-        // main-thread cost in a session whose whole point was to find main-thread costs. The status line still
-        // refreshes, because an empty buffer on the first frame is the "glitch at the start" he saw.
+        // main-thread cost in a session whose whole point was to find main-thread costs.
         if (text != renderedTail) {
             renderedTail = text
-            val keep = scroll?.scrollY ?: 0
             body.text = text
-            // A text swap re-lays the child out and ScrollView clamps its offset to the new height, which is
-            // the teleport he reported: reading the middle, thrown to the top, or yanked to the bottom. Only
-            // the tail view is allowed to follow the newest line; everything else keeps the offset it had.
-            scroll?.post {
-                if (followTail) scroll?.fullScroll(View.FOCUS_DOWN) else scroll?.scrollY = keep
-            }
+            // The scroll runs after the new text has been measured (post), which is why the position no longer
+            // overshoots and gets clamped back - and never during a gesture, which is why it no longer fights
+            // a swipe. Only following is allowed to move this view at all.
+            if (!userTouching && followTail) scroll?.post { if (followTail) scroll?.fullScroll(View.FOCUS_DOWN) }
         }
+        shownTotal = total
         val lost = TraceLog.droppedLines
-        status.text = "showing last ${minOf(n, VISIBLE_LINES)} of $n lines kept · EXPORT writes all $n · $n - ${maxOf(0, n - startedAtLines)} added since this screen opened" +
-            (if (lost > 0L) " · $lost rolled off the front (buffer is ${TraceLog.MAX_LINES})" else "")
+        val hidden = picked.size - kept.size
+        status.text = "live tail · $total line(s) kept, ${collapsed.size} shown" +
+            (if (hidden > 0) " · $hidden sampler line(s) hidden (QUIET off)" else "") +
+            (if (lost > 0L) " · $lost rolled off the front (buffer ${TraceLog.MAX_LINES})" else "") +
+            // He asked what this screen even is: it is not a recorder that starts on a change, it is a tail of a
+            // buffer the service writes to all the time, so the line says so, in the units he reads in.
+            "\nwritten as things happen (every tag except STALL/FRAME is an event) · EXPORT writes all $total" +
+            (if (total > startedAtLines) " · ${total - startedAtLines} since you opened this" else "")
     }
 
     private fun scrollBottom() {

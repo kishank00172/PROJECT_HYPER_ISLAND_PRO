@@ -119,7 +119,8 @@ object MorphCarry {
     fun riderScale(scale: Float, parentScale: Float): Float = scale / parentScale.coerceAtLeast(0.05f)
 
     /**
-     * One owner of the card content's opacity. Expanding, it comes up with the shape. Collapsing, it has to be
+     * The content's own progress - one number that every content property reads, opacity first. Expanding, it
+     * comes up with the shape. Collapsing, it has to be
      * gone before the shrinking box could cut a glyph in half, so it gets out of the way by [goneBy] of the
      * travel - that number was measured on hardware (the two collapse targets sat at 0.40 to idle and 0.45 to
      * the ping pill), which is why it is a TestLab slider and not a constant of mine.
@@ -130,6 +131,17 @@ object MorphCarry {
      * "pill bhi duplicate", "aakhri frames mei card ka content overlay dikh raha hai". One direction rule up
      * front, in [openProgress], is what keeps that from being re-introduced.
      */
-    fun contentAlpha(open: Float, towardCard: Boolean, goneBy: Float = 0.45f): Float =
+    fun contentOpen(open: Float, towardCard: Boolean, goneBy: Float = 0.45f): Float =
         if (towardCard) open else (1f - (1f - open) / goneBy).coerceIn(0f, 1f)
+
+    /**
+     * How far one element of the card has come, given the content's own [contentOpen]. The per-part form gives
+     * every element its own window - the title `[0, .6]`, the buttons `[.45, 1]` - so the elements are in
+     * reading order without a second clock to keep in step, and a collapse plays the same windows backwards:
+     * whatever arrived last is the first thing to go.
+     */
+    fun partProgress(open: Float, start: Float, end: Float): Float {
+        val span = (end - start).coerceAtLeast(0.01f)
+        return ((open - start) / span).coerceIn(0f, 1f)
+    }
 }

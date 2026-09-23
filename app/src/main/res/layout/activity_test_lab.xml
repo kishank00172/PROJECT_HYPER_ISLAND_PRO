@@ -79,6 +79,14 @@
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
+            <RadioButton
+                android:id="@+id/radioMorphPerPart"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Per-part flight - title pushes in, message fades through, buttons rise last. No whole-row fade, no whole-row scale"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
         </RadioGroup>
 
         <TextView

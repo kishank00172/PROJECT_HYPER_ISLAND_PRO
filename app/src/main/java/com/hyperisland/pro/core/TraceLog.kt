@@ -111,6 +111,52 @@ object TraceLog {
         if (lines.size <= n) lines.joinToString("\n") else lines.drop(lines.size - n).joinToString("\n")
     }
 
+    /** The tail as separate lines, so the reader can filter and merge without re-splitting one big string. */
+    fun tailLines(n: Int): List<String> = synchronized(lock) {
+        if (lines.size <= n) lines.toList() else lines.drop(lines.size - n).toList()
+    }
+
+    /**
+     * The tags that are not events. `[STALL]` and `[FRAME]` are the sampler reporting what the main thread was
+     * busy with during a window, not something the island decided - they have to stay in the exported file and
+     * they must not sit on the screen someone is trying to read. His b1396 capture was 574 lines of which 220
+     * were STALL and 19 FRAME: four lines of noise per line of story, which is why he could not read it.
+     */
+    val CHATTER_TAGS = setOf("STALL", "FRAME")
+
+    fun tagOf(line: String): String {
+        val a = line.indexOf('[')
+        val b = line.indexOf(']', a + 1)
+        return if (a >= 0 && b > a) line.substring(a + 1, b) else ""
+    }
+
+    fun isChatter(line: String, chatter: Set<String> = CHATTER_TAGS): Boolean = tagOf(line) in chatter
+
+    /**
+     * Consecutive lines that say the same thing are one event with a count: the sampler writes the same stack
+     * every window while a path stays slow, so the repetition measures duration, not how many things happened.
+     * The first line of a run keeps its timestamp and the run length is appended. Only the message body is
+     * compared, so the stamp and the `#seq` do not defeat the merge.
+     */
+    fun collapseRuns(input: List<String>): List<String> {
+        if (input.isEmpty()) return input
+        val out = ArrayList<String>(input.size)
+        var head = ""
+        var body = ""
+        var run = 0
+        for (line in input) {
+            val b = line.substringAfter("] ", line)
+            if (run > 0 && b == body) {
+                run++
+            } else {
+                if (run > 0) out.add(if (run > 1) "$head  (x$run)" else head)
+                head = line; body = b; run = 1
+            }
+        }
+        out.add(if (run > 1) "$head  (x$run)" else head)
+        return out
+    }
+
     fun size(): Int = synchronized(lock) { lines.size }
 
     /** Wiping the buffer also restarts the line numbering, so a test/reader can rely on `#1`. */
