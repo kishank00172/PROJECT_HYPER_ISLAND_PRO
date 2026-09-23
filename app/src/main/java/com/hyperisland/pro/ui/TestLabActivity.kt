@@ -197,10 +197,36 @@ class TestLabActivity : Activity() {
                 ).show()
             }
         }
+        // Which axis the content enters on. The box grows evenly left-right and downward from the pill, so the
+        // two choices are "follow that axis" and "the old way, where the row was re-centred in the box every
+        // frame" - and his own description of the old way is why this is a choice instead of my opinion:
+        // "upper right side se niche center ki aur aa rha hai", "3rd option upper left side".
+        val entryGroup = findViewById<RadioGroup>(R.id.radioMorphEntry)
+        entryGroup.check(
+            if (AppSettings.getMorphEntry(this) == AppSettings.MORPH_ENTRY_CENTRED) R.id.radioMorphEntryCentred
+            else R.id.radioMorphEntryDrop
+        )
+        entryGroup.setOnCheckedChangeListener { _, checkedId ->
+            AppSettings.setMorphEntry(
+                this,
+                if (checkedId == R.id.radioMorphEntryCentred) AppSettings.MORPH_ENTRY_CENTRED else AppSettings.MORPH_ENTRY_DROP
+            )
+            Toast.makeText(this, "Content entry: " + AppSettings.getMorphEntryName(this), Toast.LENGTH_SHORT).show()
+        }
         bindMorphSeek(
-            R.id.seekMorphLead, R.id.tvMorphLeadLabel, "content pulled out of the pill by", 0, 48,
-            { AppSettings.getMorphContentLeadDp(it) }, { c, v -> AppSettings.setMorphContentLeadDp(c, v) },
+            R.id.seekMorphDrop, R.id.tvMorphDropLabel, "extra drop from the pill", 0, 40,
+            { AppSettings.getMorphContentDropDp(it) }, { c, v -> AppSettings.setMorphContentDropDp(c, v) },
             unit = "dp"
+        )
+        bindMorphSeek(
+            R.id.seekMorphStagger, R.id.tvMorphStaggerLabel, "entry staggered by", 0, 60,
+            { AppSettings.getMorphStaggerPct(it) }, { c, v -> AppSettings.setMorphStaggerPct(c, v) }
+        )
+        // The collapse's deadline. Above this share of the shape's travel nothing of the row may still be
+        // drawn over the pill; the old 40/45 constants that only I could tune are this slider now.
+        bindMorphSeek(
+            R.id.seekMorphGone, R.id.tvMorphGoneLabel, "content gone by", 25, 90,
+            { AppSettings.getMorphGoneByPct(it) }, { c, v -> AppSettings.setMorphGoneByPct(c, v) }
         )
         findViewById<Button>(R.id.btnReplayMorph).setOnClickListener {
             // Both directions on one press: "opens nicely, closes wrong" is a real answer he could not

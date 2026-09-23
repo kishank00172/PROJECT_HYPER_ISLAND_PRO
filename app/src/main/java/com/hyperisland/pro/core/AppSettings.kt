@@ -18,7 +18,10 @@ object AppSettings {
     private const val KEY_MORPH_GLYPH_SWAP = "morph_glyph_swap_pct"
     private const val KEY_SHADE_POLICY = "shade_open_policy"
     private const val KEY_MORPH_ICON_RIDE = "morph_icon_ride"
-    private const val KEY_MORPH_CONTENT_LEAD_DP = "morph_content_lead_dp"
+    private const val KEY_MORPH_CONTENT_DROP_DP = "morph_content_drop_dp"
+    private const val KEY_MORPH_ENTRY = "morph_content_entry"
+    private const val KEY_MORPH_STAGGER_PCT = "morph_stagger_pct"
+    private const val KEY_MORPH_GONE_BY_PCT = "morph_gone_by_pct"
     private const val KEY_ISLAND_CORNER_RADIUS_DP = "island_corner_radius_dp"
 
     private const val KEY_ISLAND_STAGE2_WIDTH_DP = "island_stage2_width_dp"
@@ -88,8 +91,22 @@ object AppSettings {
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
     const val DEFAULT_MORPH_ICON_RIDE = true
-    /** How far the row is still pulled into the pill's mouth at the end of the shape's travel, in dp. */
-    const val DEFAULT_MORPH_CONTENT_LEAD_DP = 14
+    /** Extra travel on top of the geometry, in dp. 0 means: let the row arrive on the box's own math alone. */
+    const val DEFAULT_MORPH_CONTENT_DROP_DP = 20
+    const val DEFAULT_MORPH_STAGGER_PCT = 35
+    const val DEFAULT_MORPH_GONE_BY_PCT = 45
+
+    /**
+     * Where the content enters from. The box grows evenly on both sides and hangs from its own top edge, so
+     * "drop from the pill" moves the content on that same axis; "centred in the box" is what the earlier builds
+     * did - the host re-centred the row in the drawn box every frame, and the carry slid it in from the right,
+     * which he described as arriving "upper right side se niche center ki aur" (and "upper left" without the
+     * carry). Both stay available because the feeling is his call, and the arithmetic behind each is in
+     * IslandMorphFrame.
+     */
+    const val MORPH_ENTRY_DROP = 0
+    const val MORPH_ENTRY_CENTRED = 1
+    const val DEFAULT_MORPH_ENTRY = MORPH_ENTRY_DROP
 
     /**
      * The icon ride is NOT part of a style any more. He liked "scale + fade" for the content and the travelling
@@ -99,9 +116,27 @@ object AppSettings {
     fun getMorphIconRide(context: Context) = prefs(context).getBoolean(KEY_MORPH_ICON_RIDE, DEFAULT_MORPH_ICON_RIDE)
     fun setMorphIconRide(context: Context, v: Boolean) = prefs(context).edit().putBoolean(KEY_MORPH_ICON_RIDE, v).apply()
 
-    fun getMorphContentLeadDp(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_LEAD_DP, DEFAULT_MORPH_CONTENT_LEAD_DP)
-    fun setMorphContentLeadDp(context: Context, v: Int) =
-        prefs(context).edit().putInt(KEY_MORPH_CONTENT_LEAD_DP, v.coerceIn(0, 48)).apply()
+    fun getMorphContentDropDp(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_DROP_DP, DEFAULT_MORPH_CONTENT_DROP_DP)
+    fun setMorphContentDropDp(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_MORPH_CONTENT_DROP_DP, v.coerceIn(0, 40)).apply()
+
+    fun getMorphEntryName(context: Context): String =
+        if (getMorphEntry(context) == MORPH_ENTRY_DROP) "drops out of the pill" else "centred in the box"
+
+    fun getMorphEntry(context: Context) =
+        prefs(context).getInt(KEY_MORPH_ENTRY, DEFAULT_MORPH_ENTRY).coerceIn(MORPH_ENTRY_DROP, MORPH_ENTRY_CENTRED)
+    fun setMorphEntry(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_MORPH_ENTRY, v.coerceIn(MORPH_ENTRY_DROP, MORPH_ENTRY_CENTRED)).apply()
+
+    /** How much of the shape's travel the children share out between themselves instead of arriving as one block. */
+    fun getMorphStaggerPct(context: Context) = prefs(context).getInt(KEY_MORPH_STAGGER_PCT, DEFAULT_MORPH_STAGGER_PCT)
+    fun setMorphStaggerPct(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_MORPH_STAGGER_PCT, v.coerceIn(0, 60)).apply()
+
+    /** A collapse's own deadline: past this fraction of the shape's travel nothing of the row may still be drawn. */
+    fun getMorphGoneByPct(context: Context) = prefs(context).getInt(KEY_MORPH_GONE_BY_PCT, DEFAULT_MORPH_GONE_BY_PCT)
+    fun setMorphGoneByPct(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_MORPH_GONE_BY_PCT, v.coerceIn(25, 90)).apply()
 
     /**
      * What opening the notification shade does to the island. There was one behaviour and it was wrong: the

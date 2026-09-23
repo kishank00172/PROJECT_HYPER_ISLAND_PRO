@@ -35,6 +35,179 @@
             android:textColor="@color/text_secondary"
             android:textSize="15sp" />
 
+        <!-- The morph feel is his to choose, not mine to guess: the style swaps here and the island replays
+             it live, so "thoda aur" costs one drag instead of one APK. -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Island Morph Lab (content inside the island)"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:textSize="18sp" />
+
+        <RadioGroup
+            android:id="@+id/radioMorphStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <RadioButton
+                android:id="@+id/radioMorphBalanced"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Balanced - content rides the shape, scales, and fades with the shape"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioMorphCarry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ride only - content travels, size fixed, fade on the clock (b1378)"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioMorphScaleOnly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Scale + fade only - content morphs in place, it does not travel"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tvMorphScaleLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="content starts: 12%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMorphScale"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="45" />
+
+        <TextView
+            android:id="@+id/tvMorphSwapLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="icon becomes the app badge at: 50%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMorphSwap"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="80" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Where the content comes from"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <RadioGroup
+            android:id="@+id/radioMorphEntry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="10dp">
+
+            <RadioButton
+                android:id="@+id/radioMorphEntryDrop"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Drops out of the pill - it comes down from the pill's edge, never sideways"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioMorphEntryCentred"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Centred in the box (old) - it drifts down as the box grows, and in from one side"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tvMorphDropLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="extra drop from the pill: 20dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMorphDrop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="40" />
+
+        <TextView
+            android:id="@+id/tvMorphStaggerLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="entry staggered by: 35%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMorphStagger"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="60" />
+
+        <TextView
+            android:id="@+id/tvMorphGoneLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="content gone by: 45%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMorphGone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="65" />
+
+        <CheckBox
+            android:id="@+id/chkMorphRide"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Icon ride (works with any style: the pill icon travels into the card slot and becomes the badge)"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btnReplayMorph"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="14dp"
+            android:text="REPLAY MORPH (open then close)"
+            android:textColor="@color/text_primary" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -225,116 +398,6 @@
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
         </RadioGroup>
-
-        <!-- The morph feel is his to choose, not mine to guess: the style swaps here and the island replays
-             it live, so "thoda aur" costs one drag instead of one APK. -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:text="Island Morph Lab (content inside the island)"
-            android:textColor="@color/text_primary"
-            android:textStyle="bold"
-            android:textSize="18sp" />
-
-        <RadioGroup
-            android:id="@+id/radioMorphStyle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/bg_card"
-            android:orientation="vertical"
-            android:padding="14dp">
-
-            <RadioButton
-                android:id="@+id/radioMorphBalanced"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Balanced - content rides the shape, scales, and fades with the shape"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp" />
-
-            <RadioButton
-                android:id="@+id/radioMorphCarry"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Ride only - content travels, size fixed, fade on the clock (b1378)"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp" />
-
-            <RadioButton
-                android:id="@+id/radioMorphScaleOnly"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Scale + fade only - content morphs in place, it does not travel"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp" />
-
-        </RadioGroup>
-
-        <TextView
-            android:id="@+id/tvMorphScaleLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="content starts: 12%"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <SeekBar
-            android:id="@+id/seekMorphScale"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="45" />
-
-        <TextView
-            android:id="@+id/tvMorphSwapLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="icon becomes the app badge at: 50%"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <SeekBar
-            android:id="@+id/seekMorphSwap"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="80" />
-
-        <TextView
-            android:id="@+id/tvMorphLeadLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="content pulled out of the pill by: 14dp"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <SeekBar
-            android:id="@+id/seekMorphLead"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="48" />
-
-        <CheckBox
-            android:id="@+id/chkMorphRide"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Icon ride (works with any style: the pill icon travels into the card slot and becomes the badge)"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-
-        <Button
-            android:id="@+id/btnReplayMorph"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:background="@drawable/bg_card"
-            android:padding="14dp"
-            android:text="REPLAY MORPH (open then close)"
-            android:textColor="@color/text_primary" />
 
 <TextView
             android:layout_width="match_parent"

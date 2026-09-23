@@ -52,13 +52,40 @@ object MorphCarry {
     }
 
     /**
-     * How far the row is still pulled back into the pill's mouth, in pixels. Apple animates the island's
-     * content with `move(edge:)`/`slide`/`push` rather than scaling it - the content comes OUT of the edge the
-     * shape opened from - and Material's enter pattern is "fade + slide from edge" with the exit faster than the
-     * enter. This is that idea on our shape clock: 0 at the pill's edge, gone at full width, so the row reads
-     * as being pulled out rather than being switched on.
+     * How open the card is, on a scale that means the same thing in both directions: 1 when the content sits
+     * where it rests, 0 when the island is a pill. [shapeProgress] already runs 0 -> 1 whichever way the morph
+     * goes (0 at the size it started at), which is precisely what tripped the collapse up: every consumer used
+     * to re-derive "is this an expand?" and re-derive it wrongly, in three different ways. So the direction is
+     * decided ONCE, here, and nothing downstream is allowed a second opinion.
      */
-    fun contentLeadOffset(progress: Float, leadPx: Float): Float = -leadPx * (1f - progress)
+    fun openProgress(progress: Float, towardCard: Boolean): Float =
+        if (towardCard) progress.coerceIn(0f, 1f) else 1f - progress.coerceIn(0f, 1f)
+
+    /**
+     * The content's entry offset, on the only axis the shape actually grows on. The island hangs from its own Y
+     * and the box widens evenly on both sides (IslandMorphFrame), so the row must not move sideways at all - a
+     * sideways entry is what read as "upper right se center ki aur" with the carry and "upper left" without it.
+     * Instead it starts above the box's top edge - inside the pill, where the content came from, and clipped by
+     * the containment clip the host already applies - and settles down into its centred rest place. [blockTop]
+     * is the row's own centring leftover, which is what makes it land exactly where the layout wants it instead
+     * of snapping there at the end. Apple's island content enters with `move(edge: .top)`/`slide`/`push` and is
+     * never scaled as a box; Material's container transform anchors the content to the source's edge rather than
+     * re-centring it in the destination. [dropPx] is the TestLab amount on top of the geometry.
+     */
+    fun contentEntryOffset(open: Float, blockTop: Float, dropPx: Float): Float =
+        -(blockTop + dropPx) * (1f - open)
+
+    /**
+     * One step of a staggered entry: which slice of the shape's travel belongs to child [index] of [count].
+     * Every child gets the same window length, the last one finishes with the shape, so nothing is left waiting
+     * on a tail. Apple's island animates the expanded elements one after another and Material's staged entrances
+     * keep the trailing delay well under the duration for the same reason.
+     */
+    fun childOpen(index: Int, count: Int, open: Float, stagger: Float): Float {
+        if (count <= 1 || stagger <= 0f) return open
+        val start = (index.toFloat() / (count - 1).toFloat()) * stagger
+        return ((open - start) / (1f - stagger)).coerceIn(0f, 1f)
+    }
 
     /**
      * While the rider is in flight, only ONE of the two icons may be drawn. `matchedGeometryEffect` guarantees
@@ -69,35 +96,23 @@ object MorphCarry {
     fun pillIconHidden(rowAlpha: Float, rowShown: Boolean): Boolean = rowShown && rowAlpha > 0.02f
 
     /**
-     * The card content's own scale: it opens with the island instead of standing still inside it.
-     *
-     * [progress] is 0 at the size the morph STARTED at and 1 at the size it is ENDING at, in both directions -
-     * that is what makes it the shape's own clock. Which means a collapse has to read it the other way round:
-     * the row is at its resting size while the card is open and only shrinks toward [from] as the box closes on
-     * the pill. Reading it forwards on a collapse was the bug: the content snapped to 88% on the first frame of
-     * every collapse and then grew while it vanished.
+     * The card content's own scale: it opens with the island instead of standing still inside it. [open] comes
+     * from [openProgress], so both directions are already sorted out - this is one line and cannot be inverted.
      */
-    fun contentScale(progress: Float, from: Float, towardCard: Boolean): Float =
-        if (towardCard) from + (1f - from) * progress else 1f - (1f - from) * progress
+    fun contentScale(open: Float, from: Float): Float = from + (1f - from) * open
 
     /**
-     * One owner of the card content's opacity, for both directions.
+     * One owner of the card content's opacity. Expanding, it comes up with the shape. Collapsing, it has to be
+     * gone before the shrinking box could cut a glyph in half, so it gets out of the way by [goneBy] of the
+     * travel - that number was measured on hardware (the two collapse targets sat at 0.40 to idle and 0.45 to
+     * the ping pill), which is why it is a TestLab slider and not a constant of mine.
      *
-     * Expanding, the content comes up with the shape. Collapsing, it has to be gone before the shrinking box
-     * could cut a glyph in half - the "out by ~40%" rule, measured on hardware twice, kept as the ramp. With
-     * [followShape] the ramp is tied to how much of the island has actually opened rather than to the animation
-     * clock, which is the difference between a shape revealing a still picture and content travelling with a
-     * shape. [outBy] stays a parameter because the two collapse targets differ slightly (0.45 to the ping pill,
-     * 0.40 to idle) and that was tuned on a device, not here.
-     *
-     * [progress] already runs 0 -> 1 in BOTH directions (it is measured from the morph's start size to its end
-     * size), so it is used directly here and NOT mirrored. Mirroring it was the bug he saw: the card content
-     * faded out at the START of a collapse and came BACK to full opacity at the end, which leaves the whole card
-     * row - and the app icon riding inside it - drawn at full strength over the pill's own icon in the last
-     * frames. "icon duplicate hoke thoda right shift hoke original wale pe draw ho jata hai".
+     * This used to take both the clock and the shape progress and pick between them, and it inverted the shape
+     * progress on the way in: alpha reached 1 exactly at pill size, so the whole row - with its per-cell rounded
+     * card backgrounds, and the icon riding inside it - was painted at full strength over the collapsed pill.
+     * "pill bhi duplicate", "aakhri frames mei card ka content overlay dikh raha hai". One direction rule up
+     * front, in [openProgress], is what keeps that from being re-introduced.
      */
-    fun contentAlpha(t: Float, progress: Float, towardCard: Boolean, followShape: Boolean, outBy: Float = 0.4f): Float {
-        val ramp = if (followShape) progress else t
-        return if (towardCard) ramp.coerceIn(0f, 1f) else (1f - ramp / outBy).coerceIn(0f, 1f)
-    }
+    fun contentAlpha(open: Float, towardCard: Boolean, goneBy: Float = 0.45f): Float =
+        if (towardCard) open else (1f - (1f - open) / goneBy).coerceIn(0f, 1f)
 }
