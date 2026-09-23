@@ -221,7 +221,7 @@ object MotionVariant {
      * single blurred frame. A duration is a duration; measure it on the clock. (The gate stays on the shape,
      * because it is Claude's "~60% of target width" - a position, not a time.)
      */
-    const val COMPRESSION_WINDOW = 0.25f
+    const val COMPRESSION_WINDOW = 0.20f
     const val DEFAULT_SQUEEZE = 0.05f
 
     /**
