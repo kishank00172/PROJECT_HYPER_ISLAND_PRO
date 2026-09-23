@@ -102,11 +102,21 @@ class MotionVariantTest {
         for (style in intArrayOf(AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH)) {
             for (profile in 0 until MotionVariant.PROFILE_COUNT) {
                 val z = MotionVariant.dampingFor(style, profile, true)
-                val predicted = (421f * MotionVariant.peakOvershoot(z)).toInt()
+                // The travel is a share of the *distance*, not of the final height - 317 px of growth, not 421 px
+                // of card - because that is what `beginMorphPerf` prints and what his eye measures. And the loop is
+                // liquid-only: the other style deliberately adds a settle tap on top of the curve, so its printed
+                // number is the max of two things, which the signature test below covers.
+                val travel = 421f - 104f
+                if (style != AppSettings.MORPH_STYLE_LIQUID) continue
+                val predicted = (travel * MotionVariant.peakOvershoot(z)).toInt()
                 var seen = 0f
                 for (k in 0..200) seen = maxOf(seen, MotionVariant.spring(k / 200f, 380L, 0.30f, z) - 1f)
-                assertEquals("style $style profile $profile: the curve and the log disagree",
-                    (421f * seen).toInt(), predicted)
+                // One pixel at most, because both sides truncate: 317 x 0.0947 is 30.04 and the sampled grid
+                // lands on 30.03, and float32 is entitled to put either of them under 30.0. The claim worth
+                // pinning is that the log and the curve agree about what the bounce is, not their last decimal.
+                val sampled = (travel * seen).toInt()
+                assertTrue("profile $profile: the curve says $predicted, the trace would say $sampled",
+                    kotlin.math.abs(predicted - sampled) <= 1)
             }
         }
     }
@@ -356,7 +366,9 @@ class MotionVariantTest {
         // card is 1067 px wide but only 421 px tall, so a ratio that overshot 11 px sideways overshoots 4 px down.
         // These are the ratios that buy 0 / 8 / 40 px of *vertical* travel on his panel at 120 Hz, which is where
         // "you can see it" starts to live for a 380 ms morph.
-        val cardH = 421f
+        // Same basis the trace prints: the overshoot is a share of the 104 -> 421 growth, because a taller card is
+        // the whole motion and the 421 it lands on is not motion at all.
+        val cardH = 421f - 104f
         fun travel(profile: Int) = cardH * MotionVariant.peakOvershoot(
             MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, profile, true)
         )
@@ -364,7 +376,7 @@ class MotionVariantTest {
         val silky = travel(MotionVariant.PROFILE_SILKY)
         val bouncy = travel(MotionVariant.PROFILE_BOUNCY)
         assertTrue("snappy must not bounce at all on a lid going either way: $snappy", snappy <= 3f)
-        assertTrue("silky's settle is only $silky px of height", silky >= 6f)
+        assertTrue("silky's settle is only $silky px of thickness", silky >= 6f)
         assertTrue("bouncy must be at least twice silky, got $bouncy vs $silky", bouncy >= 2f * silky)
         assertTrue("and bouncy has to be a visible thickness change: $bouncy", bouncy >= 25f)
         // The width, meanwhile, must never move past the target at all - that is the axis rule, not a tuning.

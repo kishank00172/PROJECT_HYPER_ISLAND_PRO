@@ -181,6 +181,12 @@ rule, a staged return.** Nothing in either design mentions a slider, a ramp, a f
 correction, a stall meter, or a test. All of that is mine, and here is the honest classification of the biggest
 pieces:
 
+On the one point where the two designs were *wrong for this device*, they were wrong together: Claude's 1.02-1.08
+overshoot and ChatGPT's 100 -> 102 -> 100 are both horizontal, because a Dynamic Island floats with air on all four
+sides and this island hangs from the top edge. Adopting their axis without asking whether the surface had room on it
+is the mistake that cost three rounds; the correction is in `docs/THE-TWO-MOTIONS.md` §7, and it deleted more than
+it added.
+
 * **Repair of my own damage** - `setContentPinnedForMorph`'s width pin, `viewExcessHalf`, the `MIN_MORPH_WINDOW_MS`
   floor, `morphWindowFor`, the ripple's expand-only rule, the cutout containment guard and its `dp(20)` cap, the
   `avoidRamp`, and now `visibleExcessRoomPx`. Six of those nine exist because an earlier round of mine wrote a rule

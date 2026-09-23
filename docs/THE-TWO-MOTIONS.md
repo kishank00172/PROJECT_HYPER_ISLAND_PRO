@@ -264,52 +264,67 @@ and it is the reason both are now asserted against the curve, not written in pro
   values instead of the 60 %-default's gentle lag.
 * The squeeze slider's stored value overrides the new default: if it reads 3, that is what runs.
 
-## 7. Round 30: the bounce had nowhere to go, and that was the whole complaint
+## 7. Round 31: the axis, which should have been the first question
 
-His second log (b1415, `model=21091116UI`, 1131 lines, 111 morphs: 68 glass settle, 29 liquid, 14 hyper) answered
-the question the frame tables could not. He wrote:
+Round 30 ended with the bounce re-spent on height *only where the screen clipped it*. His reply was one sentence
+and it was a better review than my last three rounds of tuning:
 
-> Liquid capsule mei jo spring effect hai wo sirf only icon pe hai (expanded)? And wo bhi left right?
+> left right spring effect kon dalta hai island mei? Motion upar niche hoti hai island mei, isliye spring effect
+> bhi waisa he hona chahiye.
 
-That is not him failing to notice it. That is the geometry:
+He had also asked whether the AIs really specified all this. On the one point that matters, **they did**:
 
-* his panel is **1080 px** wide and his expanded card is **1067 px**;
-* the bouncy profile's spring asks for 1157 px, and the log shows the machine dutifully preparing for it -
-  `overshoot=89px excess=44px`;
-* **13 px** of that exists on his screen. `visibleExcessRoomPx(1080, 1067) = 13`.
+* Claude: *"`capsule` ka width 1.02-1.08 tak overshoot kare, phir settle"* - the overshoot is on the width;
+* ChatGPT: *"container scale 100 -> 102 -> 100"* - also a width pulse.
 
-So from about frame 16 the box was 1155 px wide inside a 1080 px window: not an overflow, a **clip**. Both vertical
-edges sat 37 px outside the display, where nothing can be seen. Meanwhile `applyMorphCarry` kept anchoring the
-content row to the box's left inner edge, and that edge *did* keep moving - off-screen and back. The result is a
-sentence I had no answer for until this log: **the box appears to hit a wall at full width and only the icon
-slides left-right.** Which is precisely what he saw, and it is why my tables were not enough: they described the
-curve, not the rectangle the display is allowed to show.
+Both of them were describing a Dynamic Island, which floats with air on all four sides. This island **hangs from
+the top edge of the screen and grows downward**: horizontally it has 1067 px of a 1080 px panel, so the whole
+bounce budget on that axis is thirteen pixels, half of it per side, and the card's edges are already at the
+screen's. Their timing, their gate, their squash, their ripple and their staged return all transfer to this device;
+their horizontal bounce cannot, and it should never have been chased. Three rounds of mine went into making a motion
+bigger on the one axis that cannot carry it.
 
-The fix re-spends the impossible width as possible height (`WASTED_WIDTH_TO_HEIGHT_GAIN = 0.75`, expand-only,
-spring-styles-only, zero at t=1 so the box still lands exact). On his device, at the 120 Hz his panel reported for
-most of this trace (`at=120:355`, 46 frames in the 380 ms window):
+So the rule is now in `MotionVariant.axisWidth`, and it is unconditional for the two spring styles: **the width only
+ever arrives** - capped at the card's width going out, floored at the pill's coming back - and every elastic
+component is spent downward, where the card has 1979 px of screen below it. That covers the spring's settle, the
+ripple's breath and the settle tap, and the damping table was re-tuned for the new yardstick, because 421 px is not
+1067 px and the same ratios would have shrunk the motion threefold:
 
-| frame | spring | box drawn, before | box drawn, after |
-|---|---|---|---|
-| 15 | 1.009 | 1074 x 424 | 1074 x 424 |
-| 18 | 1.070 | 1141 x 444 (61 px off-screen) | **1080 x 471** |
-| 20-21 | 1.083 | 1155 x 448 (75 px off each side) | **1080 x 482** |
-| 26 | 1.055 | 1134 x 446 | **1080 x 459** |
-| 33 | 1.008 | 1074 x 424 | 1074 x 424 |
-| 45 | 1.000 | 1067 x 421 | 1067 x 421 |
+| profile | damping | thickness added at the peak | frames of it at 120 Hz | reads as |
+|---|---|---|---|---|
+| snappy | 0.94 | **0 px** | 0 | a lid that lands and stays |
+| silky | 0.78 | **+6 px** | ~4 | one soft settle |
+| bouncy | 0.60 | **+30 px** | ~14 | the card swells and relaxes |
+| hyper morph | 0.84 + tap | **+10 px** | ~7 | a tap after the shape has arrived |
 
-The card thickens by **57 px** (13 % of 421) over ~14 frames and relaxes - the liquid look, in the one direction
-that has room. `excess=` drops from 44 px to 6 px per side, which also removes the sideways anchor shift he noticed
-as the icon's left-right. The hyper morph's settle tap gets the same treatment: 26 px of width it cannot show
-becomes a +12 px vertical tap on frames 34-42, and its phase-A squash was never affected (it *shrinks* width, so
-the screen cannot clip it - that is why 97 %/106 % survived while 102 % did not).
+The trace says so too: `[MORPH] start` now prints `axis=down travelV=30px down`, and `travelV` is computed the way
+he will judge it - a share of the 104 -> 421 *growth*, not of the 421 the box lands on - with a test pinning that
+number to the curve that produces it.
 
-Two honest notes on this. One: **silky still overshoots 11 px and gets no redirect** (11 < 13 px of room) - by
-design it is the subtle preset, and on this card it will still read as almost nothing. Use bouncy to judge the
-style. Two: the height-only bounce is a *consequence of his width choice* (407 dp expanded on a 411 dp screen). On a
-narrower card the width bounce comes back by itself and the redirect switches off - `wastedWidth` returns 0 and the
-test pins that as a no-op case, so nobody with a 700 px card gets a vertical substitute for a horizontal motion
-they could already see.
+### What that deleted, which is most of the value
+
+`visibleExcessRoomPx`, `wastedWidth`, `clampedWidth`, `WASTED_WIDTH_TO_HEIGHT_GAIN`, `morphRoomW`, the pin's
+horizontal widening, `avoidRamp`, `cutoutShift`, `measureMorphCutout`, `morphBoxShiftPx` and the frame-copy that
+applied it, the `dp(20)` cap, the row's width pin in `setContentPinnedForMorph` (height-only again, which is what it
+was before any of the spring styles existed), and the Lab's "grow away from the camera" slider with its pref.
+Five tests went with the machinery they pinned.
+
+Two of those deletions are worth naming. The cutout rule goes not because it misfired but because a sideways nudge
+is not a motion this surface can make, so the whole "edge awareness" idea was misapplied here - and the row's width
+pin goes because the *only* reason it existed was that I had made the view wider than the card and had to stop the
+content noticing. Fix the axis and the correction it needed disappears with it. That is the shape of the right fix:
+it removed more than it added.
+
+### The same trap, one axis over, caught before it shipped
+
+`IslandMorphFrame.compute` clamps the drawn box to the view - the very clamp that silently ate the horizontal
+bounce ("39 perfectly delivered frames drawing the same box"). A view pinned at 421 px tall cannot be drawn 461, so
+if the axis swap had been the whole change, **the bounce would have been invisible for a fourth round running**. The
+view now gets exactly as much extra height as the curve is expected to use (`morphPinH += the analytic peak`,
+spring styles only), while the content keeps centring against the card's *natural* height. That split is the whole
+point: the extra surface is room to draw in, never a layout the row has to match, so the offset passes through zero
+by itself on the last frame instead of snapping by half the headroom. `verticalHeadroomIsRoomToDrawInAndNotALayout`
+pins all four cases, including the no-headroom one, which must still come back clamped.
 
 ## 8. Round 30: what his first `glass settle` run said
 
@@ -330,8 +345,12 @@ acceptance test with nobody watching it.
 ## 9. What is still unproven
 
 
-The round-30 verdict on the two new looks is not in yet: the build that has the room clamp and the blur cut is
-being delivered against this log, so his next trace is the first one that tests it. What is still owed: whether the
-thickening reads as liquid or as a card that does not fit, whether hyper's tap is now distinct from it, the b1401
-ride verdict and the round-25 items. Everything in sections 1-3 is arithmetic from the shipped functions; this doc
-has been wrong three times in exactly the way that matters - it described the curve, and the device has an edge.
+Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks
+like can only come from him, and the honest list of what is owed is short: whether +30 px of thickness reads as
+liquid or as a card that does not fit, whether the hyper morph's tap is now distinguishable from it, whether the
+glass style is still "smooth" with its blur gone, and the b1401 ride verdict.
+
+And the methodological debt, which is the part worth keeping: this doc described the *curve* for three rounds while
+the device had an *edge*. Every claim about an amplitude has to be checked against three things - the window's own
+bounds, the axis the surface is free to move on, and the number of frames the panel will actually deliver - and if
+any one of them says "no room", the answer is to change the axis, not to make the number bigger.

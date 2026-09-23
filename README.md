@@ -94,7 +94,11 @@ whole history and every fix so far went straight to `main`; branches only added 
 it is b1406 with the three defects his own trace exposed, all of them mine, plus the shade probe off the main
 thread. `docs/AI-MOTION-SHOWDOWN.md` §0.5 has the numbers.
 
-Frame-by-frame tables for both new looks, with each design's own wording next to the function that implements it and the pixels his device actually gets (366 x 104 pill, 1067 x 421 card, 60 Hz): **`docs/THE-TWO-MOTIONS.md`**. That doc is also where the two defects it exposed are written down - a spring sized against 720 ms on a 360 ms animator, and phases measured on a quantity that front-loads.
+Frame-by-frame tables for both new looks, with each design's own wording next to the function that implements it and the pixels his device actually gets (366 x 104 pill, 1067 x 421 card, 60 Hz): **`docs/THE-TWO-MOTIONS.md`**. Round 31 changed the answer at its root: an island hangs from the top edge, so its
+motion - and every spring in it - is **vertical**; `MotionVariant.axisWidth` caps the width at the target and puts
+the overshoot, the ripple's breath and the settle tap on the height (0 / 6 / 30 px of thickness for the three
+presets, `axis=down travelV=..px` in the trace). That one rule deleted the horizontal headroom layer: the pin
+widening, the clip arithmetic, the cutout nudge and its slider. That doc is also where the two defects it exposed are written down - a spring sized against 720 ms on a 360 ms animator, and phases measured on a quantity that front-loads.
 **What his log said, against what I had claimed.** Frames were fine (median `avg=15ms`, `frames=24` on the new
 styles, identical to the accepted ones), so "glitchy" was geometry: (1) `cutout=540/40px` on a 1080 px screen with
 the island centred at 540 - Claude's rule as written demanded a 224 px shove there, the collapse obeyed, and the
