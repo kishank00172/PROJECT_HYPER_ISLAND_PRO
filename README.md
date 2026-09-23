@@ -89,7 +89,40 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-23 (read me first if you lost the plot)
 
-**b1406** (release `ci-406`, code `361eef7`, 138 JVM tests green, APK 2 866 170 B, sha256
+**b1411** (release `ci-411`, code `b4503c4`, 143 JVM tests green, APK 2 870 374 B, sha256
+`62e1b5aed56d426472795aa3aea0654716243a4b34af3c55f79f5c6a2f15ec71`) is the build to judge the two new looks on:
+it is b1406 with the three defects his own trace exposed, all of them mine, plus the shade probe off the main
+thread. `docs/AI-MOTION-SHOWDOWN.md` §0.5 has the numbers.
+**What his log said, against what I had claimed.** Frames were fine (median `avg=15ms`, `frames=24` on the new
+styles, identical to the accepted ones), so "glitchy" was geometry: (1) `cutout=540/40px` on a 1080 px screen with
+the island centred at 540 - Claude's rule as written demanded a 224 px shove there, the collapse obeyed, and the
+layout yanked it back one frame later: that is his "pill kabhi right shift ho ja rha hai". A lens the island is
+sitting on cannot be dodged sideways, so the rule now refuses when the hole is contained, caps what it will move,
+ramps to zero at both ends (`avoidRamp`) and is not applied to collapses at all - inert on his device, still real
+on an off-centre one. (2) The spring's headroom widened the *view*, and the row's left edge, the pill's and the
+row's measured width are all anchored to the view: ~10 px of offset that snapped back at the settle, plus a text
+re-measure in the last frame - b1343's "text set hota hai" snap re-imported by me. `setContentPinnedForMorph` now
+pins the row's width as it always pinned its height, and the two X anchors subtract `viewExcessHalf(pin, final)`,
+which is 0 for the four classic styles (a test says so, and the same test caught that my first version of the pin
+would have re-measured every *collapse* at the pill width). (3) The "dono ek he hai" one: `response=0.42s` inside
+a 380 ms window never reaches its target before the interpolator pins the last frame to 1.0, so the bounce, the
+settle and the whole reason to run a spring were truncated into a mild ease - and a 3 % squeeze over 40 ms is two
+frames on a panel his log shows at `hz=60`. The response table is now bounded by the window
+(`everySpringFitsInsideTheWindowItIsGiven` fails the build otherwise), phase A is 0.22 of the morph at 5 %, and
+the presets carry 1 px / 21 px / 68 px of overshoot on his card width instead of three decimals. Two smaller ones
+from reading my own patch: the ripple ran on collapses too at full glass strength (a fog flash on every return),
+and the capsule had the gate without the travel, which made "the shape leads, the content follows" a fade timing
+rather than a movement - it rides now.
+**And the part that was never about the new styles:** 263 `[STALL]` lines, 136 with our frame on the stack, 80 of
+them `checkNotificationShadeState` at ~47 ms each - 3 750 ms of main-thread blocking in ten minutes, landing
+inside 33 of his 74 morph windows across *every* style. b1396's answer was a throttle, which only limits how often
+we block; the probe now runs on its own daemon thread with a single-flight guard and posts its verdict back, and it
+measures into a local Rect instead of `outlineRect`, the shared one the outline provider reads while drawing. A pill
+that hides ~40 ms later is the cheaper trade. His next trace should show `checkNotificationShadeState` gone from
+the `[STALL]` lines - if it does not, this change did not work and I will hear it in his numbers.
+
+
+**b1406** (the build he judged, release `ci-406`, code `361eef7`, 138 JVM tests green, APK 2 866 170 B, sha256
 `76c72e8cf2d94ec86e5b65a57b933a028f980a8a111467801173ccbc66280e1d`): the two outside designs he benchmarked this
 app against are now **two selectable looks**, side by side in the style list, plus the fix that explains his last
 verdict. Full claim-by-claim mapping: **`docs/AI-MOTION-SHOWDOWN.md`**.
