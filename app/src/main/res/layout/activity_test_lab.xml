@@ -263,7 +263,7 @@
                 android:id="@+id/radioProfileSnappy"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Snappy - reaches the target and stops, Xiaomi's "it is already open" feel"
+                android:text="Snappy - reaches the target and stops, Xiaomi's &quot;it is already open&quot; feel"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
