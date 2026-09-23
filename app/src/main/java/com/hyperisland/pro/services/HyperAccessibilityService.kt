@@ -63,8 +63,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.animation.TimeInterpolator
 import android.view.animation.PathInterpolator
-import android.view.animation.TimeInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -3393,8 +3393,11 @@ class HyperAccessibilityService : AccessibilityService() {
             g.scaleY = rowScale
         }
         if (morphOpacityFollowsShape) {
-            if (morphLiquidOn) {
-                // Claude's whole point: the shape leads and the content follows. The crossfade does not START
+            if (morphLiquidOn && morphTowardCard) {
+                // Claude's whole point: the shape leads and the content follows. Only on the way OUT - the gate
+                // is a rule about the box reaching its size before text appears in it, and running it backwards
+                // on a collapse would snap the text off at 60 % instead of fading it, which is the jhatka this
+                // whole file exists to avoid. The crossfade does not START
                 // until the box is morphGate of the way to its final width, so text is never shown at a width
                 // that clips it - and it reads the box's progress, not the animator's, so an overshoot cannot
                 // start the fade early.
@@ -3626,6 +3629,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (rip > 0.01f) {
                     bw = (bw * (1f + 0.012f * rip)).toInt()
                     bh = (bh * (1f + 0.012f * rip)).toInt()
+                }
+                // Phase D, "micro-settle" on the container (100 -> 102 -> 100): the content is deliberately not
+                // scaled in this style - Phase C forbids a fade-replace - so the box is what settles. Width
+                // only, like the overshoot: the height leftover of the card is what centres the row.
+                if (morphCarryGrowing) {
+                    val settle = MotionVariant.microSettle(
+                        p, MotionVariant.SETTLE_WINDOW, maxOf(0.01f, morphSqueeze * 0.6f)
+                    )
+                    if (settle > 0.0005f) bw = (bw * (1f + settle)).toInt()
                 }
                 setGlassBlur(rip * morphBlurPx)
             }
@@ -3951,8 +3963,14 @@ class HyperAccessibilityService : AccessibilityService() {
         // the box 0.0 %. So the view is widened by the analytic peak of THIS curve, and by nothing else - width
         // only, because the height leftover of a wrap-content card is what centres the row, and touching that
         // re-opens the vertical drift `lerpEven` was invented to close.
-        morphOvershootPx = if (MotionVariant.isSpring(morphVariant))
-            (maxOf(fromW, toW) * MotionVariant.peakOvershoot(morphDamping)).toInt() else 0
+        morphOvershootPx = if (MotionVariant.isSpring(morphVariant)) {
+            val peak = maxOf(fromW, toW) * MotionVariant.peakOvershoot(morphDamping)
+            // His 100 -> 102 -> 100 is bigger than a 0.86-damped spring's tail, and the pulse that supplies it
+            // needs the same headroom: clamp it and the settle is gone, silently, as before.
+            val settle = if (morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH)
+                maxOf(fromW, toW) * MotionVariant.DEFAULT_SETTLE else 0f
+            maxOf(peak, settle).toInt()
+        } else 0
         if (morphOvershootPx > 4) morphPinW = morphPinW!! + morphOvershootPx
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
         val startFrame = IslandMorphFrame.compute(morphPinW!!, morphPinH!!, fromW, fromH)

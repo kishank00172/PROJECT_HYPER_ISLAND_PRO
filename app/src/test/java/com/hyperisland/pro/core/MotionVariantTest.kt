@@ -208,6 +208,39 @@ class MotionVariantTest {
     }
 
     @Test
+    fun microSettleIsABumpThatLandsFlat() {
+        val w = MotionVariant.SETTLE_WINDOW
+        assertEquals(0f, MotionVariant.microSettle(0.5f, w, 0.02f), 1e-6f)
+        assertEquals(0f, MotionVariant.microSettle(1f - w - 0.01f, w, 0.02f), 1e-6f)
+        // It must END at zero: the size the morph lands on is the size the card has to be, and a settle that
+        // leaves the box 2 % wide is a card with a wrong final width.
+        assertTrue("the settle has to return the box to its size: ${MotionVariant.microSettle(1f, w, 0.02f)}",
+            abs(MotionVariant.microSettle(1f, w, 0.02f)) < 1e-4f)
+        assertEquals(0.02f, MotionVariant.microSettle(1f - w / 2f, w, 0.02f), 1e-4f)
+        var max = 0f
+        for (i in 0..200) max = max(max, MotionVariant.microSettle(i / 200f, w, 0.02f))
+        assertTrue("the bump must stay a bump, not a bounce: $max", max in 0.019f..0.021f)
+        assertEquals(0f, MotionVariant.microSettle(0.99f, w, 0f), 1e-6f) // slider at 0 = no pulse at all
+    }
+
+    @Test
+    fun aGateRunBackwardsIsACliffNotAFade() {
+        // Why the service gates the content on the way OUT and not on the way back. Composed with the collapse
+        // curve, the gate leaves the fade almost no travel to happen in: the alpha is already zero while the box
+        // is still most of the way open, and it gets there in one step. That step is the "jhatka" he has been
+        // naming for twenty-five builds, so the composition is not allowed, and this is the proof rather than my
+        // word for it.
+        val g = MotionVariant.DEFAULT_GATE
+        val outBy = 0.4f
+        fun gatedAlpha(open: Float) = MorphCarry.contentOpen(MotionVariant.gated(open, g), false, outBy)
+        fun plainAlpha(open: Float) = MorphCarry.contentOpen(open, false, outBy)
+        val step = gatedAlpha(0.90f) - gatedAlpha(0.84f)
+        assertTrue("expected a cliff in the gated collapse, got $step", step > 0.1f)
+        assertTrue("the plain curve is a fade by comparison",
+            plainAlpha(0.90f) - plainAlpha(0.84f) < step / 2f)
+    }
+
+    @Test
     fun magneticAnchorsLagThenSnap() {
         assertEquals(0f, MotionVariant.magnetic(0f, 0.6f), 1e-6f)
         assertEquals(1f, MotionVariant.magnetic(1f, 0.6f), 1e-6f)

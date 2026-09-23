@@ -169,6 +169,22 @@ object MotionVariant {
     const val DEFAULT_SQUEEZE = 0.03f
 
     /**
+     * Phase D, "micro-settle" - 100 -> 102 -> 100 - as a small explicit pulse over the last [window] of the
+     * travel, sized by [amount]. It is not left to the spring's tail on purpose: his own two numbers disagree,
+     * because a spring at damping 0.86 overshoots by about half a percent, and half a percent of a 900 px box
+     * is four pixels nobody can feel. A sine, so the pulse starts at zero and *ends* at zero - the size the
+     * morph lands on has to be the size the card is.
+     */
+    fun microSettle(p: Float, window: Float, amount: Float): Float {
+        val w = window.coerceIn(0.02f, 0.9f)
+        if (amount <= 0f || p < 1f - w) return 0f
+        return amount * sin(PI.toFloat() * ((p - (1f - w)) / w))
+    }
+
+    const val SETTLE_WINDOW = 0.18f
+    const val DEFAULT_SETTLE = 0.02f
+
+    /**
      * The signature idea from the second design: on the way back the content is not interpolated to the pill,
      * it is **pulled** into it - attraction rising as the anchors get closer, so the last frames snap. A power
      * curve is that shape with one parameter: [pull] 0 is linear (the current behaviour), 1 is p^2.
