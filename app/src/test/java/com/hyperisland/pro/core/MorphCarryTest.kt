@@ -185,14 +185,22 @@ class MorphCarryTest {
         // 0.88 is the scale floor he leaves the slider at by default: 350 px of travel must still arrive at 350.
         assertEquals(397.7f, MorphCarry.riderShift(350f, 0.88f), 0.1f)
         assertEquals(350f, MorphCarry.riderShift(350f, 0.88f) * 0.88f, 1e-3f)
-        assertEquals(1f, MorphCarry.riderScale(0.88f, 1f), 1e-6f)
-        assertEquals(1f, MorphCarry.riderScale(0.84f, 0.84f), 1e-6f) // the drawn size is the ride's, not the row's
+        // With nothing scaled above it, the ride's own curve is exactly what is drawn.
+        assertEquals(0.88f, MorphCarry.riderScale(0.88f, 1f), 1e-6f)
+        // And the compensation cancels the parent: the drawn size is the ride's, not the row's times the ride's.
+        assertEquals(1f, MorphCarry.riderScale(0.84f, 0.84f), 1e-6f)
         // A degenerate parent scale must not turn into an infinite translation.
         assertTrue(MorphCarry.riderShift(350f, 0f) < 1e4f)
-        for (i in 1..100) {
+        // Exact above the guard, bounded below it - the guard exists so a broken frame cannot fling the icon off
+        // the screen, so the two regimes are asserted separately instead of one of them being wished away.
+        for (i in 5..100) {
             val s = i / 100f
             val drawn = MorphCarry.riderShift(350f, s) * s
-            assertEquals("travel distorted at parent scale $s", 350f, drawn.toFloat(), 1e-2f)
+            assertEquals(350f, drawn, 1e-2f) // travel distorted at parent scale $s
+        }
+        for (i in 0..4) {
+            val tiny = i / 100f
+            assertTrue("unbounded shift at parent scale $tiny", MorphCarry.riderShift(350f, tiny) <= 350f / 0.05f + 1e-3f)
         }
     }
 
