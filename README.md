@@ -89,7 +89,22 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-22 (read me first if you lost the plot)
 
-`main` head carries the **b1392** round (release `ci-392`, code `3245434`, 105 JVM tests green; APK 2 831 422 B,
+`main` head carries the **b1396** round (release `ci-396`, code `befef0e`..`e04df63`, 107 JVM tests green; APK
+2 834 810 B, sha256 `22fb68200ec6da89f377b56e867e0b348d98f73530e65275049729341b46eae4`). He noticed that the icon
+transformation had stopped being seamless - "pehle ekdum seamlessly tha ... abhi notice ho ja rha hai change" - and
+he was right for a structural reason: the ride had never owned anything. Its travel was a side effect of the row's
+`translationX` (so the round-23 drop deleted it) and its opacity was the row's fade (so the ride ended at his
+`goneBy` slider's 25-45 % while the pill's icon popped in behind it). A shared element now owns its travel (the
+box's left edge plus the measured distance between the two icon slots) and is never faded by the container it is
+leaving: while a ride runs, the fade is written on the row's content views by a single function both opacity owners
+call, the stagger rides along in the same pass, and the parent's scale is divided back out of the shift and the
+size. New mechanism from Apple's list, not a knob: the badge count rolls the way the number moved
+(`PillBadge.rollDirection`, `contentTransition(.numericText())`), with a TestLab switch, and the morph's start line
+now prints `riderY=..px` so the travel is provable from his log instead of assumed. The next item is designed, not
+tuned: `docs/MORPH-GESTURE-PLAN.md` - the morph under the finger, released into a spring that keeps the finger's
+velocity, interruptible mid-drag.
+
+Before that: **b1392** round (release `ci-392`, code `3245434`, 105 JVM tests green; APK 2 831 422 B,
 sha256 `6e1f300510352e53aa9c5654f036ac8f4f46c8742cbfdcfe0d8f0028d56bcb5d`). He said the shape-driven styles "don't
 feel like the content came down from the top", because the pill is centred and the box grows evenly on both sides -
 while the content slid in from the upper right (or upper left without the carry). Two offsets in the code explain
