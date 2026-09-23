@@ -249,7 +249,7 @@ object AppSettings {
         .putInt(KEY_MOTION_PROFILE, MotionVariant.clampProfile(v)).apply()
 
     /** Phase A's squeeze, as a percent of width (3 = "97 % width, 106 % height"). */
-    fun getMotionSqueezePct(context: Context) = MotionVariant.clampPct(prefs(context).getInt(KEY_MOTION_SQUEEZE, 3), 0, 8)
+    fun getMotionSqueezePct(context: Context) = MotionVariant.clampPct(prefs(context).getInt(KEY_MOTION_SQUEEZE, 5), 0, 8)
     fun setMotionSqueezePct(context: Context, v: Int) = prefs(context).edit()
         .putInt(KEY_MOTION_SQUEEZE, MotionVariant.clampPct(v, 0, 8)).apply()
 

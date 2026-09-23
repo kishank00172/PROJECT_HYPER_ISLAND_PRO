@@ -37,6 +37,66 @@ line of range arithmetic, so the guard is arithmetic too.
 
 ---
 
+## 0.5 b1406's own trace, and the three things it proved I got wrong
+
+He came back with: *"Bahut kuch glitchy glitchy sa ho gya hai, pill kabhi right shift ho ja rha hai collapsing
+mei, dono new morph ... jaisa bata rhe the waisa kuch ho he nahi rha, dono new options ek he hai and wo bhi faltu
+hai."* The trace answers each half with numbers, and all three causes were mine.
+
+**The per-style table from his log** (median per morph, `avg` in ms, `frames` at his panel's rate):
+
+| style | dir | frames | avg | max | slow% |
+|---|---|---|---|---|---|
+| ride only (b1378) | card / pill | 24 / 22 | 15 / 15 | 24 / 22 | 27 / 31 |
+| balanced | card / pill | 24 / 22 | 15 / 15 | 26 / 21 | 100 / 0 |
+| scale + fade only | card / pill | 24 / 21 | 15 / 15 | 22 / 20 | 50 / 0 |
+| liquid capsule (Claude) | card / pill | 24 / 21 | 15 / 15 | 21 / 22 | 12 / 12 |
+| hypermorph (ChatGPT) | card / pill | 24 / 21 | 15 / 15 | 23 / 25 | 42 / 50 |
+
+So the new looks did **not** cost frames - "glitchy" was never a performance report, and treating it as one would
+have been the fourth round of the same mistake. It is geometry.
+
+1. **`cutout=540/40px` on a 1080 px screen with the island centred at 540.** Claude's rule as written says
+   "shift away from the lens by the overlap"; with a centred lens the overlap is `halfWidth + 40`, so it demanded
+   224 px and the collapse obeyed, then the layout put the island back where it belonged one frame later. That is
+   his right-shift, exactly, and it was a rule copied from a design brief that never had to consider that the
+   hole might be *underneath* the island. Now: a hole contained by the box is inert (which zeroes the rule on his
+   device at every width), a shift that would need more than 20 dp is capped, the whole thing is multiplied by
+   `avoidRamp(p)` so it is zero at both rest positions, and it is not applied to a collapse at all.
+2. **`overshoot=21px` on every line, and no one told the row.** The headroom a spring needs is width taken *off
+   the view and given to the surface*, so the view is wider than the card for the whole morph. Three things are
+   anchored to the view's edge - the row's own left edge, the pill's, and the row's measured width - and each one
+   inherited half of that difference: a ~10 px sideways offset that snapped back at the settle (his collapse
+   complaint, second half), and a text re-measure in the last frame, which is b1343's "text set hota hai" snap
+   walking back in through a door I had just opened. Now `setContentPinnedForMorph` pins the row's **width** to
+   the final card width exactly as it already pins its height, and both X anchors subtract
+   `viewExcessHalf(pin, final)` - which is 0 for the four classic styles by construction, and a test says so.
+3. **`response=0.42s damping=0.85` inside `dur=380ms`, and `squeeze=3%` at 60 Hz.** This is the "dono ek he hai"
+   and it is the most important of the three, because it is not a bug in the code but a bug in my arithmetic:
+   a spring whose response is longer than its window never arrives before the animation is cut off, so the
+   interpolator forces the last frame to 1.0 and the bounce, the settle and the whole reason to run a spring are
+   truncated into "a slightly different ease". A 3 % compression over 40 ms is two frames on a 60 Hz panel
+   (`hz=60` - the 120 Hz vote in his log did not take). Both designs' numbers were copied faithfully and neither
+   survives a 340-380 ms window at 60 Hz. So the table is now bounded by the window (`everySpringFitsInsideTheWindowItIsGiven`
+   fails the build if `response x 1.35 > MIN_MORPH_WINDOW_MS`), phase A is 0.22 of the morph (75 ms, five
+   frames) at 5 %, and the liquid presets carry visible amplitude: 1 px, 21 px, 68 px of overshoot for
+   snappy/silky/bouncy on his card width. The hypermorph keeps its own 21 px settle pulse instead of a bounce,
+   which is the difference the two designs actually disagree about.
+
+Two smaller ones from reading my own patch: the ripple was running on collapses too (a fog-and-unfog flash on the
+first frames of every return, which neither design asked for), at full glass blur strength; and Claude's capsule
+had the gate but not the travel, so "the shape leads, the content follows" was a fade timing rather than a
+movement - it now rides, which is the one thing his design and the praised b1378 mechanism agree on.
+
+What I will not do again: copy a spec's numbers into a system without checking them against that system's
+frame budget. `response`, `damping`, `30-45 ms` were all *true* in the replies and *meaningless* at 60 Hz with a
+380 ms window, and the log could not tell me they were meaningless because every number in it was exactly what I
+asked for. The next build prints `excess=` too, so the row's landing position is a fact in the trace rather than
+a property I have to reason about at 1 a.m.
+
+
+---
+
 ## 1. Claude's design — "Dual-Spring Liquid Capsule" → style 4, `Liquid capsule (Claude)`
 
 | His claim | Verdict | Where it lives | What he can feel |

@@ -3364,7 +3364,9 @@ class HyperAccessibilityService : AccessibilityService() {
             // there is no snap at the end: at open = 1 the offset is 0, which is what the host itself lands on.
             val leftover = if (g != null) g.top.toFloat() else 0f
             if (g != null) {
-                g.translationX = 0f
+                // No longer a literal 0, and still 0 for every classic style: the row's left edge is measured
+                // from the view, so when the view carries headroom the row has to be pushed back into the box.
+                g.translationX = morphViewExcessHalf().toFloat()
                 g.translationY = if (morphHyperOn && !morphTowardCard && morphMagnet > 0f) {
                     // "Magnetic anchors", the one idea in his design that no launcher has: on the way home the
                     // content is not interpolated to the pill, it is PULLED - attraction rising as the anchors get
@@ -3377,11 +3379,13 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         } else {
             // The old entry: the host's per-frame centring is left alone, so nothing here owns translationY.
-            if (morphCarryOn && g != null) g.translationX = MorphCarry.translationX(lastMorphBoxLeft)
+            if (morphCarryOn && g != null) g.translationX =
+                MorphCarry.translationX(lastMorphBoxLeft - morphViewExcessHalf())
         }
         // The pill's row rides too, but on the box alone: sliding the pill sideways as well as growing it is
         // what read as a second pill lagging behind the first.
-        if (morphCarryOn) pillPreviewRoot?.translationX = MorphCarry.translationX(lastMorphBoxLeft)
+        if (morphCarryOn) pillPreviewRoot?.translationX =
+                MorphCarry.translationX(lastMorphBoxLeft - morphViewExcessHalf())
         var rowScale = 1f
         if (morphScaleOn && g != null) {
             // Scale about the anchor the box grows from: its top edge when the row hangs there, its middle when
@@ -3600,6 +3604,18 @@ class HyperAccessibilityService : AccessibilityService() {
 
     /** The pinned bound, falling back to the target for any frame that arrives outside a morph. */
     private fun morphPinW(): Int = morphPinW ?: morphFinalW
+
+    /**
+     * Half of whatever extra width the spring's headroom put on the card view - and the number that keeps that
+     * headroom from being felt as a glitch. The view is the surface the box is drawn on, so letting a spring
+     * overshoot means the view is wider than the card by exactly that much; every anchor measured from the VIEW's
+     * edge instead of the box's (the row's own left edge, the pill's) then sits half that amount too far left for
+     * the whole morph and snaps back into place when it lands. That snap is a sideways jump at the settle, and it
+     * is the other half of "pill kabhi right shift ho ja rha hai collapsing mei" - b1406 printed
+     * `overshoot=21px` on every line and every collapse ended with the row ~10 px from where the layout puts it.
+     * Zero for the four classic styles, because they never widen the pin: nothing already accepted moves.
+     */
+    private fun morphViewExcessHalf(): Int = MotionVariant.viewExcessHalf(morphPinW(), morphFinalW)
     private fun morphPinH(): Int = morphPinH ?: morphFinalH
 
     private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float) {
@@ -3624,7 +3640,9 @@ class HyperAccessibilityService : AccessibilityService() {
                 // "Energy ripple": a 40-70 ms wave spent as a breath of size on the box and a pass of blur over
                 // the content. Blur is what makes it felt and not seen, and the blur helper is already quantised
                 // for the glass style, so the ripple costs no new render work beyond a radius write.
-                val rip = MotionVariant.ripple(p, MotionVariant.RIPPLE_WINDOW)
+                // Expand only. Running it on the return too (which is what b1406 did) puts a fog-and-unfog flash
+                // on the first five frames of every collapse, which neither design asked for.
+                val rip = if (morphCarryGrowing) MotionVariant.ripple(p, MotionVariant.RIPPLE_WINDOW) else 0f
                 morphRipple = rip
                 if (rip > 0.01f) {
                     bw = (bw * (1f + 0.012f * rip)).toInt()
@@ -3639,7 +3657,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     )
                     if (settle > 0.0005f) bw = (bw * (1f + settle)).toInt()
                 }
-                setGlassBlur(rip * morphBlurPx)
+                setGlassBlur(rip * morphBlurPx * MotionVariant.RIPPLE_BLUR_FRACTION)
             }
             // Both: "cornerRadius = height / 2, radius ko independently animate mat karo". One rule instead of
             // a second animator, and it is what keeps a growing capsule a capsule; the final value is whatever
@@ -3650,14 +3668,21 @@ class HyperAccessibilityService : AccessibilityService() {
             // The card view sits in a screen-wide overlay, horizontally centred with the Lab's x offset on top
             // (the same arithmetic `updateOutlineForIsland` uses), so its centre on screen is one number per
             // morph and all that is left here is a subtraction.
-            val shift = MotionVariant.cutoutShift(
-                morphCenterPx, bw / 2f, cutoutCenterX, cutoutHalfW, morphCutoutBiasPx
-            )
-            // A box can only be nudged as far as the surface around it: past the pinned view there is nothing to
-            // draw on, and a clipped edge is the black border this whole mechanism exists to avoid. `compute`
-            // centres the box, so the free room on either side is exactly this arithmetic.
-            val room = ((morphPinW() - bw) / 2f).coerceAtLeast(0f)
-            morphBoxShiftPx = shift.coerceIn(-room, room).toInt()
+            // Only on the way OUT, only as much as a nudge can actually fix, and ramped to nothing at both ends of
+            // the travel. All three are load-bearing: applied flat, as in b1406, the rule asked for 224 px on a
+            // phone whose lens is centred (no sideways move uncovers a hole you are sitting on), the collapse
+            // applied the whole of it, and one frame later the layout put the island back where it belonged.
+            // That is a jump, not an avoidance.
+            if (morphCarryGrowing) {
+                val shift = MotionVariant.cutoutShift(
+                    morphCenterPx, bw / 2f, cutoutCenterX, cutoutHalfW, morphCutoutBiasPx, dp(20).toFloat()
+                ) * MotionVariant.avoidRamp(p)
+                // A box can only be nudged as far as the surface around it: past the pinned view there is nothing
+                // to draw on, and a clipped edge is the black border this whole mechanism exists to avoid.
+                // `compute` centres the box, so the free room on either side is exactly this arithmetic.
+                val room = ((morphPinW() - bw) / 2f).coerceAtLeast(0f)
+                morphBoxShiftPx = shift.coerceIn(-room, room).toInt()
+            } else morphBoxShiftPx = 0
         } else {
             // A morph of one of the four established styles must not inherit the nudge the last one left behind.
             morphBoxShiftPx = 0
@@ -3728,8 +3753,14 @@ class HyperAccessibilityService : AccessibilityService() {
         // View has no LayoutParams of its own at all (CI: "Unresolved reference 'LayoutParams'").
         gridRoot?.let { host ->
             val lp = host.layoutParams as? FrameLayout.LayoutParams ?: return@let
-            if (lp.height != want) {
-                lp.height = want
+            // The width joins the height for one reason: the surface can now be wider than the card (the spring's
+            // headroom), and a MATCH_PARENT row measured against that surface gets re-measured at the *real*
+            // width the moment the morph lands - a text reflow in the last frame, which is b1343's "text finally
+            // sets with a snap" walking back in through a door I had just opened. Pin the row to the final card
+            // width and the two numbers are the same number at the hand-off.
+            val wantW = if (pinned) morphFinalW else ViewGroup.LayoutParams.MATCH_PARENT
+            if (lp.height != want || lp.width != wantW) {
+                lp.height = want; lp.width = wantW
                 host.layoutParams = lp
             }
         }
@@ -3967,8 +3998,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val peak = maxOf(fromW, toW) * MotionVariant.peakOvershoot(morphDamping)
             // His 100 -> 102 -> 100 is bigger than a 0.86-damped spring's tail, and the pulse that supplies it
             // needs the same headroom: clamp it and the settle is gone, silently, as before.
-            val settle = if (morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH)
-                maxOf(fromW, toW) * MotionVariant.DEFAULT_SETTLE else 0f
+            val settle = maxOf(fromW, toW) * MotionVariant.DEFAULT_SETTLE
             maxOf(peak, settle).toInt()
         } else 0
         if (morphOvershootPx > 4) morphPinW = morphPinW!! + morphOvershootPx
@@ -3981,8 +4011,12 @@ class HyperAccessibilityService : AccessibilityService() {
         // The carry only makes sense while the box is what moves: on the fallback path the view itself is
         // resized per frame, so the row already sits against its left edge.
         val style = morphVariant
+        // The liquid capsule keeps the row's travel, because "the shape leads and the content follows" is a
+        // statement about where the content comes FROM. Gated alpha alone would mean text fading in while
+        // standing still - a timing difference, and he has told me twice that a timing difference is not a look.
         morphCarryOn = islandMorph != null &&
-            (style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_CARRY)
+            (style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_CARRY ||
+                style == AppSettings.MORPH_STYLE_LIQUID)
         // The glass form scales with the shape as well: size and focus are the same idea - content settling into
         // place - and without the scale it differs from "scale + fade" only by the blur, which is the one thing
         // he would not see at the end of a 260 ms morph.
@@ -4035,7 +4069,8 @@ class HyperAccessibilityService : AccessibilityService() {
                 " response=${"%.2fs".format(morphResponseSec)} damping=${"%.2f".format(morphDamping)}" +
                 " overshoot=${morphOvershootPx}px gate=${(morphGate * 100).toInt()}%" +
                 " magnet=${(morphMagnet * 100).toInt()}% squeeze=${(morphSqueeze * 100).toInt()}%" +
-                " cutout=${cutoutCenterX.toInt()}/${cutoutHalfW.toInt()}px bias=${morphCutoutBiasPx.toInt()}px"
+                " cutout=${cutoutCenterX.toInt()}/${cutoutHalfW.toInt()}px bias=${morphCutoutBiasPx.toInt()}px" +
+                " excess=${morphViewExcessHalf()}px"
             else "" 
         )
     }

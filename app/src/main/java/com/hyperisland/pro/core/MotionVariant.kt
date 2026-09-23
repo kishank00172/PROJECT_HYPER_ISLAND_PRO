@@ -33,6 +33,18 @@ object MotionVariant {
     const val MAX_STYLE = 5
     const val MIN_STYLE = 0
 
+    /**
+     * The shortest morph this app runs (`dur=340ms` in the stage animators, straight out of b1406's trace). It
+     * constrains the response table below, and the reason it exists as a constant is his round-27 verdict
+     * "dono new options ek he hai": with Claude's 0.42 s response inside a 0.38 s animation, the spring never
+     * reaches its target while it is running, so the interpolator pins the last frame to 1.0 - and the bounce,
+     * the settle, and the entire reason to use a spring are cut off at the door. What is left on screen is a
+     * slightly different ease. Which is what he saw.
+     */
+    const val MIN_MORPH_WINDOW_MS = 340L
+    /** How much of the window a spring needs to reach its target and come back: 1.35 responses. */
+    const val SPRING_SETTLE_FACTOR = 1.35f
+
     fun clampStyle(v: Int): Int = v.coerceIn(MIN_STYLE, MAX_STYLE)
 
     /**
@@ -61,6 +73,14 @@ object MotionVariant {
         AppSettings.MORPH_STYLE_HYPERMORPH -> "hypermorph (ChatGPT)"
         else -> "balanced"
     }
+
+    /**
+     * How far the *row's* anchors have to be pulled back to land on the box rather than on the surface the box is
+     * drawn inside. When a spring needs headroom the view gets wider than the card, and everything measured from
+     * the view's edge inherits half of that difference; the classic styles keep the view at exactly the final
+     * width, so for them this is 0 and their accepted numbers are untouched, by arithmetic and not by hope.
+     */
+    fun viewExcessHalf(pinW: Int, finalW: Int): Int = ((pinW - finalW) / 2).coerceAtLeast(0)
 
     /** A percent slider that cannot smuggle in a nonsense value; shared by every new knob in the Lab. */
     fun clampPct(v: Int, lo: Int, hi: Int): Int = v.coerceIn(lo, hi)
@@ -127,18 +147,41 @@ object MotionVariant {
     fun tensionRadius(heightPx: Float, wantedPx: Float): Float = minOf(heightPx / 2f, wantedPx)
 
     /**
-     * Claude's "edge-aware asymmetric growth". Android has a problem Apple never had to solve: the punch hole
-     * is not always centred, and an island that grows evenly on both sides will slide a lens out of view.
-     * Returns the horizontal shift that uncovers it, plus any manual bias (the Lab's slider, so the effect is
-     * testable on a device that reports no cutout at all). Zero shift when nothing overlaps.
+     * Claude's "edge-aware asymmetric growth", and the shape that rule had to be given to survive contact with a
+     * real phone. His idea is right for the device he was describing and wrong as written: on a phone whose hole
+     * IS centred - which is what b1406's trace showed, `cutout=540/40px` on a 1080 px screen with the island
+     * centred at 540 as well - "shift away from the lens" has no direction that helps, and the formula exactly as
+     * he gave it asked for a 224 px push, which the collapse then applied in full. His words for the result:
+     * "pill kabhi right shift ho ja rha hai collapsing mei". Three guards, each one measured:
+     *
+     *  - **containment**: if the hole sits inside the box's span, no sideways move uncovers it, so return the
+     *    bias and be inert. This alone zeroes the rule on his device at every width the island ever reaches.
+     *  - **a cap**: a shift that would need `maxShiftPx` or more to "work" is a jump, so take what is allowed and
+     *    accept partial avoidance - an island that teleports to dodge a lens is worse than one that sits near it.
+     *  - the caller multiplies the result by [avoidRamp], which is zero at both ends of the travel, so a rest
+     *    position - pill or card - is never drawn somewhere the layout will not agree with one frame later.
      */
-    fun cutoutShift(boxCenter: Float, boxHalf: Float, cutoutCenter: Float, cutoutHalf: Float, biasPx: Float): Float {
+    fun cutoutShift(
+        boxCenter: Float, boxHalf: Float, cutoutCenter: Float, cutoutHalf: Float, biasPx: Float,
+        maxShiftPx: Float = 0f,
+    ): Float {
         if (cutoutHalf <= 0f) return biasPx
-        val overlap = (boxHalf + cutoutHalf) - abs(boxCenter - cutoutCenter)
+        val d = abs(boxCenter - cutoutCenter)
+        if (d + cutoutHalf <= boxHalf) return biasPx // the lens is inside the box: uncapturable by moving
+        val overlap = (boxHalf + cutoutHalf) - d
         if (overlap <= 0f) return biasPx
         val away = if (boxCenter >= cutoutCenter) 1f else -1f
-        return away * (overlap + 1f) + biasPx
+        var need = away * (overlap + 1f)
+        if (maxShiftPx > 0f) need = need.coerceIn(-maxShiftPx, maxShiftPx)
+        return need + biasPx
     }
+
+    /**
+     * Zero at both ends of the travel, one in the middle: the only shape a mid-flight offset may take without
+     * either jumping at the settle or arriving before the box does. A parabola, so its slope at the two ends
+     * matches - no kink where the morph hands the box back to the layout.
+     */
+    fun avoidRamp(p: Float): Float = (4f * p * (1f - p)).coerceIn(0f, 1f)
 
     // ---------------------------------------------------------------- ChatGPT: the phases
 
@@ -165,8 +208,14 @@ object MotionVariant {
      * animation. It is what an underdamped [spring] does on its own, and [peakOvershoot] says by how much, so
      * the two cannot disagree the way a manual bump plus a settle always do.
      */
-    const val COMPRESSION_WINDOW = 0.15f
-    const val DEFAULT_SQUEEZE = 0.03f
+    /**
+     * Phase A's window as a fraction of the morph, and why it is 0.22 rather than the 30-45 ms he wrote: his
+     * panel is running at 60 Hz (`hz=60` in his own trace), so 40 ms is two frames - at that length the squeeze
+     * is not a feel, it is a dropped frame with a scale on it. 0.22 of 380 ms is 84 ms, five frames, and the
+     * compression can actually be seen to happen.
+     */
+    const val COMPRESSION_WINDOW = 0.22f
+    const val DEFAULT_SQUEEZE = 0.05f
 
     /**
      * Phase D, "micro-settle" - 100 -> 102 -> 100 - as a small explicit pulse over the last [window] of the
@@ -204,6 +253,10 @@ object MotionVariant {
     }
 
     const val RIPPLE_WINDOW = 0.22f
+    /** The ripple's blur as a fraction of the glass style's, because "feel it, not see it" is a fraction and not
+     * a switch: at full glass strength the text visibly fogs, which is a second effect on the same element - and
+     * running it on a collapse too, as b1406 did, is a blur flash at the start of every return. */
+    const val RIPPLE_BLUR_FRACTION = 0.45f
 
     // ---------------------------------------------------------------- the profiles Claude asked for
 
@@ -234,11 +287,11 @@ object MotionVariant {
      */
     fun responseFor(style: Int, profile: Int, towardCard: Boolean): Float {
         val p = clampProfile(profile)
-        if (style == AppSettings.MORPH_STYLE_HYPERMORPH) return if (towardCard) 0.26f else 0.19f
+        if (style == AppSettings.MORPH_STYLE_HYPERMORPH) return if (towardCard) 0.20f else 0.145f
         return when (p) {
-            PROFILE_SNAPPY -> if (towardCard) 0.30f else 0.21f
-            PROFILE_BOUNCY -> if (towardCard) 0.48f else 0.34f
-            else -> if (towardCard) 0.42f else 0.28f
+            PROFILE_SNAPPY -> if (towardCard) 0.215f else 0.15f
+            PROFILE_BOUNCY -> if (towardCard) 0.24f else 0.19f
+            else -> if (towardCard) 0.23f else 0.16f
         }
     }
 
@@ -251,9 +304,12 @@ object MotionVariant {
     fun dampingFor(style: Int, profile: Int, towardCard: Boolean): Float = when {
         style == AppSettings.MORPH_STYLE_LIQUID && !towardCard -> 1f
         style == AppSettings.MORPH_STYLE_LIQUID -> when (clampProfile(profile)) {
-            PROFILE_SNAPPY -> 0.9f
-            PROFILE_BOUNCY -> 0.7f
-            else -> 0.85f
+            // He wrote 0.85 for a tap-to-expand; 0.85 overshoots by 0.7 %, which on his 1067 px card is seven
+            // pixels - invisible, and invisible is the complaint. The presets carry the amplitude instead of the
+            // decimal, so the difference between them is a difference he can name: 1 px, 21 px, 68 px.
+            PROFILE_SNAPPY -> 0.92f
+            PROFILE_BOUNCY -> 0.66f
+            else -> 0.78f
         }
         style == AppSettings.MORPH_STYLE_HYPERMORPH -> if (towardCard) 0.86f else 0.95f
         else -> 1f

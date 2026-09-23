@@ -288,6 +288,87 @@ class MotionVariantTest {
         assertEquals(1f, MotionVariant.progressOf(100, 0, 100, 0, 100, 0), 1e-6f)
     }
 
+    // ---------------------------------------------------------------- b1406's three glitches
+
+    @Test
+    fun theCutoutRuleIsInertOnACentredLens() {
+        // b1406's own numbers, off his trace: a 1080 px screen, `cutout=540/40px`, the island centred at 540.
+        // The rule as Claude wrote it asked for a 224 px shove there and the collapse obeyed, which is what he
+        // saw as "pill kabhi right shift ho ja rha hai collapsing mei". A hole you are sitting on top of cannot
+        // be dodged sideways, so the answer is now 0 - at the pill's width AND at the card's.
+        assertEquals(0f, MotionVariant.cutoutShift(540f, 183f, 540f, 40f, 0f, 60f), 1e-6f)
+        assertEquals(0f, MotionVariant.cutoutShift(540f, 533f, 540f, 40f, 0f, 60f), 1e-6f)
+        // The Lab's bias still passes through, because that slider exists so this can be tested at all.
+        assertEquals(30f, MotionVariant.cutoutShift(540f, 183f, 540f, 40f, 30f, 60f), 1e-6f)
+    }
+
+    @Test
+    fun theCutoutRuleStillDodgesWhereDodgingWorks() {
+        // A lens at the left edge of the island's span: a small push right uncovers it.
+        val shift = MotionVariant.cutoutShift(600f, 183f, 420f, 40f, 0f, 60f)
+        assertTrue("expected a rightward nudge, got $shift", shift > 0f)
+        assertTrue("600 + $shift must clear the lens", 600f + shift - 183f > 460f)
+        // And when clearing it would take a jump, the cap takes what is allowed and accepts partial avoidance -
+        // an island that teleports to dodge a lens is worse than one that sits near it.
+        val capped = MotionVariant.cutoutShift(600f, 183f, 455f, 40f, 0f, 20f)
+        assertTrue("cap ignored: $capped", abs(capped) <= 20f + 1e-3f)
+        // Ramped to nothing at both ends, so a rest position is never drawn where the layout will not put it.
+        assertEquals(0f, MotionVariant.avoidRamp(0f), 1e-6f)
+        assertEquals(0f, MotionVariant.avoidRamp(1f), 1e-6f)
+        assertEquals(1f, MotionVariant.avoidRamp(0.5f), 1e-6f)
+        assertTrue("the ramp must be smooth at the ends", MotionVariant.avoidRamp(0.02f) < 0.08f)
+    }
+
+    @Test
+    fun everySpringFitsInsideTheWindowItIsGiven() {
+        // The silent killer from b1406: response 0.42 s inside a 0.38 s animation means the spring never reaches
+        // its target while it is running, the interpolator pins the last frame to 1.0, and the "dual-spring
+        // liquid capsule" becomes a slightly different ease. "dono new options ek he hai" was that truncation.
+        for (style in intArrayOf(AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH)) {
+            for (profile in 0 until MotionVariant.PROFILE_COUNT) {
+                for (towardCard in booleanArrayOf(true, false)) {
+                    val ms = MotionVariant.responseFor(style, profile, towardCard) * 1000f
+                    assertTrue(
+                        "style $style profile $profile towardCard=$towardCard needs ${ms}ms of settle in " +
+                            MotionVariant.MIN_MORPH_WINDOW_MS + "ms",
+                        ms * MotionVariant.SPRING_SETTLE_FACTOR <= MotionVariant.MIN_MORPH_WINDOW_MS
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun theTwoSignaturesAreBigEnoughToSeeAtHisRefreshRate() {
+        // His panel was at 60 Hz in that trace (`hz=60`), so anything under ~3 frames is not a feel. Both of
+        // these were shipped below that threshold in b1406: Claude's 0.85 damping overshot 7 px on a 1067 px
+        // card, and ChatGPT's 30-45 ms compression was two frames of nothing.
+        val card = 1067f
+        val silky = MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SILKY, true)
+        val bouncy = MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_BOUNCY, true)
+        assertTrue("silky bounce invisible: ${MotionVariant.peakOvershoot(silky) * card}px",
+            MotionVariant.peakOvershoot(silky) * card >= 15f)
+        assertTrue("bouncy must be a different animal", MotionVariant.peakOvershoot(bouncy) * card >
+            MotionVariant.peakOvershoot(silky) * card * 2f)
+        assertTrue("snappy is the one that barely lands",
+            MotionVariant.peakOvershoot(MotionVariant.dampingFor(AppSettings.MORPH_STYLE_LIQUID, MotionVariant.PROFILE_SNAPPY, true)) * card < 5f)
+        val frames = MotionVariant.COMPRESSION_WINDOW * MotionVariant.MIN_MORPH_WINDOW_MS / 16.7f
+        assertTrue("phase A is ${frames} frames at 60 Hz, must be at least 3", frames >= 3f)
+        assertTrue("the ripple would fog the text for a whole second",
+            MotionVariant.RIPPLE_WINDOW * MotionVariant.MIN_MORPH_WINDOW_MS <= 120f)
+    }
+
+    @Test
+    fun theHeadroomALayoutNeedsToLandExactIsZeroForTheClassicStyles() {
+        // The extra surface a spring needs moves every anchor that is measured from the view's edge, so the
+        // correction that puts them back must be provably 0 for the styles he has already accepted: they ask for
+        // no headroom, and this is the difference between "the new looks are safe" and "the new looks are on".
+        assertEquals(0, MotionVariant.viewExcessHalf(1067, 1067))
+        assertEquals(0, MotionVariant.viewExcessHalf(366, 366))
+        assertEquals(0, MotionVariant.viewExcessHalf(1000, 1067)) // never negative, whatever the pin ends up as
+        assertEquals(34, MotionVariant.viewExcessHalf(1067 + 68, 1067))
+    }
+
     // ---------------------------------------------------------------- the shared clamps
 
     @Test
