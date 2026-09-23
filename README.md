@@ -89,7 +89,23 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-22 (read me first if you lost the plot)
 
-`main` head carries the **b1390** round (release `ci-390`, code commits `0c2cf77`..`c446c1d`, 103 JVM tests
+`main` head carries the **b1392** round (release `ci-392`, code `3245434`, 105 JVM tests green; APK 2 831 422 B,
+sha256 `6e1f300510352e53aa9c5654f036ac8f4f46c8742cbfdcfe0d8f0028d56bcb5d`). He said the shape-driven styles "don't
+feel like the content came down from the top", because the pill is centred and the box grows evenly on both sides -
+while the content slid in from the upper right (or upper left without the carry). Two offsets in the code explain
+it exactly, and both were mine: the carry pinned the row's left edge to the box's left edge (a sideways entry), and
+the host re-centred the row in the drawn box every frame (78 px of downward drift that belongs to the box). The
+horizontal lead slider of the previous round invented a third axis and is deleted. Content now hangs from the box's
+top edge and settles onto its rest position on the same multiple of the leftover it has to cover, so it lands on
+0 - pivot follows the anchor. New TestLab controls, all of them his to move: entry (drop vs centred), drop
+distance 0-40 dp, staggered entry 0-60 % (header, title, message, actions), and an exit deadline 25-90 % that
+replaces the two constants I had measured by hand. `MorphCarry.openProgress` is the single place a morph's
+direction exists, because three consumers re-deriving it is what shipped the collapse leak in b1386. The Morph Lab
+moved to the top of TestLab ("new options dikh nahi rahe" - it was the sixth section). `docs/MOTION-RESEARCH.md`
+records which rule came from which source, including what was read and deliberately refused (M3's expressive
+spring, eaten by our box clamp).
+
+Before that: **b1390** round (release `ci-390`, code commits `0c2cf77`..`c446c1d`, 103 JVM tests
 green; APK 2 824 966 B, sha256 `05da990484bf7a288caea706bb0178a0d279ca216b71c85100866aeccf6835ad`). He felt the
 four Lab styles and reported that Balanced duplicates the pill - "icon duplicate hoke thoda right shift hoke
 original wale pe draw ho jata hai", card content visible inside the collapsed pill for the last frames - and that
