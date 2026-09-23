@@ -10,6 +10,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.hyperisland.pro.R
 import com.hyperisland.pro.core.AppSettings
+import com.hyperisland.pro.core.MotionVariant
 import com.hyperisland.pro.services.HyperAccessibilityService
 
 class TestLabActivity : Activity() {
@@ -230,6 +231,49 @@ class TestLabActivity : Activity() {
             R.id.seekMorphGone, R.id.tvMorphGoneLabel, "content gone by", 25, 90,
             { AppSettings.getMorphGoneByPct(it) }, { c, v -> AppSettings.setMorphGoneByPct(c, v) }
         )
+        bindMotionShowdown()
+        val profileGroup = findViewById<RadioGroup>(R.id.radioMotionProfile)
+        profileGroup.check(
+            when (AppSettings.getMotionProfile(this)) {
+                MotionVariant.PROFILE_SNAPPY -> R.id.radioProfileSnappy
+                MotionVariant.PROFILE_BOUNCY -> R.id.radioProfileBouncy
+                else -> R.id.radioProfileSilky
+            }
+        )
+        profileGroup.setOnCheckedChangeListener { _, checkedId ->
+            AppSettings.setMotionProfile(
+                this,
+                when (checkedId) {
+                    R.id.radioProfileSnappy -> MotionVariant.PROFILE_SNAPPY
+                    R.id.radioProfileBouncy -> MotionVariant.PROFILE_BOUNCY
+                    else -> MotionVariant.PROFILE_SILKY
+                }
+            )
+            Toast.makeText(this, "Feel: " + MotionVariant.profileName(AppSettings.getMotionProfile(this)), Toast.LENGTH_SHORT).show()
+        }
+        bindMorphSeek(
+            R.id.seekMotionSqueeze, R.id.tvMotionSqueezeLabel, "phase A squeeze", 0, 8,
+            { AppSettings.getMotionSqueezePct(it) }, { c, v -> AppSettings.setMotionSqueezePct(c, v) }
+        )
+        bindMorphSeek(
+            R.id.seekMotionGate, R.id.tvMotionGateLabel, "content held back until the box is", 0, 90,
+            { AppSettings.getMotionGatePct(it) }, { c, v -> AppSettings.setMotionGatePct(c, v) }
+        )
+        bindMorphSeek(
+            // The label names the precondition, because the rule genuinely has one: the pull is a change to the
+            // row's Y offset, and only the "drop from the pill" entry owns that offset. Under "centred", the
+            // host keeps its per-frame centring and the pull would fight it - so it is not applied, and saying
+            // so here beats quietly doing nothing.
+            R.id.seekMotionMagnet, R.id.tvMotionMagnetLabel, "pill pulls the content home by (needs drop entry)", 0, 150,
+            { AppSettings.getMotionMagnetPct(it) }, { c, v -> AppSettings.setMotionMagnetPct(c, v) }
+        )
+        // -40..40 in 1 dp steps: a SeekBar has no negative range, so the offset lives in the mapping, not in the
+        // stored value. He can only test "grows away from the camera" if he can put the camera anywhere.
+        bindMorphSeek(
+            R.id.seekMotionCutout, R.id.tvMotionCutoutLabel, "grow away from the camera by", -40, 40,
+            { AppSettings.getMotionCutoutBiasDp(it) }, { c, v -> AppSettings.setMotionCutoutBiasDp(c, v) },
+            unit = "dp"
+        )
         findViewById<Button>(R.id.btnReplayMorph).setOnClickListener {
             // Both directions on one press: "opens nicely, closes wrong" is a real answer he could not
             // otherwise give me without timing two taps against a 320 ms morph.
@@ -275,6 +319,8 @@ class TestLabActivity : Activity() {
         AppSettings.MORPH_STYLE_CARRY -> R.id.radioMorphCarry
         AppSettings.MORPH_STYLE_SHAPE_ONLY -> R.id.radioMorphScaleOnly
         AppSettings.MORPH_STYLE_GLASS -> R.id.radioMorphGlass
+        AppSettings.MORPH_STYLE_LIQUID -> R.id.radioMorphLiquid
+        AppSettings.MORPH_STYLE_HYPERMORPH -> R.id.radioMorphHyper
         else -> R.id.radioMorphBalanced
     }
 
@@ -282,7 +328,36 @@ class TestLabActivity : Activity() {
         R.id.radioMorphCarry -> AppSettings.MORPH_STYLE_CARRY
         R.id.radioMorphScaleOnly -> AppSettings.MORPH_STYLE_SHAPE_ONLY
         R.id.radioMorphGlass -> AppSettings.MORPH_STYLE_GLASS
+        R.id.radioMorphLiquid -> AppSettings.MORPH_STYLE_LIQUID
+        R.id.radioMorphHyper -> AppSettings.MORPH_STYLE_HYPERMORPH
         else -> AppSettings.MORPH_STYLE_BALANCED
+    }
+
+    /**
+     * The comparison he asked for in one tap: both designs, one after the other, and the picker left on
+     * whichever played last so "B is better" needs no second trip through the list. It replays the *real*
+     * morph through the service rather than a mock-up, because a preview of a curve is not a verdict about it.
+     */
+    private fun bindMotionShowdown() {
+        val button = findViewById<Button>(R.id.btnCompareMotion)
+        val group = findViewById<RadioGroup>(R.id.radioMorphStyle)
+        val styles = intArrayOf(AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH)
+        fun play(i: Int) {
+            if (i >= styles.size) return
+            val style = styles[i]
+            AppSettings.setMorphStyle(this, style)
+            group.check(idForMorphStyle(style))
+            Toast.makeText(this, "${i + 1}: ${AppSettings.getMorphStyleName(this)}", Toast.LENGTH_SHORT).show()
+            HyperAccessibilityService.toggleExpandFromApp(this)
+            button.postDelayed({
+                if (isFinishing) return@postDelayed
+                HyperAccessibilityService.toggleExpandFromApp(this)
+                button.postDelayed({
+                    if (!isFinishing) play(i + 1)
+                }, 900L)
+            }, 950L)
+        }
+        button.setOnClickListener { play(0) }
     }
 
     private fun bindPillIconLab() {

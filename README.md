@@ -89,7 +89,35 @@ whole history and every fix so far went straight to `main`; branches only added 
 
 ## Current position - updated 2026-09-23 (read me first if you lost the plot)
 
-`main` head carries the **b1401** round (release `ci-401`, code `6dc0ed4`, 117 JVM tests green; APK 2 843 138 B,
+`main` head carries the **b1402** round (release `ci-402`): the two outside designs he benchmarked this app
+against are now **two selectable looks**, side by side in the style list, plus the fix that explains his last
+verdict. Full claim-by-claim mapping: **`docs/AI-MOTION-SHOWDOWN.md`**.
+
+**First, the bug his complaint was actually about.** "4th mei kuchh to alag hai he nahi, 3rd jaisa he to hai"
+was not a tuning miss: `AppSettings` clamped `KEY_MORPH_STYLE` to 0..2 in *both* the getter and the setter, so
+selecting Glass settle (3) stored 2 and read back 2 - the glass branch, the `RenderEffect` blur and the radio's
+own effect had never run, on any build, since the style was added. He was describing the app correctly. Range math
+is now one number (`MotionVariant.MAX_STYLE`) used by both accessors through one function, and three JVM tests
+fail the build if a style escapes the clamp, shares a name, or if `MAX_STYLE` stops covering the last constant.
+He still owes Glass settle one re-judgement, now that it can be chosen at all.
+
+**Style 4 - Liquid capsule (Claude's design),** and **style 5 - HyperMorph (ChatGPT's design)**, both driven from
+one new Android-free file, `core/MotionVariant.kt`: a spring as a closed-form curve (his `response`/`damping`
+API, not mass/stiffness), a content gate until ~60 % of the target width, `cornerRadius = height/2` while the box
+moves, phase-A compression at 97 % x 106 %, a micro-settle that is the spring's own tail rather than a second
+animation, staged pill return (content gone by 65 %, container after), `magnetic(t, pull)` for content pulled
+into the pill, and a `sin()` energy ripple spent as one quantised blur + a 1.2 % breath of size. Per-trigger
+`snappy / silky / bouncy` presets, four sliders with their authors' numbers as defaults, and a **COMPARE A to B**
+button that replays both morphs back to back in one tap and leaves the picker on the last one. The `[MORPH]`
+start line now prints `variant= profile= response= damping= overshoot= gate= magnet= squeeze= cutout=` so a
+verdict and a log can be checked against each other - the thing the clamp bug made impossible.
+
+**Refused, in writing, rather than faked:** `SpringAnimation` (a dependency whose snippet lays the window out per
+frame - the exact b1343 regression), metaball merge of simultaneous islands (needs two surfaces; there is one),
+and Firebase/Remote-Config delivery + Compose shared-bounds (no backend, no Compose in this app). A third model's
+reply becomes style 6: one constant, one name in `MotionVariant.styleName`, one radio. 136 JVM tests (19 new).
+
+The previous round was the **b1401** build (release `ci-401`, code `6dc0ed4`, 117 JVM tests green; APK 2 843 138 B,
 sha256 `df4d889dd1bf25c980c1e22285569cae3cf965039d962d7be2948fa8a9142ae8`). Two instructions, both about the same
 mistake seen from two sides - "4th mei kya hai, kuchh to alag hai he nahi, 3rd jaisa he to hai" and "baki ke jo do
 the unka icon morph pichhle do-teen build se kharab kar diya ... jo ek maine praise kiya tha usko recover karo".

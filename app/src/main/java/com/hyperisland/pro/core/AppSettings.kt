@@ -14,6 +14,11 @@ object AppSettings {
     private const val KEY_ISLAND_Y_DP = "island_y_dp"
     private const val KEY_ISLAND_X_DP = "island_x_dp"
     private const val KEY_MORPH_STYLE = "morph_style"
+    private const val KEY_MOTION_PROFILE = "motion_profile"
+    private const val KEY_MOTION_SQUEEZE = "motion_squeeze_pct"
+    private const val KEY_MOTION_GATE = "motion_gate_pct"
+    private const val KEY_MOTION_MAGNET = "motion_magnet_pct"
+    private const val KEY_MOTION_CUTOUT_BIAS = "motion_cutout_bias_dp"
     private const val KEY_MORPH_CONTENT_SCALE = "morph_content_scale_pct"
     private const val KEY_MORPH_GLYPH_SWAP = "morph_glyph_swap_pct"
     private const val KEY_SHADE_POLICY = "shade_open_policy"
@@ -94,6 +99,18 @@ object AppSettings {
      * because the icon is the element that carries the app's identity.
      */
     const val MORPH_STYLE_GLASS = 3
+    /**
+     * Fifth style: the outside design Claude produced - two springs (the shape runs one, the content runs
+     * another that is gated until the capsule is ~60 % of the way there), a radius tied to the height,
+     * edge-aware asymmetric growth around an off-centre punch hole, and three named feel presets.
+     */
+    const val MORPH_STYLE_LIQUID = 4
+    /**
+     * Sixth style: the outside design ChatGPT produced - "HyperMorph": compression, bloom, content migration,
+     * micro-settle, and an asymmetric collapse, plus the two ideas nobody else has (magnetic anchors pulling
+     * the content in, and a short energy ripple on the surface at open).
+     */
+    const val MORPH_STYLE_HYPERMORPH = 5
     const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
@@ -204,18 +221,52 @@ object AppSettings {
     fun getIslandXDp(context: Context) = prefs(context).getInt(KEY_ISLAND_X_DP, DEFAULT_ISLAND_X_DP)
     fun setIslandXDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_X_DP, v).apply()
 
+    // Both directions go through MotionVariant.clampStyle, and the range is one number there. It used to be a
+    // literal 0..MORPH_STYLE_SHAPE_ONLY written twice here, which is how the fourth style became unselectable:
+    // the radio stored 2, the getter read 2, and the tester correctly reported that the new option looked
+    // exactly like the old one. A list whose last entry cannot be picked is not a list.
     fun getMorphStyle(context: Context) =
-        prefs(context).getInt(KEY_MORPH_STYLE, DEFAULT_MORPH_STYLE).coerceIn(MORPH_STYLE_BALANCED, MORPH_STYLE_SHAPE_ONLY)
+        MotionVariant.clampStyle(prefs(context).getInt(KEY_MORPH_STYLE, DEFAULT_MORPH_STYLE))
 
     fun setMorphStyle(context: Context, v: Int) = prefs(context).edit()
-        .putInt(KEY_MORPH_STYLE, v.coerceIn(MORPH_STYLE_BALANCED, MORPH_STYLE_SHAPE_ONLY)).apply()
+        .putInt(KEY_MORPH_STYLE, MotionVariant.clampStyle(v)).apply()
 
-    fun getMorphStyleName(context: Context): String = when (getMorphStyle(context)) {
-        MORPH_STYLE_CARRY -> "ride only (b1378)"
-        MORPH_STYLE_SHAPE_ONLY -> "scale + fade only"
-        MORPH_STYLE_GLASS -> "glass settle"
-        else -> "balanced"
-    }
+    fun getMorphStyleName(context: Context): String = getMorphStyleName(getMorphStyle(context))
+
+    /**
+     * A style number on its own, no Context. It exists so a JVM test can assert that every entry in the list is
+     * called something different: the round where the fourth option turned out to be unreachable was also the
+     * round where two radios described one behaviour, and a name table is the cheapest place in the world to
+     * catch that before it ships.
+     */
+    fun getMorphStyleName(style: Int): String = MotionVariant.styleName(style)
+
+    // --- the two outside designs' knobs. Each is a percent the Lab slides, and each is clamped by the same
+    // pure function the tests use, so a stored value can never be outside the range the rules assume.
+    fun getMotionProfile(context: Context) =
+        MotionVariant.clampProfile(prefs(context).getInt(KEY_MOTION_PROFILE, MotionVariant.PROFILE_SILKY))
+    fun setMotionProfile(context: Context, v: Int) = prefs(context).edit()
+        .putInt(KEY_MOTION_PROFILE, MotionVariant.clampProfile(v)).apply()
+
+    /** Phase A's squeeze, as a percent of width (3 = "97 % width, 106 % height"). */
+    fun getMotionSqueezePct(context: Context) = MotionVariant.clampPct(prefs(context).getInt(KEY_MOTION_SQUEEZE, 3), 0, 8)
+    fun setMotionSqueezePct(context: Context, v: Int) = prefs(context).edit()
+        .putInt(KEY_MOTION_SQUEEZE, MotionVariant.clampPct(v, 0, 8)).apply()
+
+    /** How far the box has to open before the content is allowed to crossfade (Claude's 60 %). */
+    fun getMotionGatePct(context: Context) = MotionVariant.clampPct(prefs(context).getInt(KEY_MOTION_GATE, 60), 0, 90)
+    fun setMotionGatePct(context: Context, v: Int) = prefs(context).edit()
+        .putInt(KEY_MOTION_GATE, MotionVariant.clampPct(v, 0, 90)).apply()
+
+    /** How hard the pill's anchors pull the content home on a collapse (0 = the linear move he has now). */
+    fun getMotionMagnetPct(context: Context) = MotionVariant.clampPct(prefs(context).getInt(KEY_MOTION_MAGNET, 60), 0, 150)
+    fun setMotionMagnetPct(context: Context, v: Int) = prefs(context).edit()
+        .putInt(KEY_MOTION_MAGNET, MotionVariant.clampPct(v, 0, 150)).apply()
+
+    /** Manual horizontal bias for the cutout rule, in dp: how to test edge-awareness on a phone with no cutout. */
+    fun getMotionCutoutBiasDp(context: Context) = prefs(context).getInt(KEY_MOTION_CUTOUT_BIAS, 0).coerceIn(-40, 40)
+    fun setMotionCutoutBiasDp(context: Context, v: Int) = prefs(context).edit()
+        .putInt(KEY_MOTION_CUTOUT_BIAS, v.coerceIn(-40, 40)).apply()
 
     /** How much smaller the card content starts, as a percent: 12 means it opens at 88% and grows in. */
     fun getMorphContentScalePct(context: Context) = prefs(context).getInt(KEY_MORPH_CONTENT_SCALE, DEFAULT_MORPH_CONTENT_SCALE_PCT)

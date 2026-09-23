@@ -87,6 +87,22 @@
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
+            <RadioButton
+                android:id="@+id/radioMorphLiquid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Liquid capsule (Claude's design) - the shape runs a real spring and the content is GATED behind it: no text at all until the box is ~60% open. Corners are height/2, growth dodges an off-centre camera, it can overshoot and settle"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioMorphHyper"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="HyperMorph (ChatGPT's design) - five phases: the box first SQUEEZES (97% wide, 106% tall), blooms, carries its content across, micro-settles, and comes back in stages with the content MAGNETICALLY pulled into the pill. Plus a ripple on the surface as it opens"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
         </RadioGroup>
 
         <TextView
@@ -215,6 +231,118 @@
             android:padding="14dp"
             android:text="REPLAY MORPH (open then close)"
             android:textColor="@color/text_primary" />
+
+        <Button
+            android:id="@+id/btnCompareMotion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card"
+            android:padding="14dp"
+            android:text="COMPARE A to B - Claude's capsule, then ChatGPT's hypermorph, both in one tap"
+            android:textColor="@color/text_primary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="The two outside designs run on springs, so they need two things the old four styles never asked for: a feel preset, and the numbers that make their phases visible. These sliders do nothing at all to Balanced / Ride / Scale+fade / Glass."
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <RadioGroup
+            android:id="@+id/radioMotionProfile"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <RadioButton
+                android:id="@+id/radioProfileSnappy"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Snappy - reaches the target and stops, Xiaomi's "it is already open" feel"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioProfileSilky"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Silky - Apple's default-ish curve: one small settle, no bounce you can point at"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioProfileBouncy"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Bouncy - the overshoot is the point; the box goes past the card and comes back"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tvMotionSqueezeLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="phase A squeeze: 3%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMotionSqueeze"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="8" />
+
+        <TextView
+            android:id="@+id/tvMotionGateLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="content held back until the box is: 60%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMotionGate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="90" />
+
+        <TextView
+            android:id="@+id/tvMotionMagnetLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="pill pulls the content home by: 60%"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMotionMagnet"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="150" />
+
+        <TextView
+            android:id="@+id/tvMotionCutoutLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="grow away from the camera by: 0dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <SeekBar
+            android:id="@+id/seekMotionCutout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="80" />
 
         <TextView
             android:layout_width="match_parent"

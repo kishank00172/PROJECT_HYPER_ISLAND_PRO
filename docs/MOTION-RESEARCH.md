@@ -5,6 +5,11 @@ the symptom in his words, the source that speaks to it, what was copied from it,
 code. Where a source is a third-party transcription rather than the primary document, that is said out loud —
 and where something is my inference, it is labelled, never presented as a diagnosis.
 
+> **Round 27 supersedes one claim in here.** The glass style was written up as shipped, and it *was*
+> shipped - but `AppSettings` clamped the style id to 0..2 in both accessors, so it could never be selected and
+> no verdict about it was ever a verdict about glass. That range bug, the two outside designs implemented as
+> styles 4 and 5, and the refused parts of each, are in `docs/AI-MOTION-SHOWDOWN.md`.
+
 ## 0. The primary source is his own dump
 
 Everything below is downstream of measurements already in the repo, because taste claims can be argued with and

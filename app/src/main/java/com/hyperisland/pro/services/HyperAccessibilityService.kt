@@ -80,6 +80,7 @@ import com.hyperisland.pro.core.IslandMorphFrame
 import com.hyperisland.pro.core.MorphFrame
 import com.hyperisland.pro.core.MorphFrameHost
 import com.hyperisland.pro.core.MorphCarry
+import com.hyperisland.pro.core.MotionVariant
 import com.hyperisland.pro.core.MorphJankMeter
 import com.hyperisland.pro.core.stallLine
 import com.hyperisland.pro.core.stallShouldPrint
@@ -350,6 +351,17 @@ class HyperAccessibilityService : AccessibilityService() {
     // ULTRA-SMOOTH CURVES
     private val expandInterpolator = PathInterpolator(0.34f, 1.56f, 0.64f, 1.0f) 
     private val morphInterpolator = PathInterpolator(0.25f, 0.46f, 0.45f, 0.94f) 
+    /**
+     * The curve the morph animators run on. The animators are BUILT before `beginMorphPerf` knows which look
+     * this is, so a spring chosen at build time would always be the previous morph's; this reads the state at
+     * frame time instead. For the four original styles it *is* the house curve, unchanged - a new design must
+     * never be able to rewrite a feel he has already judged, which is the rule that broke once before.
+     */
+    private val morphCurve = android.view.animation.TimeInterpolator { f ->
+        if (MotionVariant.isSpring(morphVariant))
+            MotionVariant.spring(f, morphDurationMs, morphResponseSec, morphDamping)
+        else morphInterpolator.getInterpolation(f)
+    } 
     private val collapseInterpolator = PathInterpolator(0.55f, 0.0f, 0.1f, 1.0f)
     private val ghostMagneticInterpolator = PathInterpolator(0.16f, 1.0f, 0.30f, 1.0f)
     private val ghostMaterialInterpolator = PathInterpolator(0.20f, 0.0f, 0.0f, 1.0f)
@@ -520,6 +532,35 @@ class HyperAccessibilityService : AccessibilityService() {
     private val GLASS_BLUR_DP = 6
     private var morphBlurPx = 0f
     private var lastBlurPx = -1f
+    /** The horizontal nudge Claude's cutout rule settled on for this morph, in px, applied to the drawn box. */
+    private var morphBoxShiftPx = 0
+    /** This frame's shape progress, kept for the log and for anyone who wants to see what a frame thought. */
+    private var morphProgress = 0f
+    /**
+     * The two outside designs' per-morph state. Everything here is read ONCE, at the start of the morph, and
+     * every frame of that morph uses those values - which is the opposite of what the previous round did, where
+     * the style was consulted in one place and the Lab's labels implied another. A verdict he gives has to be a
+     * verdict about a known set of numbers, and the [MORPH] log line now prints them so the two can be compared.
+     */
+    private var morphVariant = 0
+    private var morphVariantOn = false
+    private var morphLiquidOn = false
+    private var morphHyperOn = false
+    private var morphGate = 0.6f
+    private var morphMagnet = 0.6f
+    private var morphSqueeze = 0f
+    private var morphRipple = 0f
+    private var morphResponseSec = 0.42f
+    private var morphDamping = 1f
+    private var morphDurationMs = 360L
+    private var morphOvershootPx = 0
+    private var morphFromH = 0
+    private var morphToH = 0
+    /** Claude's "asymmetric growth never covers the lens": the band the punch hole occupies, measured per morph. */
+    private var morphCutoutBiasPx = 0f
+    private var cutoutCenterX = 0f
+    private var cutoutHalfW = 0f
+    private var morphCenterPx = 0f
     private var lastShelfCheckAt = 0L
     /** Which app we are waiting to take the foreground after a quick action, and since when. */
     private var actionTakeoverPkg: String? = null
@@ -1392,7 +1433,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 360L
-            interpolator = morphInterpolator
+            interpolator = morphCurve // the spring styles need this; the old four get the same curve as before
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
@@ -3075,7 +3116,7 @@ class HyperAccessibilityService : AccessibilityService() {
         //  - no islandView scaleY squash (that scaled the TEXT, which is what read as jitter)
         val expand = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 360L
-            interpolator = morphInterpolator // same reason as setStageAnimated: overshoot is eaten by the clamp
+            interpolator = morphCurve // same reason as setStageAnimated: and the pin is widened so it is NOT eaten
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t))
@@ -3162,7 +3203,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // fading inside a static box, which is the "masking lag raha hai" he keeps describing. The collapse
             // curve spent its first 4 frames on 0.1/0.3/0.5/0.7% of the distance and then covered 10.1% in one
             // frame: nothing, nothing, jhatka. One house curve both ways = 4-5% every frame, no dead frames.
-            interpolator = morphInterpolator
+            interpolator = morphCurve
             addUpdateListener {
                 val t = it.animatedValue as Float
                 updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t))
@@ -3323,7 +3364,15 @@ class HyperAccessibilityService : AccessibilityService() {
             val leftover = if (g != null) g.top.toFloat() else 0f
             if (g != null) {
                 g.translationX = 0f
-                g.translationY = MorphCarry.contentEntryOffset(open, leftover, morphContentDropPx)
+                g.translationY = if (morphHyperOn && !morphTowardCard && morphMagnet > 0f) {
+                    // "Magnetic anchors", the one idea in his design that no launcher has: on the way home the
+                    // content is not interpolated to the pill, it is PULLED - attraction rising as the anchors get
+                    // closer, so the early frames hang and the last ones snap. Only the content's own offset
+                    // takes this curve; the box keeps the spring, which is what makes them read as attached to
+                    // different things on purpose rather than desynced by accident.
+                    val travelled = MotionVariant.magnetic(1f - open, morphMagnet)
+                    MorphCarry.contentEntryOffset(1f - travelled, leftover, morphContentDropPx)
+                } else MorphCarry.contentEntryOffset(open, leftover, morphContentDropPx)
             }
         } else {
             // The old entry: the host's per-frame centring is left alone, so nothing here owns translationY.
@@ -3343,7 +3392,15 @@ class HyperAccessibilityService : AccessibilityService() {
             g.scaleY = rowScale
         }
         if (morphOpacityFollowsShape) {
-            if (morphGlassOn) {
+            if (morphLiquidOn) {
+                // Claude's whole point: the shape leads and the content follows. The crossfade does not START
+                // until the box is morphGate of the way to its final width, so text is never shown at a width
+                // that clips it - and it reads the box's progress, not the animator's, so an overshoot cannot
+                // start the fade early.
+                setMorphContentAlpha(
+                    MorphCarry.contentOpen(MotionVariant.gated(open, morphGate), morphTowardCard, morphOutBy)
+                )
+            } else if (morphGlassOn) {
                 // The blur is the entrance here, so the fade must not eat it: readable (though out of focus)
                 // from about a third of the travel onward, and sharpening all the way to the box's final size.
                 setMorphContentAlpha(MorphCarry.partProgress(open, 0f, 0.6f))
@@ -3435,7 +3492,16 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun applyMorphBlur(open: Float) {
         val c = MorphCarry.contentOpen(open, morphTowardCard, morphOutBy)
-        val raw = MorphCarry.blurRadiusPx(c, morphBlurPx)
+        setGlassBlur(MorphCarry.blurRadiusPx(c, morphBlurPx))
+    }
+
+    /**
+     * One place where a radius becomes a RenderEffect, shared by the glass settle and ChatGPT's ripple. The
+     * quantisation is the whole reason this is affordable: `setRenderEffect` is cheap per call, so rounding to
+     * half a pixel turns sixty frames of a blur into a handful of them, and a radius under half a pixel is
+     * cleared rather than animated, so no faint blur can linger.
+     */
+    private fun setGlassBlur(raw: Float) {
         val q = if (raw < 0.6f) 0f else (Math.round(raw * 2f) / 2f)
         if (q == lastBlurPx) return
         lastBlurPx = q
@@ -3482,6 +3548,15 @@ class HyperAccessibilityService : AccessibilityService() {
         morphCarryOn = false
         morphScaleOn = false
         morphGlassOn = false
+        // The two designs' geometry is a per-morph property, not a setting that leaks into the next draw: an
+        // eased offset or a ripple blur still applied outside a morph is a card that has stopped obeying the
+        // stage it is in.
+        morphVariantOn = false
+        morphLiquidOn = false
+        morphHyperOn = false
+        morphRipple = 0f
+        morphBoxShiftPx = 0
+        setGlassBlur(0f)
         // A blur that survives the morph is a card nobody can read, and it would stay until the next text
         // change. -1 forces the next morph to write its first step whatever this one ended on.
         lastBlurPx = -1f
@@ -3524,20 +3599,102 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun morphPinH(): Int = morphPinH ?: morphFinalH
 
     private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float) {
-        islandBackground?.cornerRadius = r
-        outlineRadius = r
+        var bw = w
+        var bh = h
+        var br = r
+        if (morphVariantOn) {
+            // Both designs redraw the box each frame and both do it in phases; this is the only place the drawn
+            // size is decided, so the phases go here rather than into the six animators that call it. Progress
+            // is measured on the box, not on the clock: a spring's clock reaches 1.0 while the shape is still
+            // on its way back, and a phase keyed to the clock would fire in the wrong place.
+            val p = MotionVariant.progressOf(morphFromW, morphFromH, morphToW, morphToH, w, h).coerceIn(0f, 1f)
+            morphProgress = p
+            if (morphHyperOn) {
+                // Phase A, only on the way OUT: during a collapse the box is already at the pin, so a squeeze
+                // there clamps to nothing and reads as a hitch instead of a compression.
+                if (morphCarryGrowing && morphSqueeze > 0f) {
+                    val c = MotionVariant.compression(p, MotionVariant.COMPRESSION_WINDOW, morphSqueeze)
+                    bw = (w * (1f - c)).toInt()
+                    bh = (h * (1f + 2f * c)).toInt()
+                }
+                // "Energy ripple": a 40-70 ms wave spent as a breath of size on the box and a pass of blur over
+                // the content. Blur is what makes it felt and not seen, and the blur helper is already quantised
+                // for the glass style, so the ripple costs no new render work beyond a radius write.
+                val rip = MotionVariant.ripple(p, MotionVariant.RIPPLE_WINDOW)
+                morphRipple = rip
+                if (rip > 0.01f) {
+                    bw = (bw * (1f + 0.012f * rip)).toInt()
+                    bh = (bh * (1f + 0.012f * rip)).toInt()
+                }
+                setGlassBlur(rip * morphBlurPx)
+            }
+            // Both: "cornerRadius = height / 2, radius ko independently animate mat karo". One rule instead of
+            // a second animator, and it is what keeps a growing capsule a capsule; the final value is whatever
+            // the style asked for, so a card with 22 dp corners still lands on 22 dp.
+            br = MotionVariant.tensionRadius(bh.toFloat(), r)
+            // Claude's edge-awareness: the box widens evenly and is then nudged away from the lens, so an
+            // off-centre punch hole never gets covered by an island that only knows how to grow symmetrically.
+            // The card view sits in a screen-wide overlay, horizontally centred with the Lab's x offset on top
+            // (the same arithmetic `updateOutlineForIsland` uses), so its centre on screen is one number per
+            // morph and all that is left here is a subtraction.
+            val shift = MotionVariant.cutoutShift(
+                morphCenterPx, bw / 2f, cutoutCenterX, cutoutHalfW, morphCutoutBiasPx
+            )
+            // A box can only be nudged as far as the surface around it: past the pinned view there is nothing to
+            // draw on, and a clipped edge is the black border this whole mechanism exists to avoid. `compute`
+            // centres the box, so the free room on either side is exactly this arithmetic.
+            val room = ((morphPinW() - bw) / 2f).coerceAtLeast(0f)
+            morphBoxShiftPx = shift.coerceIn(-room, room).toInt()
+        } else {
+            // A morph of one of the four established styles must not inherit the nudge the last one left behind.
+            morphBoxShiftPx = 0
+        }
+        islandBackground?.cornerRadius = br
+        outlineRadius = br
         val host = islandMorph
         if (host != null) {
             // The card is not resized at all during a morph: this frame is one small invalidate inside the
             // view, which is why the overlay window stops being laid out 60 times a second.
-            val frame = IslandMorphFrame.compute(morphPinW(), morphPinH(), w, h)
+            val frame = IslandMorphFrame.compute(morphPinW(), morphPinH(), bw, bh)
+            // The nudge is kept OUT of `lastMorphBoxLeft` on purpose. That number is how the content rules
+            // recover the shape's progress - `MorphCarry.shapeProgress` reads the box width back out of the
+            // centring arithmetic - and a left edge that has been shifted sideways would be read as a box that
+            // is wider than it is, putting the fade ahead of the shape it exists to follow. The shift is where
+            // the box is DRAWN, not how far the morph has come.
             lastMorphBoxLeft = frame.left
-            host.applyMorphFrame(frame, r)
+            host.applyMorphFrame(
+                if (morphBoxShiftPx == 0) frame
+                else frame.copy(left = frame.left + morphBoxShiftPx, right = frame.right + morphBoxShiftPx),
+                br
+            )
             return
         }
-        if (w == morphLayoutW && h == morphLayoutH) return
-        morphLayoutW = w; morphLayoutH = h
-        updateIslandLayout(w, h, r)
+        if (bw == morphLayoutW && bh == morphLayoutH) return
+        morphLayoutW = bw; morphLayoutH = bh
+        updateIslandLayout(bw, bh, br)
+    }
+
+    /**
+     * Where the punch hole actually is, as a horizontal band across the top of the screen, measured from the
+     * window insets rather than from a model name. A device that reports no cutout gets a half-width of 0 and
+     * the rule returns just the Lab's bias, which is how this stays testable on a phone with a centred hole.
+     */
+    private fun measureMorphCutout() {
+        cutoutCenterX = 0f
+        cutoutHalfW = 0f
+        morphCenterPx = resources.displayMetrics.widthPixels / 2f + dp(AppSettings.getIslandXDp(this)).toFloat()
+        val root = visualRoot ?: return
+        val cut = root.rootWindowInsets?.displayCutout ?: return
+        var left = Int.MAX_VALUE
+        var right = 0
+        for (b in cut.boundingBoxes) {
+            if (b.top > dp(90)) continue // a bottom gesture inset is not a camera
+            left = minOf(left, b.left)
+            right = maxOf(right, b.right)
+        }
+        if (left >= right) return
+        cutoutCenterX = (left + right) / 2f
+        cutoutHalfW = (right - left) / 2f
     }
 
     /**
@@ -3765,6 +3922,22 @@ class HyperAccessibilityService : AccessibilityService() {
         morphMeter = MorphJankMeter(frameWatch.periodMs())
         setContentPinnedForMorph(true)
         gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        // --- which of the six looks this morph is, and the numbers the two outside designs brought with it.
+        morphVariant = AppSettings.getMorphStyle(this)
+        morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
+        morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH
+        morphVariantOn = morphLiquidOn || morphHyperOn
+        morphDurationMs = durationMs
+        val motionProfile = AppSettings.getMotionProfile(this)
+        morphResponseSec = MotionVariant.responseFor(morphVariant, motionProfile, towardCard)
+        morphDamping = MotionVariant.dampingFor(morphVariant, motionProfile, towardCard)
+        morphGate = AppSettings.getMotionGatePct(this) / 100f
+        morphMagnet = AppSettings.getMotionMagnetPct(this) / 100f
+        morphSqueeze = if (morphHyperOn) AppSettings.getMotionSqueezePct(this) / 100f else 0f
+        morphRipple = 0f
+        morphProgress = 0f
+        morphCutoutBiasPx = AppSettings.getMotionCutoutBiasDp(this) * resources.displayMetrics.density
+        measureMorphCutout()
         val startR = islandBackground?.cornerRadius ?: toR
         // One layout for the whole morph, and the growth or shrink is drawn from here on. Starting the box
         // at the *old* size in the same call is what keeps this from flashing a full-size black card for a frame.
@@ -3772,6 +3945,14 @@ class HyperAccessibilityService : AccessibilityService() {
         // shrink is the card we are leaving, not the pill we are heading to. Pinning to the target instead is
         // what made every collapse frame clamp to the final size, so the shape never moved at all.
         morphPinW = maxOf(fromW, toW); morphPinH = maxOf(fromH, toH)
+        // A spring that overshoots needs somewhere to overshoot INTO. `IslandMorphFrame` clamps the drawn box to
+        // the view's size, and that clamp is what ate the last elastic attempt: 29 of 46 frames measured moving
+        // the box 0.0 %. So the view is widened by the analytic peak of THIS curve, and by nothing else - width
+        // only, because the height leftover of a wrap-content card is what centres the row, and touching that
+        // re-opens the vertical drift `lerpEven` was invented to close.
+        morphOvershootPx = if (MotionVariant.isSpring(morphVariant))
+            (maxOf(fromW, toW) * MotionVariant.peakOvershoot(morphDamping)).toInt() else 0
+        if (morphOvershootPx > 4) morphPinW = morphPinW!! + morphOvershootPx
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
         val startFrame = IslandMorphFrame.compute(morphPinW!!, morphPinH!!, fromW, fromH)
         lastMorphBoxLeft = startFrame.left
@@ -3780,7 +3961,7 @@ class HyperAccessibilityService : AccessibilityService() {
         morphGcStart = gcSnapshot()
         // The carry only makes sense while the box is what moves: on the fallback path the view itself is
         // resized per frame, so the row already sits against its left edge.
-        val style = AppSettings.getMorphStyle(this)
+        val style = morphVariant
         morphCarryOn = islandMorph != null &&
             (style == AppSettings.MORPH_STYLE_BALANCED || style == AppSettings.MORPH_STYLE_CARRY)
         // The glass form scales with the shape as well: size and focus are the same idea - content settling into
@@ -3803,10 +3984,15 @@ class HyperAccessibilityService : AccessibilityService() {
         morphEntryDrop = AppSettings.getMorphEntry(this) == AppSettings.MORPH_ENTRY_DROP
         // The stagger fades the same views the blur is resolving; two entrances on one element is a third
         // thing nobody can name, so the glass form runs on focus alone.
-        morphStagger = if (morphGlassOn) 0f else AppSettings.getMorphStaggerPct(this) / 100f
-        morphOutBy = AppSettings.getMorphGoneByPct(this) / 100f
+        // The liquid style times the content with a gate instead of a stagger; two windows on one fade is a
+        // third thing nobody can name, and he has already told me that.
+        morphStagger = if (morphGlassOn || morphLiquidOn) 0f else AppSettings.getMorphStaggerPct(this) / 100f
+        // ChatGPT's Phase E is a *staged* return: the content is gone in 100-140 ms while the container takes
+        // 170-210 ms. So this style owns its own goneBy rather than letting the Lab's slider undo the design -
+        // below about 0.55 the two halves read as one event, above it the card empties and then shrinks.
+        morphOutBy = if (morphHyperOn && !morphTowardCard) 0.65f else AppSettings.getMorphGoneByPct(this) / 100f
         morphCarryGrowing = toW + toH >= fromW + fromH
-        morphFromW = fromW; morphToW = toW
+        morphFromW = fromW; morphToW = toW; morphFromH = fromH; morphToH = toH
         morphIconLauncher = appIconView?.drawable
         morphIconPill = pillPreviewIcon?.drawable
         applyMorphCarry(0f)
@@ -3822,7 +4008,16 @@ class HyperAccessibilityService : AccessibilityService() {
                 // the two rows are on one line, and any non-zero entry there would mean a vertical drift that
                 // b1378 never had. If "ride=classic" ever shows up with the drop off and a box edge of 0, the
                 // icon is again being carried by someone else's transform.
-                "boxLeft=${lastMorphBoxLeft}px roll=${if (AppSettings.getMorphCountRoll(this)) "on" else "off"}"
+                "boxLeft=${lastMorphBoxLeft}px roll=${if (AppSettings.getMorphCountRoll(this)) "on" else "off"}" +
+            // The variant's own numbers, printed rather than implied: when he says "3rd jaisa hi hai", the log
+            // now answers whether the style he picked is the style that ran, and with what curve.
+            if (morphVariantOn) " variant=${AppSettings.getMorphStyleName(morphVariant)}" +
+                " profile=${MotionVariant.profileName(motionProfile)}" +
+                " response=${"%.2fs".format(morphResponseSec)} damping=${"%.2f".format(morphDamping)}" +
+                " overshoot=${morphOvershootPx}px gate=${(morphGate * 100).toInt()}%" +
+                " magnet=${(morphMagnet * 100).toInt()}% squeeze=${(morphSqueeze * 100).toInt()}%" +
+                " cutout=${cutoutCenterX.toInt()}/${cutoutHalfW.toInt()}px bias=${morphCutoutBiasPx.toInt()}px"
+            else "" 
         )
     }
 
