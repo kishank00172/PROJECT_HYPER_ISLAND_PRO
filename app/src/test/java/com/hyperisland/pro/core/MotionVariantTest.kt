@@ -389,6 +389,38 @@ class MotionVariantTest {
     }
 
     @Test
+    fun thePullIsOneArcSharedBySinkAndStretch() {
+        // His steps 1-3 as testable properties: one driver, zero at both ends (the catch leaves nothing
+        // behind), the peak exactly half-way into the window, a single hump on each side of it.
+        assertEquals(0f, MotionVariant.pullPhase(0f), 1e-6f)
+        assertEquals(0f, MotionVariant.pullPhase(MotionVariant.PULL_WINDOW), 1e-6f)
+        assertEquals(0f, MotionVariant.pullPhase(0.999f), 1e-6f)
+        assertEquals(1f, MotionVariant.pullPhase(MotionVariant.PULL_WINDOW / 2f), 1e-4f)
+        assertTrue("a hump, left side", MotionVariant.pullPhase(0.2f) < MotionVariant.pullPhase(0.35f))
+        assertTrue("a hump, right side", MotionVariant.pullPhase(0.55f) > MotionVariant.pullPhase(0.7f))
+        assertEquals(1f + MotionVariant.STRETCH_Y_MAX, MotionVariant.stretchScaleY(1f), 1e-6f)
+        assertEquals(1f - MotionVariant.SQUEEZE_X, MotionVariant.stretchScaleX(1f), 1e-6f)
+        assertEquals(1f, MotionVariant.stretchScaleY(0f), 1e-6f)
+        assertEquals(1f, MotionVariant.stretchScaleX(0f), 1e-6f)
+    }
+
+    @Test
+    fun theFloatKeepsTheHierarchyHeWrote() {
+        // Step 4 verbatim: text bobs more than the icon, the icon at least a pixel (or it is not there), the
+        // wave is one sine that never exceeds the amplitude, and a full period later it is back to zero.
+        assertTrue(MotionVariant.FLOAT_TEXT_PX > MotionVariant.FLOAT_ICON_PX)
+        assertTrue(MotionVariant.FLOAT_ICON_PX >= 1f)
+        var extreme = 0f
+        for (i in 0..100) {
+            val v = MotionVariant.floatOffsetPx(i / 100f, MotionVariant.FLOAT_TEXT_PX)
+            extreme = maxOf(extreme, kotlin.math.abs(v))
+        }
+        assertTrue(extreme <= MotionVariant.FLOAT_TEXT_PX + 1e-3f)
+        assertEquals(0f, MotionVariant.floatOffsetPx(0f, MotionVariant.FLOAT_TEXT_PX), 1e-4f)
+        assertEquals(0f, MotionVariant.floatOffsetPx(0.5f, MotionVariant.FLOAT_TEXT_PX), 1e-4f)
+    }
+
+    @Test
     fun buoyancyIsALagAndADipInsideExactEndings() {
         // The round-33 ask, "buoyancy wala effect, jaise content liquid mein hai": the content's ride progress
         // on the spring styles is its own slower, underdamped spring. Two properties make it safe on every

@@ -418,7 +418,47 @@ A formula's inputs can silently stop meaning what they meant when the formula wa
 a headroom difference). Every correction that survived contact with his eyes reads the scene directly - the
 box's own edges, the animator's own clock - and computes nothing from deltas of the delta.
 
-## 11. What is still unproven
+## 11. Round 34: the expansion he saw was sequential; the one in the table is not - his spec reconciled both
+
+His round-34 opening, with the angry emoji: "pehle y axis ke along expand hota hai, fir dono side expand hota
+hai, uniformly all side expansion nahi hota kyu". Before defending or fixing anything, the table at his exact
+params (ping pill -> full, liquid at his saved snappy profile, 380 ms, 60 Hz): `spring(t)` drives BOTH axes, so
+at frame 6 of 23 the box is 1010 x 395 - 92 % each; at frame 9, 1057 x 416 - 99 % each. Nothing in the size
+math is sequential: width moves 2.2x the pixels per frame (701 px to cover vs 317), so in the ~100 ms real
+working window the sideways motion dominates the retina; by the time content clears the gate (60 % shape,
+opened at frame ~3), the shape has already flattened. What he could not name is the part his spec then wrote
+down for him: the expansion has no PULL. A card that blooms symmetric from the top edge without ever travelling
+down reads as a resize, not as an island being opened - and a resize is exactly what "uniformly nahi" felt like.
+
+So round 34 implements his volume-constant spec mechanism for mechanism, which also answers the uniformity
+question with a single shared driver:
+
+* **Step 1 - the pull and throw:** `pullPhase(t)` = one sine arc over the first 75 % of the clock, 0 at both
+  ends. It feeds two properties at once: `islandView.translationY` peaking at **26 px** (10 dp) and the text
+  column's `scaleY = 1 + 0.15 * arc`, `scaleX = 1 - 0.05 * arc` - his exact 1.15 / 0.95 pair, on the text only.
+* **Step 2 - deep sink:** the island and the content travel together (the buoyancy of round 33 stacks with the
+  arc: the content still dips its own 15 px past the seat while the box is sinking).
+* **Step 3 - the snap back:** the arc returns to exactly 0 and the scales to exactly 1.000 by frame 17 of 23,
+  because the endpoints are definitions, not hopes; the cleanup re-asserts every one of them.
+* **Step 4 - separated buoyancy:** after the settle the island is rigid (it never moves again), the text column
+  bobs **+- 3 px**, the icon **+- 1 px** - his amplitudes verbatim - on one shared 2.4 s sine, written per
+  vsync to two hardware-layered views, so the loop costs no re-raster. The float starts at morph end on a full
+  spring card and is retired (with the translations restored to 0) by the first line of the next beginMorphPerf.
+
+Rules of ownership, because this file exists to keep them: the pull owns `islandView.translationY` alone and
+nothing in `IslandMorphFrame` is allowed to know about it (the frame math centres the box, the pull moves the
+window - two properties, or the centring and the sink fight); the stretch owns the text column's scale and the
+icon is never in the column ("left ka icon rigid brand asset hai"); the float owns the content's translationY
+and the icon's, and nobody else writes those two while it runs. The three spring styles get the pull and the
+float (`isSpring` is the gate, as with the buoyancy: a rigid curve pulled downward reads as a window glitch,
+not as elastic); the four classic styles are untouched by all of it.
+
+The one honest limit the spec does not have: the pull arc is keyed to the CLOCK (t), not to the shape - his
+steps are written in time ("tezi se neeche", 30-45 ms phases), and anything keyed to `spring(t)` at his
+almost-settled profile would end before it could be felt. The trace prints it, so it is checkable on device:
+`pull=10dp stretch=0.15/0.95 float=3/1px on`.
+
+## 12. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

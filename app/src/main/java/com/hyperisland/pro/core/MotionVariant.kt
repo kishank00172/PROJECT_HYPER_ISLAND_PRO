@@ -255,6 +255,38 @@ object MotionVariant {
     fun buoy(t: Float, durationMs: Long, baseResponseSec: Float): Float =
         spring(t, durationMs, baseResponseSec * BUOY_RESPONSE_SCALE, BUOY_DAMPING)
 
+    // ------------------------------------------------- the pull, his steps 1-3 as one shared arc (round 34)
+
+    /** The slice of a morph over which the island is "pulled": 75 % of the clock. */
+    const val PULL_WINDOW = 0.75f
+    /** How far the whole island travels down at the pull's peak, in dp (= 26 px on his 2.625 panel). */
+    const val PULL_DP = 10
+    /** The stretch and squeeze, verbatim from his step 1: enough to feel flexible, too little to blur. */
+    const val STRETCH_Y_MAX = 0.15f
+    const val SQUEEZE_X = 0.05f
+    /** Step 4, his amplitudes verbatim: the text bobs, the icon barely bobs, the island does not. */
+    const val FLOAT_TEXT_PX = 3f
+    const val FLOAT_ICON_PX = 1f
+    /** One slow breath: a full bob in 2.4 s - a liquid feel is a loop you can watch, not a one-shot curve. */
+    const val FLOAT_PERIOD_MS = 2400L
+
+    /**
+     * The single arc of steps 1-3: 0 at both ends of [window], 1 exactly half-way into it - the throw, the
+     * deep sink, and the catch are this one curve, so the size, the sink and the text stretch cannot desync
+     * the way three separately tuned effects would. Clamping outside the window is a definition, not a hack:
+     * after the catch the island is rigid, and rigid is the state his step 4 demands it return to.
+     */
+    fun pullPhase(t: Float, window: Float = PULL_WINDOW): Float =
+        if (t <= 0f || t >= window) 0f else sin(PI.toFloat() * t / window)
+
+    /** Volume-constant, his exact pair: tall by 15 %, narrow by 5 % - the "weight" stays put. */
+    fun stretchScaleY(phase: Float): Float = 1f + STRETCH_Y_MAX * phase
+    fun stretchScaleX(phase: Float): Float = 1f - SQUEEZE_X * phase
+
+    /** One shared sine for every floater; the caller scales it to its own amplitude (the hierarchy). */
+    fun floatOffsetPx(fraction: Float, amplitudePx: Float): Float =
+        (amplitudePx.toDouble() * sin(2.0 * PI * fraction.toDouble())).toFloat()
+
     // ---------------------------------------------------------------- the profiles Claude asked for
 
     /**
