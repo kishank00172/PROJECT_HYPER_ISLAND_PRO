@@ -23,8 +23,9 @@ data class MorphFrame(
     val bottom: Int,
     /**
      * How far the content has to shift so it stays centered inside the *drawn* box instead of inside the
-     * pinned view (bound plus headroom). Negative while the box is shorter than that surface, 0 when they
-     * match - which at the spring's peak is the whole point: the curve's maximum moves the content not at all.
+     * pinned view (bound plus headroom), pinned at -headH/2 once the box reaches the natural height - so the
+     * spring's overshoot is drawn below content that does not move. Without headroom this is the old centring:
+     * negative while the box is shorter than the view, 0 when they match.
      */
     val contentOffsetY: Int
 ) {
@@ -56,13 +57,19 @@ object IslandMorphFrame {
         // Centring against [boundH] while the view is [boundH] + [headH] tall leaves the content standing half
         // the headroom out of place, and every pixel the spring adds or removes around [boundH] then flips the
         // offset's sign: a content bounce at the curve's own frequency plus a 1-2 px rounding jitter between
-        // frames - motion ON the content instead of UNDER it. Centring against the full surface instead has the
-        // property the whole design wants: at the spring's peak the box and the surface are the same size, the
-        // offset is 0, the content stands still, and the overshoot is nothing but empty surface below the card.
-        // At rest the offset is -headH/2, which added to the layout's own centring leftover (+headH/2) puts the
-        // content exactly where a headroom-free view would - the hand-off needs no correction either way, and
-        // for the four classic styles headH is 0 so every number here is identical to the old arithmetic.
-        return MorphFrame(left, 0, left + boxW, boxH, (boxH - boundH - headH) / 2)
+        // frames - motion ON the content instead of UNDER it. Centring against the full surface instead
+        // restores the invariant: at rest the offset is -headH/2, which added to the layout's own centring
+        // leftover (+headH/2) puts the content exactly where a headroom-free view would put it - the hand-off
+        // needs no correction, and for the four classic styles headH is 0 so every number here is identical
+        // to the old arithmetic.
+        // ...and once the box has passed the natural height the content stops moving entirely: the offset is
+        // pinned at the rest value (exactly what cancels the layout's own centring leftover), so the last
+        // [headH] pixels of the curve - the whole elastic life of the spring - are drawn as empty surface
+        // below a content that does not move at all. No excursion, no sign flip, no end snap; "jerky" had
+        // all three (his report, b1422). Below the natural height the offset tracks the box one to one, which
+        // is the reveal the pinned view was built for.
+        val contentOffsetY = ((boxH - boundH - headH) / 2).coerceAtMost(-headH / 2)
+        return MorphFrame(left, 0, left + boxW, boxH, contentOffsetY)
     }
 
     /**

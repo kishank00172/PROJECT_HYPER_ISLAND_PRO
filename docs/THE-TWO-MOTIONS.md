@@ -357,12 +357,14 @@ frame the curve crossed the natural height the offset flipped sign, and since th
 reset the translation in one call, the last frame of every spring morph snapped the content 15 px straight up.
 His words for the whole class: jerky, not smooth. The fix is one sign and one sentence - the content is centred
 against the surface it is *laid out in* (`(boxH - boundH - headH) / 2`), not against the card's destination:
-then the peak's offset is 0 (the content stands still while the bottom edge breathes), the settle's offset is
-`-headH/2`, which the layout's own `+headH/2` leftover cancels exactly, and the drawn position of every child is
-- truncation aside - bit-identical to the headroom-free curve of the classic styles. The ride curve in
+then the offset
+reaches its rest value (`-headH/2`, exactly cancelled by the layout's own `+headH/2` leftover) at the natural
+height and never moves again: the curve's whole elastic excursion is drawn as surface below a content standing
+still, and below the natural height every child's drawn position is - truncation aside - bit-identical to the
+headroom-free curve of the classic styles. The ride curve in
 `applyMorphCarry` subtracts the same `headH/2`, so both writers land on one number at open = 1.
-`theHeadroomIsInvisibleToTheContentForEveryBoxHeight` checks the identity for five box heights and three content
-heights. At the bouncy peak b1422 dipped the CONTENT 30 px with a 15 px end-snap; now the content's peak
+`theHeadroomIsInvisibleToTheContentForEveryBoxHeight` checks both halves of that claim against the
+same five box heights and three content heights. At the bouncy peak b1422 dipped the CONTENT 30 px with a 15 px end-snap; now the content's peak
 excursion is the integer rounding noise, and only the bottom edge moves.
 
 **The icon that vanishes on the way back.** Nothing to do with the spring: `setStageAnimated` faded the *pill

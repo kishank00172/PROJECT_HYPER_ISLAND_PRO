@@ -106,16 +106,21 @@ class IslandMorphFrameTest {
         // the curve's frequency - "spring content pe jerky feel deta hai". The property that fixes it: at the
         // spring's peak the box and the surface are one size, the offset is zero, and the overshoot is nothing
         // but empty surface below the card.
+        // Below the natural height the offset tracks the box one to one - the reveal - and once the box passes
+        // the natural height the offset is pinned at the rest value: the spring's whole elastic life is drawn
+        // as surface below a content that does not move. -19 is the layout's own centring leftover with the
+        // sign flipped, so at rest and at the peak the content is drawn at exactly the same pixel.
+        val below = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 418, headH = 39)
+        assertEquals(418, below.height)
+        assertEquals(-21, below.contentOffsetY)  // (418 - 421 - 39) / 2: still tracking the box
         val peak = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 460, headH = 39)
         assertEquals(460, peak.height)
-        assertEquals("at the spring's peak the content stands still", 0, peak.contentOffsetY)
-        // A frame mid-settle: the offset is the amount the layout's own centring moved, in one direction - a
-        // smooth slide, never a bounce around zero.
+        assertEquals("past the natural height the offset does not move again", -19, peak.contentOffsetY)
         val mid = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 447, headH = 39)
         assertEquals(447, mid.height)
-        assertEquals(-6, mid.contentOffsetY)   // (447 - 421 - 39) / 2
+        assertEquals(-19, mid.contentOffsetY)
         val atRest = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 421, headH = 39)
-        assertEquals(-19, atRest.contentOffsetY) // exactly cancels the layout's own +19 centring leftover
+        assertEquals(-19, atRest.contentOffsetY)
         assertEquals(421, atRest.height)
         // Without the headroom the box is eaten, which is the regression this exists to prevent.
         val eaten = IslandMorphFrame.compute(1080, 421, 1067, 447)
@@ -131,12 +136,14 @@ class IslandMorphFrameTest {
 
     @Test
     fun theHeadroomIsInvisibleToTheContentForEveryBoxHeight() {
-        // The claim behind the fix, as arithmetic the CI can keep: a child laid out in the widened surface and
-        // shifted by the frame's offset is drawn at the very same pixel as in the headroom-free view, whatever
-        // the box's height - so the spring breathes the surface and the content never moves. pill (104),
-        // mid (200) and card (421) sized content, five box heights each.
+        // The claim behind the fix, as arithmetic the CI can keep - stated in the two halves it is true in.
+        // Below the natural height, where the headroom-free world could express the same motion: a child laid
+        // out in the widened surface and shifted by the frame's offset is drawn at the very same pixel as in
+        // the unpadded view (the spring's padding is invisible). At and past the natural height, where the
+        // unpadded world would clamp and there IS no comparable frame: the offset does not move at all - the
+        // curve's overshoot is empty surface below content standing at its natural rest.
         for (contentH in listOf(104, 200, 421)) {
-            for (boxH in listOf(104, 262, 421, 447, 460)) {
+            for (boxH in listOf(104, 262, 421)) {
                 val withHead = IslandMorphFrame.compute(1080, 421, 1067, boxH, headH = 39)
                 val without = IslandMorphFrame.compute(1080, 421, 1067, boxH, headH = 0)
                 val drawnWith = (421 + 39 - contentH) / 2 + withHead.contentOffsetY
@@ -144,6 +151,13 @@ class IslandMorphFrameTest {
                 assertTrue(
                     "box=$boxH content=$contentH: headroom moves content ($drawnWith vs $drawnWithout)",
                     kotlin.math.abs(drawnWith - drawnWithout) <= 1,
+                )
+            }
+            for (boxH in listOf(421, 447, 460)) {
+                val withHead = IslandMorphFrame.compute(1080, 421, 1067, boxH, headH = 39)
+                assertEquals(
+                    "box=$boxH content=$contentH: the elastic excursion must not move the content",
+                    -19, withHead.contentOffsetY,
                 )
             }
         }
