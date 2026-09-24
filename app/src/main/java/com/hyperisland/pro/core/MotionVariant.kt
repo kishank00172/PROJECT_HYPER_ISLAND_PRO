@@ -74,14 +74,6 @@ object MotionVariant {
         else -> "balanced"
     }
 
-    /**
-     * How far the *row's* anchors have to be pulled back to land on the box rather than on the surface the box is
-     * drawn inside. When a spring needs headroom the view gets wider than the card, and everything measured from
-     * the view's edge inherits half of that difference; the classic styles keep the view at exactly the final
-     * width, so for them this is 0 and their accepted numbers are untouched, by arithmetic and not by hope.
-     */
-    fun viewExcessHalf(pinW: Int, finalW: Int): Int = ((pinW - finalW) / 2).coerceAtLeast(0)
-
     /** A percent slider that cannot smuggle in a nonsense value; shared by every new knob in the Lab. */
     fun clampPct(v: Int, lo: Int, hi: Int): Int = v.coerceIn(lo, hi)
 
@@ -237,6 +229,31 @@ object MotionVariant {
      * a switch: at full glass strength the text visibly fogs, which is a second effect on the same element - and
      * running it on a collapse too, as b1406 did, is a blur flash at the start of every return. */
     const val RIPPLE_BLUR_FRACTION = 0.45f
+
+    // ---------------------------------------------------------------- the buoyancy the tester asked for by name
+
+    /**
+     * How much slower the CONTENT floats than the box, and with how little damping. His round-33 words, after
+     * a snappy-profile run where the box had no bounce left to share: "pill se nikla hua content aise feel
+     * nahi aata, content sidha aa jata hai - buoyancy wala effect do, jaise content liquid mein hai aur expand
+     * ne uspe asar daala." The spring styles' ride used to track the shape 1:1, so a critically-damped box
+     * (damping 1.00 at his saved profile) made the text walk a stiff diagonal: perfectly on time, and dead.
+     * The content now travels on its OWN spring: a third slower, and underdamped, so the box arrives first,
+     * the content trails in like something suspended in it, overshoots its rest by a few pixels and floats
+     * back. It is a property of the spring STYLES, not of his motion profile - at snappy the box stays crisp
+     * and the content still floats, which is the whole point of calling the style "liquid".
+     */
+    const val BUOY_RESPONSE_SCALE = 1.30f
+    const val BUOY_DAMPING = 0.55f
+
+    /**
+     * The content's buoyant progress. Landed on [spring] so the guarantee that matters is inherited, not
+     * re-proven: exactly 0 at the start and exactly 1 at [durationMs], so the ride cannot snap at the
+     * hand-off - the lag and the float all live strictly inside the window. Mid-flight it is behind the box
+     * and occasionally past 1 (the dip), by [peakOvershoot] on a 0.55 damping.
+     */
+    fun buoy(t: Float, durationMs: Long, baseResponseSec: Float): Float =
+        spring(t, durationMs, baseResponseSec * BUOY_RESPONSE_SCALE, BUOY_DAMPING)
 
     // ---------------------------------------------------------------- the profiles Claude asked for
 

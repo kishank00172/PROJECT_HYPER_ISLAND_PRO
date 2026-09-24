@@ -587,6 +587,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphIconRide = true
     private var morphContentDropPx = 0f
     private var morphEntryDrop = true
+    /** Spring styles only: the content rides its own slower, underdamped spring on the way in (buoyancy -
+     * his ask, round 33), so it lands after the box, dips past its seat, and floats back. */
+    private var morphBuoyOn = false
+    /** The card's text column - everything the morph's fade may touch, and all it touches since round 33.
+     * The icon section fades with nobody: it is the shared element. */
+    private var gridContentSec: android.view.View? = null
     private var morphStagger = 0f
     private var morphOpenFrame = 0f
     private var lastMorphBoxLeft = 0
@@ -3298,7 +3304,13 @@ class HyperAccessibilityService : AccessibilityService() {
                         setMorphContentAlpha(1f - (t / 0.4f).coerceIn(0f, 1f))
                     }
                 }
-                if (target != IslandStage.STAGE3_FULL) pillPreviewRoot?.alpha = 1f
+                // The destination rides from frame one (positioned, owning the box's edge) but is HELD BACK
+                // until the arrival window: the un-faded rider IS the icon for the middle of the trip - that
+                // is the b1378 feel he asked back by name ("pehle icon move hoke udhar jata tha") - and a
+                // second copy drawn beside it, ~70 px away, is the "duplicate icon" he has rejected twice.
+                // In the last 15 % the copy materialises where the rider lands and takes it over; the end
+                // listener then owns its visibility outright, with no frame in between.
+                if (target != IslandStage.STAGE3_FULL) pillPreviewRoot?.alpha = MorphCarry.partProgress(t, 0.85f, 1f)
                 // Was: islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI)) — a whole-card 4% vertical
                 // squash on every morph. Scaling the card scales the TEXT, so it blurred and "breathed"
                 // on both expand and collapse. The rounded-corner growth alone carries the motion now.
@@ -3436,9 +3448,17 @@ class HyperAccessibilityService : AccessibilityService() {
             // their numbers are untouched.
             val headroomHalf = morphOvershootPx / 2f
             if (g != null) {
-                // No longer a literal 0, and still 0 for every classic style: the row's left edge is measured
-                // from the view, so when the view carries headroom the row has to be pushed back into the box.
-                g.translationX = morphViewExcessHalf().toFloat()
+                // Literal 0 now. The subtraction this used to share with the pill's ride existed to undo the
+                // horizontal headroom's shift - and after the axis rule there IS no horizontal headroom, so on
+                // a collapse (pinW - finalW)/2 came out as the whole travel: the fading row was dragged ~350 px
+                // right while the box shrank around it. The content exits where it stands.
+                g.translationX = 0f
+                // The buoyancy: spring styles on the way IN ride the content on its own spring - a third
+                // slower and underdamped ([MotionVariant.buoy]) - so it lands after the box, dips past its
+                // seat and floats back: "jaise content liquid mein hai". The exact-endings guarantee is the
+                // shared spring's (it is 1.0 at t = 1), so the hand-off still cannot snap; the classic
+                // styles are untouched because isSpring gates it.
+                val travel = if (morphBuoyOn) MotionVariant.buoy(t, morphDurationMs, morphResponseSec) else open
                 g.translationY = if (morphHyperOn && !morphTowardCard && morphMagnet > 0f) {
                     // "Magnetic anchors", the one idea in his design that no launcher has: on the way home the
                     // content is not interpolated to the pill, it is PULLED - attraction rising as the anchors get
@@ -3447,17 +3467,20 @@ class HyperAccessibilityService : AccessibilityService() {
                     // different things on purpose rather than desynced by accident.
                     val travelled = MotionVariant.magnetic(1f - open, morphMagnet)
                     MorphCarry.contentEntryOffset(1f - travelled, leftover, morphContentDropPx) - headroomHalf
-                } else MorphCarry.contentEntryOffset(open, leftover, morphContentDropPx) - headroomHalf
+                } else MorphCarry.contentEntryOffset(travel, leftover, morphContentDropPx) - headroomHalf
             }
         } else {
             // The old entry: the host's per-frame centring is left alone, so nothing here owns translationY.
-            if (morphCarryOn && g != null) g.translationX =
-                MorphCarry.translationX(lastMorphBoxLeft - morphViewExcessHalf())
+            if (morphCarryOn && g != null) g.translationX = MorphCarry.translationX(lastMorphBoxLeft)
         }
-        // The pill's row rides too, but on the box alone: sliding the pill sideways as well as growing it is
-        // what read as a second pill lagging behind the first.
-        if (morphCarryOn) pillPreviewRoot?.translationX =
-                MorphCarry.translationX(lastMorphBoxLeft - morphViewExcessHalf())
+        // The pill copy is glued to the box's own left edge, whichever way the box is moving: on the way out
+        // it is the source the card grows away from, on the way in it is the destination the icon rides into.
+        // The subtraction this line carried ((pinW - finalW) / 2) belonged to the horizontal-headroom world;
+        // after the axis rule that difference IS the travel, so the destination's icon began every collapse
+        // about 350 px off-screen and only slid in for the last frames - the concrete half of "in between
+        // animation icon gayab ho jata hai". Unconditional now: the destination riding into place is not a
+        // personality of the carry styles, it is the hand-off's contract.
+        pillPreviewRoot?.translationX = MorphCarry.translationX(lastMorphBoxLeft)
         var rowScale = 1f
         if (morphScaleOn && g != null) {
             // Scale about the anchor the box grows from: its top edge when the row hangs there, its middle when
@@ -3544,12 +3567,14 @@ class HyperAccessibilityService : AccessibilityService() {
      * the very same views: each one gets the row's opacity times its own slice of the travel.
      */
     private fun setMorphContentAlpha(a: Float) {
-        val g = gridRoot ?: return
-        // One writer, one number, on the ROW - and therefore on everything inside it, the icon included. That is
-        // what made b1378 read as a single object moving. The per-child version of this function (round 24)
-        // existed to stop a rider being faded by the container it was leaving; with the rider gone there is
-        // nothing to protect, and writing children instead of the row was itself part of what he felt.
-        g.alpha = a
+        // One writer, one number, on the TEXT SECTION - never on the row. The row contains the shared
+        // element (the icon, in iconSec), and a shared element must not be faded by the container it is
+        // leaving: with the fade on the row, goneBy = 45 % erased the icon half-way into every collapse,
+        // which is "in between animation icon gayab ho jata hai" (his report on b1424). The text exits
+        // early - that part of the design was measured on hardware and stays - while the icon rides the
+        // whole way down, swaps to the pill glyph, and lands where the pill takes it over. Not a new look:
+        // the b1378 hand-off recovered one mechanism at a time, like the last time a refactor lost it.
+        (gridContentSec ?: gridRoot ?: return).alpha = a
         if (morphStagger > 0f) applyMorphStagger(a)
     }
 
@@ -3663,6 +3688,7 @@ class HyperAccessibilityService : AccessibilityService() {
         actionScroll?.translationY = 0f
         appIconView?.translationX = 0f
         appIconView?.translationY = 0f
+        gridContentSec?.alpha = 1f // the fade's home since round 33: restored here like every other alpha
         pillPreviewIcon?.alpha = 1f
         appIconView?.scaleX = 1f
         appIconView?.scaleY = 1f
@@ -3671,22 +3697,15 @@ class HyperAccessibilityService : AccessibilityService() {
         morphIconLauncher = null
         morphIconPill = null
         lastMorphBoxLeft = 0
+        // Hidden at begin for the travel; revealed by the hand-off through the one policy writer, so a
+        // collapse to the badge pill ends with the counter and a collapse away from it ends without one -
+        // decided by the ring's contents, not by whoever happened to show or hide the pill last.
+        if (currentStage != IslandStage.STAGE3_FULL) pillChatCount = pillChatCount
     }
 
     /** The pinned bound, falling back to the target for any frame that arrives outside a morph. */
     private fun morphPinW(): Int = morphPinW ?: morphFinalW
 
-    /**
-     * Half of whatever extra width the spring's headroom put on the card view - and the number that keeps that
-     * headroom from being felt as a glitch. The view is the surface the box is drawn on, so letting a spring
-     * overshoot means the view is wider than the card by exactly that much; every anchor measured from the VIEW's
-     * edge instead of the box's (the row's own left edge, the pill's) then sits half that amount too far left for
-     * the whole morph and snaps back into place when it lands. That snap is a sideways jump at the settle, and it
-     * is the other half of "pill kabhi right shift ho ja rha hai collapsing mei" - b1406 printed
-     * `overshoot=21px` on every line and every collapse ended with the row ~10 px from where the layout puts it.
-     * Zero for the four classic styles, because they never widen the pin: nothing already accepted moves.
-     */
-    private fun morphViewExcessHalf(): Int = MotionVariant.viewExcessHalf(morphPinW(), morphFinalW)
 
     /**
      * The one funnel every morph animator writes its size through, and it is given the animator's own clock [t]
@@ -4115,6 +4134,11 @@ class HyperAccessibilityService : AccessibilityService() {
         morphBlurPx = if (morphGlassOn) 0f else dp(GLASS_BLUR_DP).toFloat()
         morphContentDropPx = dp(AppSettings.getMorphContentDropDp(this)).toFloat()
         morphEntryDrop = AppSettings.getMorphEntry(this) == AppSettings.MORPH_ENTRY_DROP
+        // The content floats in only when the surface under it floats too: the box has to be a spring for the
+        // buoyancy to read as liquid instead of latency, and only the way IN has a box that arrives first -
+        // on the way OUT the content leaves on its own axis (the magnet, or the classic exit), which he has
+        // never complained about.
+        morphBuoyOn = morphEntryDrop && towardCard && MotionVariant.isSpring(morphVariant)
         // The stagger fades the same views the blur is resolving; two entrances on one element is a third
         // thing nobody can name, so the glass form runs on focus alone.
         // The liquid style times the content with a gate instead of a stagger; two windows on one fade is a
@@ -4128,6 +4152,12 @@ class HyperAccessibilityService : AccessibilityService() {
         morphFromW = fromW; morphToW = toW; morphFromH = fromH; morphToH = toH
         morphIconLauncher = appIconView?.drawable
         morphIconPill = pillPreviewIcon?.drawable
+        // The badge belongs to the pill the morph ENDS on, not the middle of the trip: while the box travels,
+        // the destination rides without its counter, and the cleanup below puts it back through the one
+        // policy writer. "In this process wo count badge bhi dikh jata hai" - since the destination is
+        // visible from frame one, the counter came with it at frame one; his rule for the badge was always
+        // "earn the attention", and a morph in flight has not earned it.
+        if (!towardCard) pillPreviewCount?.visibility = View.GONE
         applyMorphCarry(0f)
         TraceLog.morph(
             "start $label dur=${durationMs}ms style=${AppSettings.getMorphStyleName(this)} " +
@@ -4150,7 +4180,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 " gate=${(morphGate * 100).toInt()}%" +
                 " magnet=${(morphMagnet * 100).toInt()}% squeeze=${(morphSqueeze * 100).toInt()}%" +
                 " axis=${MotionVariant.SPRING_AXIS} travelV=${morphTravelV}px down" +
-                " excess=${morphViewExcessHalf()}px"
+                " buoy=${"%.2fs".format(morphResponseSec * MotionVariant.BUOY_RESPONSE_SCALE)}/${"%.2f".format(MotionVariant.BUOY_DAMPING)}"
             else "" 
         )
     }
@@ -4502,7 +4532,7 @@ class HyperAccessibilityService : AccessibilityService() {
             this@HyperAccessibilityService.gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(1), dp(1), dp(1), dp(1)); visibility = View.GONE; alpha = 0f; weightSum = 1f
                 val iconSec = FrameLayout(context).apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
-                val contentSec = LinearLayout(context).apply {
+                val contentSec = LinearLayout(context).also { this@HyperAccessibilityService.gridContentSec = it }.apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0)
                     val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
                     this@HyperAccessibilityService.appNameText = TextView(context).apply { setTextColor(Color.rgb(0, 150, 255)); textSize = 11f; typeface = Typeface.DEFAULT_BOLD }

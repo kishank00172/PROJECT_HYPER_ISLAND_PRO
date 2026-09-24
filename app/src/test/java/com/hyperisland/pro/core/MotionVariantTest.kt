@@ -389,14 +389,33 @@ class MotionVariantTest {
     }
 
     @Test
-    fun theHeadroomALayoutNeedsToLandExactIsZeroForTheClassicStyles() {
-        // The extra surface a spring needs moves every anchor that is measured from the view's edge, so the
-        // correction that puts them back must be provably 0 for the styles he has already accepted: they ask for
-        // no headroom, and this is the difference between "the new looks are safe" and "the new looks are on".
-        assertEquals(0, MotionVariant.viewExcessHalf(1067, 1067))
-        assertEquals(0, MotionVariant.viewExcessHalf(366, 366))
-        assertEquals(0, MotionVariant.viewExcessHalf(1000, 1067)) // never negative, whatever the pin ends up as
-        assertEquals(34, MotionVariant.viewExcessHalf(1067 + 68, 1067))
+    fun buoyancyIsALagAndADipInsideExactEndings() {
+        // The round-33 ask, "buoyancy wala effect, jaise content liquid mein hai": the content's ride progress
+        // on the spring styles is its own slower, underdamped spring. Two properties make it safe on every
+        // expand of those styles: the endpoints are EXACT (the shared spring clamps them), so the grid's
+        // hand-off at open = 1 still lands on the host's own offset - no snap, ever - and the overshoot is
+        // bounded small enough that the dip reads as a float, not as a second bounce fighting the box's.
+        val buoys = (0..46).map { i -> MotionVariant.buoy(i / 46f, 380L, 0.15f) }   // his saved profile: snappy
+        assertEquals(0f, buoys.first(), 1e-6f)
+        assertEquals(1f, buoys.last(), 1e-6f)
+        val peak = buoys.max()
+        assertTrue("a buoyant rise must overshoot or it is invisible: peak=$peak", peak > 1.03f)
+        assertTrue("and must stay a float, not a second spring of the box's size: peak=$peak", peak < 1.15f)
+        // After the dip it comes home and stays: the last sixth of the morph is inside +/- 1 % of the rest.
+        val settled = buoys.drop(38)
+        assertTrue("it must come home: $settled", settled.all { kotlin.math.abs(1f - it) < 0.01f })
+        // On the way up it is travelling (mid-liquid) well before it dips: a frame ~15 % in is past half but
+        // not past 1 - it has not arrived early, which would be latency, nor teleported, which was the old
+        // "content sidha aa jata hai" once the profile went critically damped.
+        val early = buoys[7]
+        assertTrue("t=15%% in the liquid: $early", early in 0.5f..1.0f)
+        // The dip is real and bounded, and the idol frame never sits above it by chance of sampling.
+        assertTrue("the dip is where the rise ends: $early < $peak", early < peak)
+        // Every spring profile gets the same exact endings, whatever the base response.
+        for (response in listOf(0.15f, 0.26f, 0.29f)) {
+            assertEquals(1f, MotionVariant.buoy(1f, 380L, response), 1e-6f)
+            assertEquals(0f, MotionVariant.buoy(0f, 380L, response), 1e-6f)
+        }
     }
 
     // ---------------------------------------------------------------- the shared clamps

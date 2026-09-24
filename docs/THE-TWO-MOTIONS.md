@@ -382,7 +382,43 @@ Both fixes leave the four classic styles' numbers exactly where they were - head
 direction rules - which is also how I know the "old teeno" were collateral, not target: when the destination
 doesn't exist, no style can ride into it, balanced or bouncy.
 
-## 10. What is still unproven
+## 10. Round 33: the meaning of a formula outlives the world it was written for
+
+His b1424 report came with the log: liquid with his saved snappy profile (`damping=1.00`, `travelV=0px`),
+collapses to the ping pill, and three observations that are three different bugs - plus one ask by name.
+
+**The icon vanished mid-collapse because a subtraction had changed meaning.** `boxLeft - (pinW - finalW) / 2`
+was written when the view could be WIDER than the card: the difference was headroom and the subtraction put
+anchors back onto the box. After the axis rule there is no horizontal headroom, so on a collapse the difference
+is the whole travel: the pill's own icon began every trip ~350 px off the left edge of the view and slid in
+only for the last frames, and the fading row was dragged the same 350 px to the right. The fix is not a new
+constant, it is the removal of a stale one (`viewExcessHalf` is gone, with its tests and its trace line): the
+pill copy glues to the box's own left edge on every morph in every style, and the row's x translation is a
+literal 0.
+
+**The shared element was being faded by the container it leaves - again.** `setMorphContentAlpha` wrote the
+whole row, so `goneBy = 45%` erased the riding icon half-way into every collapse. The fade now lives on the
+text section only: the text still exits early (that was measured on hardware and stays), while the icon rides
+the whole way down, swaps to the pill's glyph, and the pill's own copy - riding from frame one but held back
+to the last 15% - materialises underneath to take it over. The count badge pops in with it only when the morph
+ENDS (beginMorphPerf hides it, the cleanup restores it through the one policy writer; his ring held 11 pages,
+which is why it popped at frame one the moment the destination became visible).
+
+**The ask: buoyancy.** "Content sidha aa jata hai, uspe effect daalna hai - buoyancy wala, jaise content liquid
+mein hai aur expand ne uspe asar daala." With the box critically damped at his saved profile, the content's 1:1
+ride was the only motion left, and 1:1 reads as teleportation at 380 ms. `MotionVariant.buoy` rides the content
+on its own spring - response x 1.30, damping 0.55 - so on the way IN (spring styles only) it arrives after the
+box, overshoots by 12.6% of the ride (~15 px at his `drop=20dp` setup), and floats back to its seat; the shared
+spring clamps the endpoints exactly, so the hand-off still cannot snap, and the classic styles are untouched.
+`buoyancyIsALagAndADipInsideExactEndings` pins the endpoint exactness, the bounded peak, and the settle; the
+trace now prints `buoy=0.20s/0.55` so the curve on his phone is the same curve this paragraph claims.
+
+§9's boundary rule, generalized: it is not just bounds this file keeps getting wrong about, it is *references*.
+A formula's inputs can silently stop meaning what they meant when the formula was approved (an overshoot bound,
+a headroom difference). Every correction that survived contact with his eyes reads the scene directly - the
+box's own edges, the animator's own clock - and computes nothing from deltas of the delta.
+
+## 11. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks
