@@ -321,9 +321,11 @@ it removed more than it added.
 bounce ("39 perfectly delivered frames drawing the same box"). A view pinned at 421 px tall cannot be drawn 461, so
 if the axis swap had been the whole change, **the bounce would have been invisible for a fourth round running**. The
 view now gets exactly as much extra height as the curve is expected to use (`morphPinH += the analytic peak`,
-spring styles only), while the content keeps centring against the card's *natural* height. That split is the whole
-point: the extra surface is room to draw in, never a layout the row has to match, so the offset passes through zero
-by itself on the last frame instead of snapping by half the headroom. `verticalHeadroomIsRoomToDrawInAndNotALayout`
+spring styles only). The centring rule that survived round 31 - content against the card's *natural* height - was
+repaired and then re-broken within one build; §9 is that story, and the short version is: there are two bounds in
+a headroom world, and the content has to be centred against the one the layout actually used, not the one the
+card will end up at. With that fixed, the spring's peak leaves the content *standing still* and the overshoot is
+nothing but empty surface below the card.
 pins all four cases, including the no-headroom one, which must still come back clamped.
 
 ## 8. Round 30: what his first `glass settle` run said
@@ -342,7 +344,43 @@ because on this surface material has nothing to be material about - the first wa
 was 80 calls and 3 750 ms in b1406, inside 29 of 74 morph windows). The off-main-thread shelf probe passed its
 acceptance test with nobody watching it.
 
-## 9. What is still unproven
+## 9. Round 32: two bounds, and the content belongs to the one the layout used
+
+b1422 got the axis right and the content wrong, in one mechanism, and his report was two symptoms that look
+unrelated until you do the arithmetic: "spring effect content pe jerky feel deta hai" and "wapas jab pill banta
+hai to icon gayab ho jata hai, theek karo - old teeno mein bhi".
+
+**The jerky spring.** `IslandMorphFrame.compute` translated every child by `(boxH - naturalH) / 2`, but the view
+is `naturalH + headH` tall and the layout centred the content in the full view. Two references, one truth short:
+at the settle the content stood half the headroom out of place (a permanent +15 px at the bouncy profile), every
+frame the curve crossed the natural height the offset flipped sign, and since the hand-off resized the view and
+reset the translation in one call, the last frame of every spring morph snapped the content 15 px straight up.
+His words for the whole class: jerky, not smooth. The fix is one sign and one sentence - the content is centred
+against the surface it is *laid out in* (`(boxH - boundH - headH) / 2`), not against the card's destination:
+then the peak's offset is 0 (the content stands still while the bottom edge breathes), the settle's offset is
+`-headH/2`, which the layout's own `+headH/2` leftover cancels exactly, and the drawn position of every child is
+- truncation aside - bit-identical to the headroom-free curve of the classic styles. The ride curve in
+`applyMorphCarry` subtracts the same `headH/2`, so both writers land on one number at open = 1.
+`theHeadroomIsInvisibleToTheContentForEveryBoxHeight` checks the identity for five box heights and three content
+heights. At the bouncy peak b1422 dipped the CONTENT 30 px with a 15 px end-snap; now the content's peak
+excursion is the integer rounding noise, and only the bottom edge moves.
+
+**The icon that vanishes on the way back.** Nothing to do with the spring: `setStageAnimated` faded the *pill
+preview* out (`alpha = 1f - t`) on every morph target except the ping pill - including the collapse to idle, in
+which the pill preview IS the destination. So from ~40% of a manual collapse (when the card's content has faded
+out per the goneBy rule) the box shrank around an empty capsule, and at the end the idle-collapse listener set
+the pill `GONE` entirely, leaving the icon's return to a later notification-queue repaint - which, on the two
+occasions it did not come in his own b1415 export, left `end-state grid=V/0.0 pill=G/0.0`: a black capsule with
+no icon at all. Rule the round adds to the file: **an animation's destination must exist from frame one**. The
+collapse now pre-shows the pill (visible, opaque, on top - the same treatment the ping branch always had), the
+fade runs only on the way OUT of the pill, and the end of the collapse keeps what the morph arrived at instead
+of handing the surface back to a queue.
+
+Both fixes leave the four classic styles' numbers exactly where they were - headH is zero and the pill rules are
+direction rules - which is also how I know the "old teeno" were collateral, not target: when the destination
+doesn't exist, no style can ride into it, balanced or bouncy.
+
+## 10. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

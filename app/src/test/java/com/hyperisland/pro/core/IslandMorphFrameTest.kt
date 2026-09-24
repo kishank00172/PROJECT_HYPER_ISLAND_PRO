@@ -2,6 +2,7 @@ package com.hyperisland.pro.core
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -100,14 +101,21 @@ class IslandMorphFrameTest {
     @Test
     fun verticalHeadroomIsRoomToDrawInAndNotALayout() {
         // The clamp that flattened the horizontal bounce also sits on the vertical axis, so the headroom has to
-        // let the box out *without* moving what the content is centred against. Two failures to guard: a box that
-        // cannot exceed the card (bounce eaten), and a content offset that follows the widened surface (a snap at
-        // the settle, which is this file's oldest bug).
-        val bounce = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 447, headH = 39)
-        assertEquals(447, bounce.height)
-        assertEquals("the content rides half the thickness change, not the whole headroom", 13, bounce.contentOffsetY)
+        // let the box out *without* being felt by the content. The b1422 failure was the second kind: centring
+        // the content against the card while the view was card + headroom tall left a sign-flipping offset at
+        // the curve's frequency - "spring content pe jerky feel deta hai". The property that fixes it: at the
+        // spring's peak the box and the surface are one size, the offset is zero, and the overshoot is nothing
+        // but empty surface below the card.
+        val peak = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 460, headH = 39)
+        assertEquals(460, peak.height)
+        assertEquals("at the spring's peak the content stands still", 0, peak.contentOffsetY)
+        // A frame mid-settle: the offset is the amount the layout's own centring moved, in one direction - a
+        // smooth slide, never a bounce around zero.
+        val mid = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 447, headH = 39)
+        assertEquals(447, mid.height)
+        assertEquals(-6, mid.contentOffsetY)   // (447 - 421 - 39) / 2
         val atRest = IslandMorphFrame.compute(boundW = 1080, boundH = 421, w = 1067, h = 421, headH = 39)
-        assertEquals(0, atRest.contentOffsetY)
+        assertEquals(-19, atRest.contentOffsetY) // exactly cancels the layout's own +19 centring leftover
         assertEquals(421, atRest.height)
         // Without the headroom the box is eaten, which is the regression this exists to prevent.
         val eaten = IslandMorphFrame.compute(1080, 421, 1067, 447)
@@ -119,6 +127,26 @@ class IslandMorphFrameTest {
         assertEquals((1067 - 366) / 2, pill.left)
         // And `naturalBoundH` is how a caller recovers that number from a view it had to grow.
         assertEquals(421, IslandMorphFrame.naturalBoundH(460, 39))
+    }
+
+    @Test
+    fun theHeadroomIsInvisibleToTheContentForEveryBoxHeight() {
+        // The claim behind the fix, as arithmetic the CI can keep: a child laid out in the widened surface and
+        // shifted by the frame's offset is drawn at the very same pixel as in the headroom-free view, whatever
+        // the box's height - so the spring breathes the surface and the content never moves. pill (104),
+        // mid (200) and card (421) sized content, five box heights each.
+        for (contentH in listOf(104, 200, 421)) {
+            for (boxH in listOf(104, 262, 421, 447, 460)) {
+                val withHead = IslandMorphFrame.compute(1080, 421, 1067, boxH, headH = 39)
+                val without = IslandMorphFrame.compute(1080, 421, 1067, boxH, headH = 0)
+                val drawnWith = (421 + 39 - contentH) / 2 + withHead.contentOffsetY
+                val drawnWithout = (421 - contentH) / 2 + without.contentOffsetY
+                assertTrue(
+                    "box=$boxH content=$contentH: headroom moves content ($drawnWith vs $drawnWithout)",
+                    kotlin.math.abs(drawnWith - drawnWithout) <= 1,
+                )
+            }
+        }
     }
 
 }

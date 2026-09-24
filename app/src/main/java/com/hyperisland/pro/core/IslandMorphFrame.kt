@@ -23,7 +23,8 @@ data class MorphFrame(
     val bottom: Int,
     /**
      * How far the content has to shift so it stays centered inside the *drawn* box instead of inside the
-     * final-sized view. Negative while the box is shorter than the view, 0 when they match.
+     * pinned view (bound plus headroom). Negative while the box is shorter than that surface, 0 when they
+     * match - which at the spring's peak is the whole point: the curve's maximum moves the content not at all.
      */
     val contentOffsetY: Int
 ) {
@@ -50,11 +51,18 @@ object IslandMorphFrame {
         val boxW = w.coerceIn(0, boundW.coerceAtLeast(0))
         val boxH = h.coerceIn(0, (boundH + headH).coerceAtLeast(0))
         val left = (boundW - boxW) / 2
-        // The centring is deliberately against [boundH] and not against the bound plus its headroom: the content
-        // has to sit where the *card* will be, so that when the spring comes home the offset passes through zero
-        // on its own and the last frame needs no correction. Centring against the widened surface instead is how a
-        // bounce ends up snapping the text by half the headroom, which is the oldest bug in this file.
-        return MorphFrame(left, 0, left + boxW, boxH, (boxH - boundH) / 2)
+        // The content is centred against the WHOLE pinned surface - bound plus headroom - not against the
+        // card's natural height. His b1422 verdict, verbatim: "spring effect content pe jerky feel deta hai".
+        // Centring against [boundH] while the view is [boundH] + [headH] tall leaves the content standing half
+        // the headroom out of place, and every pixel the spring adds or removes around [boundH] then flips the
+        // offset's sign: a content bounce at the curve's own frequency plus a 1-2 px rounding jitter between
+        // frames - motion ON the content instead of UNDER it. Centring against the full surface instead has the
+        // property the whole design wants: at the spring's peak the box and the surface are the same size, the
+        // offset is 0, the content stands still, and the overshoot is nothing but empty surface below the card.
+        // At rest the offset is -headH/2, which added to the layout's own centring leftover (+headH/2) puts the
+        // content exactly where a headroom-free view would - the hand-off needs no correction either way, and
+        // for the four classic styles headH is 0 so every number here is identical to the old arithmetic.
+        return MorphFrame(left, 0, left + boxW, boxH, (boxH - boundH - headH) / 2)
     }
 
     /**

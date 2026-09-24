@@ -3234,9 +3234,15 @@ class HyperAccessibilityService : AccessibilityService() {
             gridRoot?.animate()?.cancel()
             gridRoot?.visibility = View.VISIBLE
         } else if (target == IslandStage.STAGE1_IDLE) {
-            // Same double-owner fix as STAGE3_FULL: the frame loop owns pillPreviewRoot.alpha, the end of
-            // the morph owns its visibility.
+            // The pill is the DESTINATION of this morph, not something it happens to end at - the collapse is
+            // the hand-back of the icon, and a destination that only exists after the animation means the icon
+            // rides into a capsule that is not drawn: goneBy onward the box shrinks around nothing and the pill
+            // pops in after. Visible, opaque and on top from frame one, exactly like the ping branch, and the
+            // frame loop is the one owner of its alpha below (the 140/160 ms pop race stays dead).
             pillPreviewRoot?.animate()?.cancel()
+            pillPreviewRoot?.visibility = View.VISIBLE
+            pillPreviewRoot?.alpha = 1f
+            pillPreviewRoot?.bringToFront()
         }
 
         val targetW = dp(getTargetWidth(target))
@@ -3257,9 +3263,12 @@ class HyperAccessibilityService : AccessibilityService() {
                 updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t), t)
                 applyMorphCarry(t)
                 morphMeter?.frame(System.nanoTime(), t)
-                // One owner of the pill's fade for every stage change, notification or not. It used to be
-                // written here *and* by a separate 140/160ms animator, which is the mid-morph pop.
-                if (target != IslandStage.STAGE2_PING) pillPreviewRoot?.alpha = 1f - t
+                // One owner of the pill's fade for every stage change, notification or not - and which way it
+                // goes depends on which end of the morph the pill is. Expanding, it is the thing being LEFT:
+                // it fades with t. Collapsing, it is the thing being ARRIVED at, and "1f - t on everything
+                // that is not ping" faded the destination away for the whole shrink - the glyph swap rode into
+                // a capsule that was never shown. That is "jab pill banta hai to icon gayab ho jata hai".
+                if (target == IslandStage.STAGE3_FULL) pillPreviewRoot?.alpha = 1f - t
                 // Morph opacity policy. The `&& notificationMode` that used to gate each branch is gone, and
                 // his log is why it had to go: a tap-expand runs with notificationMode = false, so **no branch
                 // ran at all** - the expanded content sat at alpha 1.0 through the whole collapse and was
@@ -3289,7 +3298,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         setMorphContentAlpha(1f - (t / 0.4f).coerceIn(0f, 1f))
                     }
                 }
-                if (target == IslandStage.STAGE2_PING) pillPreviewRoot?.alpha = 1f
+                if (target != IslandStage.STAGE3_FULL) pillPreviewRoot?.alpha = 1f
                 // Was: islandView?.scaleY = 1f - (0.04f * sin(t * Math.PI)) — a whole-card 4% vertical
                 // squash on every morph. Scaling the card scales the TEXT, so it blurred and "breathed"
                 // on both expand and collapse. The rounded-corner growth alone carries the motion now.
@@ -3307,7 +3316,14 @@ class HyperAccessibilityService : AccessibilityService() {
                     }
                     if (target == IslandStage.STAGE1_IDLE) {
                         gridRoot?.visibility = View.GONE
-                        pillPreviewRoot?.visibility = View.GONE
+                        // Keep what the morph arrived at. Hiding the pill here made a tap-collapse end as an
+                        // empty black capsule whenever the notification queue had nothing left to repaint into
+                        // it - his own export shows the state twice: `grid=V/0.0 pill=G/0.0`. The dominant,
+                        // intended end-state in that same log is `pill=V/1.0`: the pill visible and owning its
+                        // icon again, which is also what b1378's hand-off was built to mean.
+                        pillPreviewRoot?.visibility = View.VISIBLE
+                        pillPreviewRoot?.alpha = 1f
+                        pillPreviewRoot?.bringToFront()
                         notificationMode = false
                     }
                     if (target == IslandStage.STAGE2_PING) {
@@ -3407,9 +3423,18 @@ class HyperAccessibilityService : AccessibilityService() {
             // gridRoot is WRAP_CONTENT in a full-height host, so `g.top` IS the centring leftover the layout
             // had to give it: 0 would glue the row to the box's top edge, g.top is where it rests. The host
             // wrote frame.contentOffsetY on this view a few lines earlier in the SAME frame and this replaces
-            // it - that centring is exactly the "drifts down as the box grows" he felt, and it is also why
-            // there is no snap at the end: at open = 1 the offset is 0, which is what the host itself lands on.
+            // it for the row - with the round-32 anchor they land on the same number at open = 1 (the host's
+            // offset there is -headroom/2 too), so nothing snaps at the hand-off.
             val leftover = if (g != null) g.top.toFloat() else 0f
+            // Half the spring's headroom comes out of every ride value below. The layout prepared the row for
+            // a view that is natural + headroom tall, but the curve was authored against the natural card;
+            // without this the whole ride floated half the headroom low, and the settle pulled the content
+            // across that gap right where his eye was ("spring content pe jerky feel deta hai", b1422). With
+            // it, the spring's extra surface is room the content never has to know about: every intermediate
+            // value is bit-identical to the headroom-free curve of the classic styles, and the last frame
+            // lands on exactly the offset the host writes for the other children. Zero for the classics, so
+            // their numbers are untouched.
+            val headroomHalf = morphOvershootPx / 2f
             if (g != null) {
                 // No longer a literal 0, and still 0 for every classic style: the row's left edge is measured
                 // from the view, so when the view carries headroom the row has to be pushed back into the box.
@@ -3421,8 +3446,8 @@ class HyperAccessibilityService : AccessibilityService() {
                     // takes this curve; the box keeps the spring, which is what makes them read as attached to
                     // different things on purpose rather than desynced by accident.
                     val travelled = MotionVariant.magnetic(1f - open, morphMagnet)
-                    MorphCarry.contentEntryOffset(1f - travelled, leftover, morphContentDropPx)
-                } else MorphCarry.contentEntryOffset(open, leftover, morphContentDropPx)
+                    MorphCarry.contentEntryOffset(1f - travelled, leftover, morphContentDropPx) - headroomHalf
+                } else MorphCarry.contentEntryOffset(open, leftover, morphContentDropPx) - headroomHalf
             }
         } else {
             // The old entry: the host's per-frame centring is left alone, so nothing here owns translationY.
