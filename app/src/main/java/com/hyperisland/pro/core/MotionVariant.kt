@@ -259,24 +259,32 @@ object MotionVariant {
 
     // ------------------------------------------------- the pull, his steps 1-3 as one shared arc (round 34)
 
-    /** The slice of a morph over which the island is "pulled": 75 % of the clock. */
+    /** The pull lives in the box's CALM window: after the curve's race (round 35b - the sine that peaked at
+     * frame 9 drowned in 300 px of travel; "bas normally expand ho ja raha tha"). Ends strictly inside the
+     * clock, so the catch is done before the cleanup's exactness claim has to carry it. */
     const val PULL_START = 0.12f
     const val PULL_END = 0.88f
-    private const val PULL_ATTACK = 0.35f  // of the span: quarter-sine down to full depth
-    private const val PULL_HOLD = 0.30f    // ... HANG there, so the depth is met by the eye, not skimmed
     /** How far the whole island travels down at the pull's peak, in dp (= 26 px on his 2.625 panel). */
     const val PULL_DP = 10
     /** The stretch and squeeze, verbatim from his step 1: enough to feel flexible, too little to blur. */
     const val STRETCH_Y_MAX = 0.15f
     const val SQUEEZE_X = 0.05f
+    /** Step 4, his amplitudes verbatim: the text bobs, the icon barely bobs, the island does not. */
+    const val FLOAT_TEXT_PX = 3f
+    const val FLOAT_ICON_PX = 1f
+    /** One slow breath: a full bob in 2.4 s - a liquid feel is a loop you can watch, not a one-shot curve. */
+    const val FLOAT_PERIOD_MS = 2400L
+    private const val PULL_ATTACK = 0.35f  // of the span: quarter-sine down to full depth
+    private const val PULL_HOLD = 0.30f    // ... HANG there - the depth must be met by the eye, not skimmed
+
     /**
-     * Steps 1-3 as one attack-hold-release arc that lives in the box's CALM window ([PULL_START]..[PULL_END]):
-     * the single sine of round 34 peaked at frame 9 - inside the box's 300 px race - and round 35 returned
-     * "bas normally expand ho ja raha tha"; a dip on an edge that is already travelling fast drowns in the
-     * travel. So: quarter-sine attack to full depth ([PULL_ATTACK] of the span), a hang at the depth
-     * ([PULL_HOLD]; the depth must be MET, not skimmed), and a quarter-cosine release that accelerates into
-     * the seat - the snap. Zero outside, zero at both ends: the catch leaves nothing for the cleanup to
-     * invent. Still one and the same phase for the box's bottom edge and the text stretch below.
+     * The single arc of steps 1-3, redrawn for the eye (round 35b): a quarter-sine attack to full depth
+     * ([PULL_ATTACK] of the span), a hang at the depth ([PULL_HOLD]; his spec says the island is "thrown",
+     * and a throw reads as arriving AND pausing against a still background, not as a spike), then a
+     * quarter-cosine release that accelerates into the seat - the snap. One curve, so the box's bottom edge
+     * and the text stretch below cannot desync the way separately tuned effects would; zero outside the
+     * window and zero at both ends, because after the catch the island is rigid, and rigid is the state his
+     * step 4 demands it return to.
      */
     fun pullPhase(t: Float): Float {
         val span = PULL_END - PULL_START
