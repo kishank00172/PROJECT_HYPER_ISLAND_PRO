@@ -260,26 +260,34 @@ object MotionVariant {
     // ------------------------------------------------- the pull, his steps 1-3 as one shared arc (round 34)
 
     /** The slice of a morph over which the island is "pulled": 75 % of the clock. */
-    const val PULL_WINDOW = 0.75f
+    const val PULL_START = 0.12f
+    const val PULL_END = 0.88f
+    private const val PULL_ATTACK = 0.35f  // of the span: quarter-sine down to full depth
+    private const val PULL_HOLD = 0.30f    // ... HANG there, so the depth is met by the eye, not skimmed
     /** How far the whole island travels down at the pull's peak, in dp (= 26 px on his 2.625 panel). */
     const val PULL_DP = 10
     /** The stretch and squeeze, verbatim from his step 1: enough to feel flexible, too little to blur. */
     const val STRETCH_Y_MAX = 0.15f
     const val SQUEEZE_X = 0.05f
-    /** Step 4, his amplitudes verbatim: the text bobs, the icon barely bobs, the island does not. */
-    const val FLOAT_TEXT_PX = 3f
-    const val FLOAT_ICON_PX = 1f
-    /** One slow breath: a full bob in 2.4 s - a liquid feel is a loop you can watch, not a one-shot curve. */
-    const val FLOAT_PERIOD_MS = 2400L
-
     /**
-     * The single arc of steps 1-3: 0 at both ends of [window], 1 exactly half-way into it - the throw, the
-     * deep sink, and the catch are this one curve, so the size, the sink and the text stretch cannot desync
-     * the way three separately tuned effects would. Clamping outside the window is a definition, not a hack:
-     * after the catch the island is rigid, and rigid is the state his step 4 demands it return to.
+     * Steps 1-3 as one attack-hold-release arc that lives in the box's CALM window ([PULL_START]..[PULL_END]):
+     * the single sine of round 34 peaked at frame 9 - inside the box's 300 px race - and round 35 returned
+     * "bas normally expand ho ja raha tha"; a dip on an edge that is already travelling fast drowns in the
+     * travel. So: quarter-sine attack to full depth ([PULL_ATTACK] of the span), a hang at the depth
+     * ([PULL_HOLD]; the depth must be MET, not skimmed), and a quarter-cosine release that accelerates into
+     * the seat - the snap. Zero outside, zero at both ends: the catch leaves nothing for the cleanup to
+     * invent. Still one and the same phase for the box's bottom edge and the text stretch below.
      */
-    fun pullPhase(t: Float, window: Float = PULL_WINDOW): Float =
-        if (t <= 0f || t >= window) 0f else sin(PI.toFloat() * t / window)
+    fun pullPhase(t: Float): Float {
+        val span = PULL_END - PULL_START
+        if (t <= PULL_START || t >= PULL_END) return 0f
+        val u = (t - PULL_START) / span
+        return when {
+            u < PULL_ATTACK -> (sin((u / PULL_ATTACK) * (PI / 2.0))).toFloat()
+            u < PULL_ATTACK + PULL_HOLD -> 1f
+            else -> (cos(((u - PULL_ATTACK - PULL_HOLD) / (1f - PULL_ATTACK - PULL_HOLD)) * (PI / 2.0))).toFloat()
+        }
+    }
 
     /** Volume-constant, his exact pair: tall by 15 %, narrow by 5 % - the "weight" stays put. */
     fun stretchScaleY(phase: Float): Float = 1f + STRETCH_Y_MAX * phase

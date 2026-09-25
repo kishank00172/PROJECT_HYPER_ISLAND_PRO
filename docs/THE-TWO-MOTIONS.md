@@ -483,6 +483,16 @@ true anyway or the island would stop hanging from the anchor that makes it an is
 this build: a displacement is defined by its anchor first and its amplitude second; my round-34 mechanism was
 named after the amplitude.
 
+Amendment (same round, after he watched this build too): "kuchh effect hai kaha - bas normally expand ho ja
+raha hai, mera idea ignore kar diya?" Visibility is a property of the effect, not a wish. The single sine
+peaked at frame 9, when the box itself was still racing downward 300 px - a 26 px dip on an edge already
+travelling fast drowns in the travel. The arc was re-drawn where the eye can see it: quarter-sine attack
+starting at t=0.12, a HANG at full depth from t=0.39 to t=0.61 (the depth must be met, not skimmed; frames
+9-14 the bottom sits 26 px below its seat while the box is already full) and a quarter-cosine release that
+accelerates into the seat - yank, hang, snap, over by frame 20. And the default style is now his design
+itself: existing builds keep their pref (choice is respected), fresh installs start on HIS, because an idea
+he was told exists but cannot find reads as an idea that was ignored.
+
 The trace numbers are the audit: `pull=10dp stretch=0.15/0.95 float=3/1px on` - and now also a style name in
 the same line, "liquid pull (aapka design)", so the design that runs is the one he picked in the Lab. His own
 words about the spec - "ho sakta hai mere vision se thoda alag ho gya hoga, main test karne ke baad dekhunga" -

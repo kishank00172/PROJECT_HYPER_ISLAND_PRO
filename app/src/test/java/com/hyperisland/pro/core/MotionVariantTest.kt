@@ -393,14 +393,26 @@ class MotionVariantTest {
 
     @Test
     fun thePullIsOneArcSharedBySinkAndStretch() {
-        // His steps 1-3 as testable properties: one driver, zero at both ends (the catch leaves nothing
-        // behind), the peak exactly half-way into the window, a single hump on each side of it.
+        // Steps 1-3 with VISIBILITY stated as a property - round 35: the old sine peaked inside the box's
+        // own race and drowned in it ("bas normally expand ho ja raha tha"). Zero far outside the calm
+        // window, a real arrival, a flat full-depth HANG wide enough to read, an eased attack and release,
+        // and the stretch pair exact.
         assertEquals(0f, MotionVariant.pullPhase(0f), 1e-6f)
-        assertEquals(0f, MotionVariant.pullPhase(MotionVariant.PULL_WINDOW), 1e-6f)
+        assertEquals(0f, MotionVariant.pullPhase(MotionVariant.PULL_START), 1e-6f)
+        assertEquals(0f, MotionVariant.pullPhase(MotionVariant.PULL_END), 1e-6f)
         assertEquals(0f, MotionVariant.pullPhase(0.999f), 1e-6f)
-        assertEquals(1f, MotionVariant.pullPhase(MotionVariant.PULL_WINDOW / 2f), 1e-4f)
-        assertTrue("a hump, left side", MotionVariant.pullPhase(0.2f) < MotionVariant.pullPhase(0.35f))
-        assertTrue("a hump, right side", MotionVariant.pullPhase(0.55f) > MotionVariant.pullPhase(0.7f))
+        assertTrue("the yank waits for the race to pass", MotionVariant.PULL_START > 0f)
+        assertTrue("the catch happens well inside the clock", MotionVariant.PULL_END < 1f)
+        val span = MotionVariant.PULL_END - MotionVariant.PULL_START
+        assertEquals(1f, MotionVariant.pullPhase(MotionVariant.PULL_START + 0.5f * span), 1e-3f)
+        assertTrue("a hang, not a spike (early)",
+            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.45f * span) > 0.99f)
+        assertTrue("a hang, not a spike (late)",
+            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.60f * span) > 0.99f)
+        assertTrue("getting there is an ease, not a blink",
+            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.20f * span) < 0.9f)
+        assertTrue("and the release is a release, not a glitch",
+            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.80f * span) in 0.4f..0.7f)
         assertEquals(1f + MotionVariant.STRETCH_Y_MAX, MotionVariant.stretchScaleY(1f), 1e-6f)
         assertEquals(1f - MotionVariant.SQUEEZE_X, MotionVariant.stretchScaleX(1f), 1e-6f)
         assertEquals(1f, MotionVariant.stretchScaleY(0f), 1e-6f)

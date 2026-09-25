@@ -119,7 +119,10 @@ object AppSettings {
      * not flags on the spring styles.
      */
     const val MORPH_STYLE_LIQUIDPULL = 6
-    const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
+    // His design is the front door: every existing build keeps its chosen style (the pref wins), and every
+    // fresh install starts on HIS, because the style he invented should not hide behind a default he never
+    // asked for - the round-35 lesson being that an idea he cannot find reads as an idea that was ignored.
+    const val DEFAULT_MORPH_STYLE = MORPH_STYLE_LIQUIDPULL
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
     /** Extra travel on top of the geometry, in dp. 0 means: let the row arrive on the box's own math alone. */

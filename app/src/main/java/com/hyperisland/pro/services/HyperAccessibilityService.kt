@@ -3826,13 +3826,13 @@ class HyperAccessibilityService : AccessibilityService() {
             // motion here, it is a rectangle drawn off-screen and a content row sliding sideways, which is what
             // b1415 shipped and what he reported: "left right spring effect kon dalta hai island mei?"
             bw = MotionVariant.axisWidth(bw, morphToW, morphCarryGrowing)
-            // Steps 1-3 with the top edge LOCKED (his round-35 verdict on watching it move: "upar wala
-            // portion lock rahega ... lock kar do"): the sink is paid by the BOTTOM edge alone. The box
-            // grows taller than the curve mid-pull and is caught back to it - down, deeper, home - while
-            // neither the view nor the frame's top ever moves: an island hangs from its anchor, and motion
-            // that spends the anchor is not a pull, it is a window sliding. The extra depth is budgeted
-            // into the pin at begin (morphOvershootPx), so the clamp lets it through, and the contentOffset
-            // pin keeps the CONTENT exactly still while this travels.
+            // Steps 1-3, top edge LOCKED (his correction: "upar wala portion lock rahega") AND visible
+            // (his next one: "bas normally expand ho ja raha tha" - the round-34/35 sine peaked inside the
+            // box's own race and drowned). The dip is paid by the BOTTOM edge alone, in the CALM window
+            // after the curve has finished growing: the box holds 26 px deeper for ~6 frames and then is
+            // caught home frames 20+ while the top never moves - a yank, a hang, a snap. The depth is
+            // budgeted into the pin at begin (morphOvershootPx), so no clamp eats it, and the contentOffset
+            // pin keeps the content itself exactly still while the silhouette travels.
             if (morphPullOn) bh += (dp(MotionVariant.PULL_DP) * MotionVariant.pullPhase(tc)).toInt()
             // Both: "cornerRadius = height / 2, radius ko independently animate mat karo". One rule instead of
             // a second animator, and it is what keeps a growing capsule a capsule; the final value is whatever
