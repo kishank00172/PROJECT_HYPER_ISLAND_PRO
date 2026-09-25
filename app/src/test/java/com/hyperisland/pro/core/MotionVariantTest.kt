@@ -411,8 +411,10 @@ class MotionVariantTest {
             MotionVariant.pullPhase(MotionVariant.PULL_START + 0.60f * span) > 0.99f)
         assertTrue("getting there is an ease, not a blink",
             MotionVariant.pullPhase(MotionVariant.PULL_START + 0.20f * span) < 0.9f)
-        assertTrue("and the release is a release, not a glitch",
-            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.80f * span) in 0.4f..0.7f)
+        assertTrue("deep into the release and still high - the snap lands late (cos curve, ~0.78 at 80 %)",
+            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.80f * span) in 0.70f..0.90f)
+        assertTrue("then genuinely home shortly after (~0.22 at 95 %)",
+            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.95f * span) in 0.15f..0.35f)
         assertEquals(1f + MotionVariant.STRETCH_Y_MAX, MotionVariant.stretchScaleY(1f), 1e-6f)
         assertEquals(1f - MotionVariant.SQUEEZE_X, MotionVariant.stretchScaleX(1f), 1e-6f)
         assertEquals(1f, MotionVariant.stretchScaleY(0f), 1e-6f)
