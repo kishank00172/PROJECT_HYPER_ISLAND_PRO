@@ -29,6 +29,7 @@ class MotionVariantTest {
             AppSettings.MORPH_STYLE_BALANCED, AppSettings.MORPH_STYLE_CARRY,
             AppSettings.MORPH_STYLE_SHAPE_ONLY, AppSettings.MORPH_STYLE_GLASS,
             AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH,
+            AppSettings.MORPH_STYLE_LIQUIDPULL,
         )
         for (s in styles) assertEquals("style $s must survive the clamp", s, MotionVariant.clampStyle(s))
         assertTrue("MAX_STYLE must cover the last style", MotionVariant.MAX_STYLE >= styles.last())
@@ -55,19 +56,21 @@ class MotionVariantTest {
         val names = (MotionVariant.MIN_STYLE..MotionVariant.MAX_STYLE).map { MotionVariant.styleName(it) }
         assertEquals("one name per style", names.size, names.toSet().size)
         assertTrue(names[0] == "balanced")
-        assertTrue(names.last().contains("ChatGPT"))
+        assertTrue(names.last().contains("aapka design"))
         // ...and the Context-free name the service logs is the same string the radio promises him.
         assertEquals(MotionVariant.styleName(AppSettings.MORPH_STYLE_HYPERMORPH), "hypermorph (ChatGPT)")
+        assertEquals(MotionVariant.styleName(AppSettings.MORPH_STYLE_LIQUIDPULL), "liquid pull (aapka design)")
     }
 
     @Test
-    fun theTwoNewStylesAreSpringsAndTheOldFourAreNot() {
+    fun theSpringStylesAreSpringsAndTheOldFourAreNot() {
         assertFalse(MotionVariant.isSpring(AppSettings.MORPH_STYLE_BALANCED))
         assertFalse(MotionVariant.isSpring(AppSettings.MORPH_STYLE_CARRY))
         assertFalse(MotionVariant.isSpring(AppSettings.MORPH_STYLE_SHAPE_ONLY))
         assertFalse(MotionVariant.isSpring(AppSettings.MORPH_STYLE_GLASS))
         assertTrue(MotionVariant.isSpring(AppSettings.MORPH_STYLE_LIQUID))
         assertTrue(MotionVariant.isSpring(AppSettings.MORPH_STYLE_HYPERMORPH))
+        assertTrue(MotionVariant.isSpring(AppSettings.MORPH_STYLE_LIQUIDPULL)) // the pull needs an elastic surface
     }
 
     // ---------------------------------------------------------------- Claude's spring

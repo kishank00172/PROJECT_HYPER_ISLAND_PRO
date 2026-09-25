@@ -103,6 +103,14 @@
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
+            <RadioButton
+                android:id="@+id/radioMorphLiquidPull"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Liquid pull (aapka design) - the island is PULLED down with the expansion: top edge locked at its anchor, the bottom edge dips and is caught; text stretches 1.15/0.95 volume-constant, content rides in buoyant, and after the settle the container is rigid while the text bobs +-3px and the icon +-1px"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
         </RadioGroup>
 
         <TextView

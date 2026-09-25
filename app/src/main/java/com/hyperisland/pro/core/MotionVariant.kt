@@ -30,7 +30,7 @@ object MotionVariant {
      * describing the truth. A style list that cannot reach its last entry is not a list. Every style now goes
      * through [clampStyle], and `MotionVariantTest` fails the build if any constant is outside it.
      */
-    const val MAX_STYLE = 5
+    const val MAX_STYLE = 6
     const val MIN_STYLE = 0
 
     /**
@@ -71,6 +71,7 @@ object MotionVariant {
         AppSettings.MORPH_STYLE_GLASS -> "glass settle"
         AppSettings.MORPH_STYLE_LIQUID -> "liquid capsule (Claude)"
         AppSettings.MORPH_STYLE_HYPERMORPH -> "hypermorph (ChatGPT)"
+        AppSettings.MORPH_STYLE_LIQUIDPULL -> "liquid pull (aapka design)"
         else -> "balanced"
     }
 
@@ -78,7 +79,8 @@ object MotionVariant {
     fun clampPct(v: Int, lo: Int, hi: Int): Int = v.coerceIn(lo, hi)
 
     fun isSpring(style: Int): Boolean =
-        style == AppSettings.MORPH_STYLE_LIQUID || style == AppSettings.MORPH_STYLE_HYPERMORPH
+        style == AppSettings.MORPH_STYLE_LIQUID || style == AppSettings.MORPH_STYLE_HYPERMORPH ||
+            style == AppSettings.MORPH_STYLE_LIQUIDPULL
 
     // ---------------------------------------------------------------- the spring, as a curve
 

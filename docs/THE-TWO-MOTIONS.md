@@ -458,7 +458,37 @@ steps are written in time ("tezi se neeche", 30-45 ms phases), and anything keye
 almost-settled profile would end before it could be felt. The trace prints it, so it is checkable on device:
 `pull=10dp stretch=0.15/0.95 float=3/1px on`.
 
-## 12. What is still unproven
+## 12. Round 35: a design gets its own home, and an anchor is never a volume to spend
+
+Two instructions, both from watching b1426 actually run instead of reading its description: "uska new morph
+banao - alag design, addon nahi", and "upar wala portion lock rahega - abhi dekhta hu ki during animation upar
+wala area niche kuchh frames ke liye aa jata hai, maybe volume match karne ke liye, lekin usko lock kar do".
+
+The first is an architecture rule the ledger needed anyway: the pull/stretch/buoyancy/float package is now ONE
+style - `MORPH_STYLE_LIQUIDPULL` (6), named "liquid pull (aapka design)" - and the round-34 flags on liquid and
+hypermorph are gone from them: they are back to their own designs, his is back to being his. He's right about
+the principle, not just the taste: an addon layered on someone else's design is two designers at once, the
+exact tangle the carry-and-fade years cost us. The flotation therefore gets gated by style, not by spring-ness:
+liquid and hyper morph keep round 31-33 (axis rule, spring settle, the buoyancy he asked for them in round 33),
+and the pull family belongs wholly to style 6.
+
+The second is a physics correction with an anchor in it. The round-34 sink translated the whole view, so for
+the ~10 frames near the arc's peak the island's TOP EDGE moved down 26 px. He measured it with his eyes and
+proposed the right rule before I could: "upar wala portion lock rahega". Now the sink is paid entirely by the
+BOTTOM edge: `bh += 26 px * pullPhase(t)`, the spring and pull headrooms are budgeted together into the pin
+(spring + 26 px, so at his snappy profile the box may draw 457 px and the dip peak 443 fits), and the
+contentOffset pin keeps the content still while the bottom edge travels: throw (+26 px by frame 9-10),
+caught home by frame 17 - and `top = 0` on every frame of every amplitude, which the frame math has to keep
+true anyway or the island would stop hanging from the anchor that makes it an island. The lesson that survives
+this build: a displacement is defined by its anchor first and its amplitude second; my round-34 mechanism was
+named after the amplitude.
+
+The trace numbers are the audit: `pull=10dp stretch=0.15/0.95 float=3/1px on` - and now also a style name in
+the same line, "liquid pull (aapka design)", so the design that runs is the one he picked in the Lab. His own
+words about the spec - "ho sakta hai mere vision se thoda alag ho gya hoga, main test karne ke baad dekhunga" -
+are respected by constants, not by persuasion: every number above is one `const val` in MotionVariant.
+
+## 13. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

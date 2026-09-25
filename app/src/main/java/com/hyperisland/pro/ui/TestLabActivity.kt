@@ -318,6 +318,7 @@ class TestLabActivity : Activity() {
         AppSettings.MORPH_STYLE_GLASS -> R.id.radioMorphGlass
         AppSettings.MORPH_STYLE_LIQUID -> R.id.radioMorphLiquid
         AppSettings.MORPH_STYLE_HYPERMORPH -> R.id.radioMorphHyper
+        AppSettings.MORPH_STYLE_LIQUIDPULL -> R.id.radioMorphLiquidPull
         else -> R.id.radioMorphBalanced
     }
 
@@ -327,6 +328,7 @@ class TestLabActivity : Activity() {
         R.id.radioMorphGlass -> AppSettings.MORPH_STYLE_GLASS
         R.id.radioMorphLiquid -> AppSettings.MORPH_STYLE_LIQUID
         R.id.radioMorphHyper -> AppSettings.MORPH_STYLE_HYPERMORPH
+        R.id.radioMorphLiquidPull -> AppSettings.MORPH_STYLE_LIQUIDPULL
         else -> AppSettings.MORPH_STYLE_BALANCED
     }
 

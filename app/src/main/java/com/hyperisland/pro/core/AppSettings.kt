@@ -110,6 +110,15 @@ object AppSettings {
      * the content in, and a short energy ripple on the surface at open).
      */
     const val MORPH_STYLE_HYPERMORPH = 5
+    /**
+     * Seventh style - the first that is HIS design end to end ("liquid pull", his sketch run through an AI for
+     * phrasing, fixed to his correction that the TOP stays locked): the island is pulled down with the
+     * expansion, the depth paid by the BOTTOM edge while the anchor at the top never moves; the text stretches
+     * volume-constant (1.15 / 0.95); the content arrives buoyant; and after the settle the container is rigid
+     * while the text bobs +-3 px and the icon +-1 px. Steps 1-4 of his spec, one shared arc, its own design -
+     * not flags on the spring styles.
+     */
+    const val MORPH_STYLE_LIQUIDPULL = 6
     const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BALANCED
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50

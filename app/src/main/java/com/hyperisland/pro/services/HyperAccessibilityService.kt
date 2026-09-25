@@ -3729,14 +3729,15 @@ class HyperAccessibilityService : AccessibilityService() {
     /**
      * His step 4, verbatim numbers: after the settle the CONTAINER is rigid and the contents float - the
      * text column bobs +-FLOAT_TEXT_PX, the icon +-FLOAT_ICON_PX, one shared slow sine ([FLOAT_PERIOD_MS]
-     * per breath), which is the hierarchy he asked for: heavy things in a liquid bob more than the rigid
-     * one. A ValueAnimator writes two translations per vsync onto hardware layers already cached by the
-     * morph, so the loop costs no re-raster; it starts only on a settled FULL card in a spring style and
-     * [stopIslandFloat] - run at every new morph - puts both views back at exactly zero.
+     * per breath) - the hierarchy he asked for: heavy things in a liquid bob more than the rigid one. A
+     * ValueAnimator writes two translations per vsync onto hardware layers already cached by the morph, so
+     * the loop costs no re-raster; it starts only on a settled FULL card of HIS style (liquid pull; the
+     * others keep their settle states) and [stopIslandFloat] - run at every new morph - puts both views
+     * back at exactly zero.
      */
     private fun startOrUpdateIslandFloat() {
         stopIslandFloat(restore = true)
-        if (currentStage != IslandStage.STAGE3_FULL || !MotionVariant.isSpring(morphVariant)) return
+        if (currentStage != IslandStage.STAGE3_FULL || morphVariant != AppSettings.MORPH_STYLE_LIQUIDPULL) return
         val text = gridContentSec ?: return
         val icon = gridIconSec ?: return
         islandFloatAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -3825,12 +3826,14 @@ class HyperAccessibilityService : AccessibilityService() {
             // motion here, it is a rectangle drawn off-screen and a content row sliding sideways, which is what
             // b1415 shipped and what he reported: "left right spring effect kon dalta hai island mei?"
             bw = MotionVariant.axisWidth(bw, morphToW, morphCarryGrowing)
-            // The pull (his steps 1-3): the whole island travels down with the expansion and is caught back.
-            // One translation on the VIEW root - never the frame math - so the background, the centring and
-            // every child ride together and the last frames sit exactly where the layout says; the arc ends
-            // at 0 three quarters in, and the cleanup re-asserts it. `else 0f` matters: if a collapse
-            // interrupts mid-pull, stale sink must not leak into the next morph.
-            islandView?.translationY = if (morphPullOn) dp(MotionVariant.PULL_DP) * MotionVariant.pullPhase(tc) else 0f
+            // Steps 1-3 with the top edge LOCKED (his round-35 verdict on watching it move: "upar wala
+            // portion lock rahega ... lock kar do"): the sink is paid by the BOTTOM edge alone. The box
+            // grows taller than the curve mid-pull and is caught back to it - down, deeper, home - while
+            // neither the view nor the frame's top ever moves: an island hangs from its anchor, and motion
+            // that spends the anchor is not a pull, it is a window sliding. The extra depth is budgeted
+            // into the pin at begin (morphOvershootPx), so the clamp lets it through, and the contentOffset
+            // pin keeps the CONTENT exactly still while this travels.
+            if (morphPullOn) bh += (dp(MotionVariant.PULL_DP) * MotionVariant.pullPhase(tc)).toInt()
             // Both: "cornerRadius = height / 2, radius ko independently animate mat karo". One rule instead of
             // a second animator, and it is what keeps a growing capsule a capsule; the final value is whatever
             // the style asked for, so a card with 22 dp corners still lands on 22 dp.
@@ -4107,6 +4110,9 @@ class HyperAccessibilityService : AccessibilityService() {
         gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         // --- which of the six looks this morph is, and the numbers the two outside designs brought with it.
         morphVariant = AppSettings.getMorphStyle(this)
+        // His design, gated early because the headroom budget below has to know about it: the pull is style
+        // LIQUIDPULL's whole mechanism, and it runs only on the way IN - a collapse is a return, not a throw.
+        morphPullOn = towardCard && morphVariant == AppSettings.MORPH_STYLE_LIQUIDPULL
         morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
         morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH
         morphVariantOn = morphLiquidOn || morphHyperOn
@@ -4157,6 +4163,10 @@ class HyperAccessibilityService : AccessibilityService() {
             // Only the second design taps on purpose; the first one's spring is the whole story.
             if (morphHyperOn) (maxOf(fromH, toH) * MotionVariant.DEFAULT_SETTLE).toInt() else 0,
         )
+        // The pull's dip rides in the same headroom: the spring's overshoot (any) plus the arc's peak, so the
+        // drawn box can reach 421 + spring + 26 px without the clamp eating the sink - round 31's lesson,
+        // applied to a number that changed one round later.
+        if (morphPullOn) morphOvershootPx += dp(MotionVariant.PULL_DP)
         if (morphOvershootPx > 0) morphPinH = morphPinH!! + morphOvershootPx
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
         val startFrame = IslandMorphFrame.compute(morphPinW!!, morphNaturalH, fromW, fromH, morphOvershootPx)
@@ -4202,8 +4212,6 @@ class HyperAccessibilityService : AccessibilityService() {
         // on the way OUT the content leaves on its own axis (the magnet, or the classic exit), which he has
         // never complained about.
         morphBuoyOn = morphEntryDrop && towardCard && MotionVariant.isSpring(morphVariant)
-        // Steps 1-3 need a surface that can be thrown and caught: only a spring style, only on the way IN.
-        morphPullOn = towardCard && MotionVariant.isSpring(morphVariant)
         stopIslandFloat(true)  // a new morph retires the previous card's float loop, whatever landed here
         islandView?.translationY = 0f
         // The column gets its own cached layer while the morph owns its scale: stretching a texture is one
