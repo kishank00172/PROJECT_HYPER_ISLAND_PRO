@@ -3795,7 +3795,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 v2TraceSamples += "|@" + "%.2f".format(v2TraceMarks[v2TraceNextIdx]) + ": ty=" +
                     "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
                     " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f) +
-                    " box=" + bw + "x" + bh +
+                    " box=" + w + "x" + h +    // the callsite frame numbers - declared long before any clamp below
                     "@" + "%.0fms".format(rawT * morphDurationMs)
                 v2TraceNextIdx++
             }
