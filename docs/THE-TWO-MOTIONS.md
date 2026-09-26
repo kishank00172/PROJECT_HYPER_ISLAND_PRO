@@ -531,7 +531,24 @@ the criterion the table used is written down: (a) what his eyes praised, (b) how
 (c) how many subsequent fixes each style consumed, (d) whose design it is. Blueprint v2 tops (b), (c) as a
 hypothesis now, and (d) by definition; the rest of the table follows.
 
-## 14. What is still unproven
+## 14. Round 37: the clock is not the carry's clock (D1), and two writers of one alpha (D2)
+
+The audit he commissioned found its own villain in my code - and it was a legacy clock, the eldest kind of
+bug in this family. Every expand reaches `applyMorphCarry`, and on the auto path the carry receives
+`0.5f + 0.5f * t` (the ping half and the expand half each own half the timeline - a glyph hand-off contract
+from the drag era, still correct FOR THE GLYPH). The blueprint v2 overlay consumed that value directly, so on
+the path he expands most (auto notification) the pendulum ran t in [0.5..1]: the stretch window skipped, the
+sink peak spent, and the haptic's window (0.335-0.345) - mathematically unreachable before t=0.5 - never
+fired at all. Manual tap-expand, by passing the carry 1×t, was the only path showing anything. The fix
+moves the overlay out of the carry's world and one step earlier into `updateIslandLayoutForMorph`, to the
+tick every expand animator makes with its own untransformed `t`; the gate (v2-only, towardCard, pin-live)
+keeps it out of the ping half and out of collapses. D2 went with it: the legacy shape-fade (default-on)
+quietly re-wrote the one property the blueprint declares its own (the text section's alpha) on every frame
+- now `&& !morphV2On` at both sites. Classic styles: zero change by construction; the only added predicate
+is the v2 gate. And it is on record now: a clock transformed for one consumer is not a clock, it is half
+an effect; reusing it for a second is how two mathematically correct effects ship nothing.
+
+## 15. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks
