@@ -460,7 +460,7 @@ class MotionVariantTest {
         // Container constants are his, pinned so a sloppy refactor reports back to him by itself.
         assertEquals(950L, MotionVariant.V2_EXPAND_TOTAL_MS)
         assertEquals(380L, MotionVariant.V2_COLLAPSE_TOTAL_MS)
-        assertEquals(0.78f, MotionVariant.V2_CONTAINER_DAMPING, 1e-9f) // his binding order (visible overshoot: +6.3 px on H)
+        assertEquals(0.62f, MotionVariant.V2_CONTAINER_DAMPING, 1e-9f) // b1440 evidence: 0.78 was masked -> band 0.60-0.65 at 0.62: +26.6 px on H
         assertEquals(0.90f, MotionVariant.V2_COLLAPSE_DAMPING, 1e-9f)
 
         // Text pendulum: reads his phase table back exactly at the anchors, rigid after the hard lock.

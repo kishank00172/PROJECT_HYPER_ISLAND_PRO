@@ -616,7 +616,21 @@ destination axis for v2 morphs (uncurbed it would dip off-card by 14 px, ghost-p
 keeps the bounce. The ride-label in the begin trace is variantized too, seeing the truth is now one grep away
 instead of one theory.
 
-## 18. What is still unproven
+## 18. Round 41: three contradictions, three instrumented answers
+
+They read the b1440 log and were right on all three, one being mine twice over. (a) The overshoot was real but
+sub-perceptible - +6.3 px peaking in the same window as the content's largest arc, masked. His band order is
+0.60-0.65: at 0.62 the peak math reads 8.4% of travel = +26.6 px on height at real ~140 ms, caught before the
+320 ms lock, width still clamped at destination. (b) Width in the log overshot +13 px because the sampler
+printed the PARAMETER VIEW (`w`, the lerped input) not the RENDER VIEW (`bw`, the clamped value drawn) -
+in the same family as t/rawT: a log line must name which of a value's two projections it reads. The clamp had
+applied; the log lied. The sampler now computes the post-clamp number inline. (c) Collapse alpha 0.00 vs 1.00:
+the end evidence printed its fields AFTER clearMorphCarry/pin-restore made every view nominal for the next
+morph - 1.00 was the restored baseline; the flight's true end sits in the @0.90 sample mark now, and the
+evidence line reads pre-restore values explicitly. No flash is possible: the collapse's island-sleep (+90 ms)
+and the overlay bed stand between the restore and any user-visible frame.
+
+## 19. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

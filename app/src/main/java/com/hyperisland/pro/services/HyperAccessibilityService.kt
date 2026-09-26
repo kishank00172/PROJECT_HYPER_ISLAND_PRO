@@ -603,7 +603,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var v2TraceFrames = 0
     private var v2TraceNextIdx = 0
     private var v2TraceSamples = ""
-    private val v2TraceMarks = floatArrayOf(0.2f, 0.4f, 0.6f, 0.8f, 0.999f)
+    private val v2TraceMarks = floatArrayOf(0.2f, 0.4f, 0.6f, 0.8f, 0.90f, 0.999f)
     /** Step-4 float loop: active only on a settled FULL card in a spring style; cancelled on any new morph. */
     private var morphStagger = 0f
     private var morphOpenFrame = 0f
@@ -3795,7 +3795,8 @@ class HyperAccessibilityService : AccessibilityService() {
                 v2TraceSamples += "|@" + "%.2f".format(v2TraceMarks[v2TraceNextIdx]) + ": ty=" +
                     "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
                     " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f) +
-                    " box=" + w + "x" + h +    // the callsite frame numbers - declared long before any clamp below
+                    " box=" + (if (morphV2On) (if (morphTowardCard) w.coerceAtMost(morphToW) else w.coerceAtLeast(morphToW)) else w) +
+                    "x" + h +    // DRAWN numbers (post width-clamp): a log must read the render view, not the parameter view
                     "@" + "%.0fms".format(rawT * morphDurationMs)
                 v2TraceNextIdx++
             }
@@ -4307,11 +4308,16 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun endMorphPerf(label: String) {
         if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
+        // Read the flight-end values BEFORE clearMorphCarry/pin-restore rewrite the tree to the next-morph
+        // baseline - the b1440 "alpha 0.00 at 40% vs 1.00 at end" contradiction lived exactly in this order.
+        val endPreA = gridContentSec?.alpha ?: -1f
+        val endPreTy = gridContentSec?.translationY ?: -999f
+        val endPreSy = gridContentSec?.scaleY ?: -1f
         clearMorphCarry()
         morphV2On = false
         v2HapticDone = false
         setContentPinnedForMorph(false)
-        TraceLog.morph("morph end evidence: contentSec alpha=" + "%.2f".format(gridContentSec?.alpha ?: -1f) + " tY=" + "%.1f".format(gridContentSec?.translationY ?: -999f) + " scaleY=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) + " layerType=" + (gridContentSec?.layerType ?: -9) + " (0=NONE)")
+        TraceLog.morph("morph end evidence (FLIGHT-END, read PRE-restore): contentSec alpha=" + "%.2f".format(endPreA) + " tY=" + "%.1f".format(endPreTy) + " scaleY=" + "%.3f".format(endPreSy) + " | post-restore baseline alpha=1.00 is next-morph prep only; a collapse keeps hitting island-sleep at +90 ms so a frame of restored card content can never surface (overlay bed + top-pinned layout)")
         gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
         // Size first, then release the drawn box - same message, one traversal after both. On a collapse the
         // pinned view is still card-sized at this instant, so clearing the frame before the resize would
