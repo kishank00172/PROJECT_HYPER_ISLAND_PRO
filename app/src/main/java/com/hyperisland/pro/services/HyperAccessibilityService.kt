@@ -3570,6 +3570,32 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * "Precise Snap, Organic Breath" - the blueprint v2 he sent, written as one overlay per frame and as the
+     * FINAL word on the two sections it owns (round 34-35's writers scattered across three functions, which is
+     * half of why the style it served never rendered it): the text column rides the anchor pendulum
+     * (-40 arrival, +26 deep sink locked against the container's own lock, the -5 / +2 bounce pair, rigid at
+     * the hard lock), carries the pull-window stretch (his 1.15 / 0.95 over the first 247 ms) and the strike
+     * opacity (0 -> 1 over the first 130 ms); the icon rides the same pendulum at exactly half buoyancy, 40 ms
+     * later, NEVER stretched (his rigid-brand-asset rule); and exactly one haptic lands the instant the
+     * container hard-locks (t = 0.337 of the 950 ms clock - exactly once per expand, re-armed at the next begin).
+     */
+    private fun applyBlueprintV2(t: Float) {
+        gridContentSec?.let { sec ->
+            sec.translationY = MotionVariant.v2TextOffsetPx(t)
+            sec.scaleY = MotionVariant.v2StretchScaleY(t)
+            sec.scaleX = MotionVariant.v2StretchScaleX(t)
+            sec.alpha = if (t < 0.137f) t / 0.137f else 1f
+        }
+        gridIconSec?.let { icon ->
+            icon.translationY = MotionVariant.v2IconOffsetPx(t)
+        }
+        if (!v2HapticDone && MotionVariant.v2HapticAt(t)) {
+            islandView?.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+            v2HapticDone = true
+        }
+    }
+
+    /**
      * The only writer of the card content's opacity while a morph runs, for both styles - the shape-driven ramp
      * from [applyMorphCarry] and the clock-driven one from the stage animator both come through here, because
      * two owners of one alpha is the bug this file keeps meeting.
@@ -5009,29 +5035,4 @@ class HyperAccessibilityService : AccessibilityService() {
     override fun onDestroy() { invalidateContentCache(); stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }
 
-    /**
-     * "Precise Snap, Organic Breath" - the blueprint v2 he sent, written as one overlay per frame and as the
-     * FINAL word on the two sections it owns (round 34-35's writers scattered across three functions, which is
-     * half of why the style it served never rendered it): the text column rides the anchor pendulum
-     * (-40 arrival, +26 deep sink locked against the container's own lock, the -5 / +2 bounce pair, rigid at
-     * the hard lock), carries the pull-window stretch (his 1.15 / 0.95 over the first 247 ms) and the strike
-     * opacity (0 -> 1 over the first 130 ms); the icon rides the same pendulum at exactly half buoyancy, 40 ms
-     * later, NEVER stretched (his rigid-brand-asset rule); and exactly one haptic lands the instant the
-     * container hard-locks (t = 0.337 of the 950 ms clock - exactly once per expand, re-armed at the next begin).
-     */
-    private fun applyBlueprintV2(t: Float) {
-        gridContentSec?.let { sec ->
-            sec.translationY = MotionVariant.v2TextOffsetPx(t)
-            sec.scaleY = MotionVariant.v2StretchScaleY(t)
-            sec.scaleX = MotionVariant.v2StretchScaleX(t)
-            sec.alpha = if (t < 0.137f) t / 0.137f else 1f
-        }
-        gridIconSec?.let { icon ->
-            icon.translationY = MotionVariant.v2IconOffsetPx(t)
-        }
-        if (!v2HapticDone && MotionVariant.v2HapticAt(t)) {
-            islandView?.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
-            v2HapticDone = true
-        }
-    }
 
