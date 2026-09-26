@@ -462,7 +462,11 @@ class MotionVariantTest {
         assertEquals(380L, MotionVariant.V2_COLLAPSE_TOTAL_MS)
         assertEquals(0.62f, MotionVariant.V2_CONTAINER_DAMPING, 1e-9f) // b1440 evidence: 0.78 was masked -> band 0.60-0.65 at 0.62: +26.6 px on H
         assertEquals(0.04f, MotionVariant.V2_CONTAINER_SQUEEZE, 1e-9f) // round 42: width voice, 3-5% band
-        assertEquals(0.04f, MotionVariant.V2_COLLAPSE_CONTENT_SINK, 1e-9f) // round 42-2: 1.00 -> 0.96 monotone
+        assertEquals(0.08f, MotionVariant.V2_COLLAPSE_CONTENT_SINK, 1e-9f) // round 42-2: round 43: 1.00 -> 0.92 on the container's own curve, clip-only (no fade)
+        assertEquals(0.05f, MotionVariant.V2_NECK_MAX_INSET, 1e-9f)       // round 43-1: his 5% (9% was too strong)
+        assertEquals(40L, MotionVariant.V2_NECK_START_MS)
+        assertEquals(300L, MotionVariant.V2_NECK_END_MS)
+        assertEquals(220L, MotionVariant.V2_GULP_MS)                      // round 43-3: post-lock confirm gulp
         assertEquals(0.90f, MotionVariant.V2_COLLAPSE_DAMPING, 1e-9f)
 
         // Text pendulum: reads his phase table back exactly at the anchors, rigid after the hard lock.

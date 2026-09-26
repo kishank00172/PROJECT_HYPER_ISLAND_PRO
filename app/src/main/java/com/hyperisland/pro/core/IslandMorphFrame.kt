@@ -27,7 +27,15 @@ data class MorphFrame(
      * spring's overshoot is drawn below content that does not move. Without headroom this is the old centring:
      * negative while the box is shorter than the view, 0 when they match.
      */
-    val contentOffsetY: Int
+    val contentOffsetY: Int,
+    /**
+     * The maximum horizontal inset of the "neck" for this frame, in px (0 = plain capsule). The drawn
+     * silhouette is not a rectangle when this is non-zero: each edge walks inward as
+     * neckPx * sin(PI * yFraction^1.4) - zero at the top (the icon's edge never moves), peaking ~61% down,
+     * back to zero at the bottom. The profile lives in this data class so the view only draws geometry
+     * and the math stays unit-tested. Blueprint v2 expand only; classic styles always pass 0.
+     */
+    val neckPx: Float = 0f,
 ) {
     val width: Int get() = right - left
     val height: Int get() = bottom - top
@@ -48,7 +56,7 @@ object IslandMorphFrame {
      * hz=120`, i.e. thirty-nine perfectly delivered frames drawing the *same* box. The animation was not
      * slow; the shape was never asked for.
      */
-    fun compute(boundW: Int, boundH: Int, w: Int, h: Int, headH: Int = 0): MorphFrame {
+    fun compute(boundW: Int, boundH: Int, w: Int, h: Int, headH: Int = 0, neckPx: Float = 0f): MorphFrame {
         val boxW = w.coerceIn(0, boundW.coerceAtLeast(0))
         val boxH = h.coerceIn(0, (boundH + headH).coerceAtLeast(0))
         val left = (boundW - boxW) / 2
@@ -69,7 +77,7 @@ object IslandMorphFrame {
         // all three (his report, b1422). Below the natural height the offset tracks the box one to one, which
         // is the reveal the pinned view was built for.
         val contentOffsetY = ((boxH - boundH - headH) / 2).coerceAtMost(-headH / 2)
-        return MorphFrame(left, 0, left + boxW, boxH, contentOffsetY)
+        return MorphFrame(left, 0, left + boxW, boxH, contentOffsetY, neckPx.coerceAtLeast(0f))
     }
 
     /**
@@ -81,6 +89,18 @@ object IslandMorphFrame {
      * zero: the four classic styles, and every other caller, get the arithmetic they have always had.
      */
     fun naturalBoundH(pinH: Int, headH: Int): Int = (pinH - headH).coerceAtLeast(0)
+
+    /**
+     * Round 43 (his spec, verbatim profile): inset(yFraction) = maxInset * sin(PI * yFraction^1.4),
+     * yFraction 0=top, 1=bottom. Deliberately NOT linear: a straight taper reads as a receding 3D wedge,
+     * this reads as an elastic squeeze - soft shoulders at the top, peak ~61% down, easing back out.
+     */
+    fun neckInset(yFraction: Float, maxInsetPx: Float): Float {
+        if (maxInsetPx <= 0f) return 0f
+        val y = yFraction.coerceIn(0f, 1.0001f)
+        return (maxInsetPx * kotlin.math.sin(kotlin.math.PI * Math.pow(y.toDouble(), 1.4))).toFloat()
+            .coerceIn(0f, maxInsetPx)
+    }
 
     /** The dirty area a frame change needs: the union of the two boxes, not the whole screen. */
     fun dirtyBounds(a: MorphFrame?, b: MorphFrame?): IntArray {

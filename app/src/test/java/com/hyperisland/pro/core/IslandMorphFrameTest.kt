@@ -163,4 +163,21 @@ class IslandMorphFrameTest {
         }
     }
 
+
+    @Test
+    fun neckProfile_hisFormula_peaksAt61PercentAndZerosAtBothEnds() {
+        val n = 200
+        var peakAt = -1; var peakV = -1f
+        for (i in 0..n) {
+            val v = IslandMorphFrame.neckInset(i.toFloat() / n, 100f)
+            if (v > peakV) { peakV = v; peakAt = i }
+        }
+        assertEquals(0f, IslandMorphFrame.neckInset(0f, 100f), 0.6f)         // the icon edge never insets
+        assertEquals(0f, IslandMorphFrame.neckInset(1f, 100f), 0.6f)         // eases back out at the bottom
+        assertEquals(100f, peakV, 0.6f)                                      // maxInset respected exactly
+        assertTrue("peak around 55-65% down, not linear: got ${peakAt * 100 / n}%", peakAt * 100 / n in 58..64)
+        // and decidedly NOT a linear taper: halfway-down must read well under the peak
+        assertTrue(IslandMorphFrame.neckInset(0.5f, 100f) < 97f)
+    }
+
 }

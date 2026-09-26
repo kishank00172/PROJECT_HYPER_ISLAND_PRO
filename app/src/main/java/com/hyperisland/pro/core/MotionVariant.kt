@@ -266,12 +266,28 @@ object MotionVariant {
      * and 40 ms late, the hard lock, and the one haptic are all read from here.
      */
     const val V2_EXPAND_TOTAL_MS = 950L
-    const val V2_COLLAPSE_TOTAL_MS = 380L   // "380 LOCK62- ??FIGMMo??" -> ~380 ms total, spring r=0.30 s
-    const val V2_CONTAINER_SQUEEZE = 0.04f   // round 42 (his order: enable+tune the sleeping squeeze, 3-5%
+    const val V2_COLLAPSE_TOTAL_MS = 380L
+    // Round 43-1: the container "neck" (his formula inset(y)=maxInset*sin(PI*y^1.4), active 40-300 ms,
+    // envelope sin peak at the window's centre = 170 ms; maxInset = 5% of the current drawn width,
+    // "previously tried 9% - too strong"). Top edge full width always; it REPLACES the uniform squeeze
+    // for the v2 expand (same slot, better silhouette - no double-narrowing).
+    const val V2_NECK_MAX_INSET = 0.05f
+    const val V2_NECK_START_MS = 40L
+    const val V2_NECK_END_MS = 300L
+    // Round 43-3: the post-lock "confirm gulp" on the pill itself - a SEPARATE 220 ms pulse after the
+    // collapse's hard lock (the collapse curve itself stays crisp/zero-overshoot, untouched). Volume-constant
+    // keyframes for sy/sx live in the service next to the animator that runs them.
+    const val V2_GULP_MS = 220L   // "380 LOCK62- ??FIGMMo??" -> ~380 ms total, spring r=0.30 s
+    const val V2_CONTAINER_SQUEEZE = 0.04f   // round 42 arm, retired at runtime in round 43: the same
+    // window + purpose is owned by V2_NECK_* below with a per-y inset profile (uniform squeeze cannot
+    // express "zero at the icon edge"); kept pinned for lore and for non-v2 experiments.   // round 42 (his order: enable+tune the sleeping squeeze, 3-5%
     // sane band read at 4%): the WIDTH-side voice of the vertical bounce - the same volume-constant symmetry the
     // text overlay already performs (sy up <-> sx down). Windowed on rawT, peak 0.15 ~= real 142 ms so the eye
     // reads ONE settle beside the height apex at ~140 ms, fully released by rawT 0.30 (pre-lock).
-    const val V2_COLLAPSE_CONTENT_SINK = 0.04f   // round 42-2 (his: collapse has ZERO content motion - log truth:
+    const val V2_COLLAPSE_CONTENT_SINK = 0.08f   // round 43 (his order): synced with the container's OWN
+    // 380 ms shrink curve, 1.00 -> 0.92, monotone; the dedicated alpha fade is GONE for the v2 collapse -
+    // clip-only ("content retreating into the shrinking pill", the existing dispatchDraw containment clip
+    // doing the cutting), so the scale speaks alone instead of racing a fade.   // round 42-2 (his: collapse has ZERO content motion - log truth:
     // ty=0/sy=1.000 all the way): a monotone crisp settle-in, scale 1.00 -> 0.96, no overshoot, keyed to the
     // collapse spring's own monotone output coerced - a shrink that LOOKS intentional instead of flat.
     const val V2_CONTAINER_RESPONSE = 0.22f  // ~4 px peak overshoot at 421 dp, fully locked by 0.337 t (320 ms)

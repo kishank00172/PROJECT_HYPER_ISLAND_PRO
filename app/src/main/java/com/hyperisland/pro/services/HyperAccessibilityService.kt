@@ -3323,12 +3323,18 @@ class HyperAccessibilityService : AccessibilityService() {
                     if (target == IslandStage.STAGE3_FULL) {
                         setMorphContentAlpha(t)
                     } else if (target == IslandStage.STAGE2_PING) {
-                        setMorphContentAlpha(1f - (t / 0.45f).coerceIn(0f, 1f))
-                        // Round 42-2 (his log: "poore collapse mein ty=0 sy=1.000 sx=1.000 HAMESHA" - the content
-                        // never moved; only alpha and the box did): the settle-in sink. Monotone by construction -
-                        // the collapse spring's own output is coerced to [0,1], so even its 0.15% floor cannot
-                        // bounce the scale back: 1.00 -> 0.96 and stay put until the carry clears offscreen
-                        // (the island sleeps at +90 ms; the restore is provably invisible, b1441's fix).
+                        // Round 43-2 (his order, "try clip-only first"): the v2 collapse has NO dedicated alpha
+                        // fade at all any more. The old 0-45% fade let content vanish in open space before the
+                        // box shrank around it; now the dispatchDraw containment clip IS the disappearance -
+                        // the box's own shrinking edges cut the content away ("content retreating into the
+                        // shrinking pill", verbatim). Classic/carry styles keep the fade they always had.
+                        if (!(morphV2On && !morphTowardCard)) {
+                            setMorphContentAlpha(1f - (t / 0.45f).coerceIn(0f, 1f))
+                        }
+                        // The settle-in sink, deepened on his numbers and synced to the CONTAINER'S OWN curve
+                        // (this t is exactly what sizes the box - not a separate faster timeline): 1.00 -> 0.92
+                        // across the full 380 ms, monotone (the coerced collapse-spring output cannot bounce
+                        // back), restoring at end while the pill takes the stage - provably invisible.
                         if (morphV2On && !morphTowardCard) {
                             val sink = 1f - MotionVariant.V2_COLLAPSE_CONTENT_SINK * t.coerceIn(0f, 1f)
                             gridContentSec?.scaleX = sink
@@ -3351,7 +3357,11 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
+                    // Round 43-3: capture BEFORE endMorphPerf resets the v2 flags - the gulp fires exactly
+                    // at the hard lock (this end is the lock), separate from the crisp collapse curve.
+                    val v2CollapseLocked = morphV2On && target == IslandStage.STAGE2_PING
                     endMorphPerf("stage->$target")
+                    if (v2CollapseLocked) runV2GulpPulse()
                     gridRoot?.translationY = 0f
                     syncContentWidth()
                     flushDeferredRegionUpdate()
@@ -3793,11 +3803,18 @@ class HyperAccessibilityService : AccessibilityService() {
         // frames, which is why "plain resize, normal content" was the exact history it drew. The haptic
         // window (0.335-0.345) sat between frames 2 and 3 in spring-time and the tick mostly never fired.
         // Rule (triage #32): the interpolator's output is a shape, not a clock; anything timed reads rawT.
-        // Round 42: the squeeze window - a pure TIME shape on rawT (never the spring's output, triage #32):
-        // sin(PI * rawT/0.30), 0 at both ends, peak 1.0 at rawT 0.15 ~= real 142 ms - one frame beside the
-        // height overshoot's ~140 ms apex, so the eye reads ONE settle, not two signals. Collapse gets 0.
-        val v2SqueezeNow = if (morphV2On && morphTowardCard && morphSqueeze > 0f) {
-            morphSqueeze * kotlin.math.sin(Math.PI * (rawT / 0.30f).coerceIn(0f, 1f)).toFloat()
+        // Round 43: the squeeze voice moved from WIDTH-uniform (round 42, retired - a uniform factor cannot
+        // express "zero at the icon edge") to the NECK silhouette. Same time window by design: active
+        // 40-300 ms on the raw clock, sin envelope peaking at the centre = 170 ms, 5% of the CURRENT drawn
+        // width ("9% was too strong" - his number). Collapse gets 0, classic styles get 0.
+        val v2SqueezeNow = 0f   // retired runtime path; the constant stays pinned in MotionVariant
+        val v2NeckNow = if (morphV2On && morphTowardCard) {
+            val ms = rawT * morphDurationMs
+            if (ms >= MotionVariant.V2_NECK_START_MS && ms <= MotionVariant.V2_NECK_END_MS) {
+                val span = (MotionVariant.V2_NECK_END_MS - MotionVariant.V2_NECK_START_MS).toFloat()
+                MotionVariant.V2_NECK_MAX_INSET * w *
+                    kotlin.math.sin(Math.PI * (ms - MotionVariant.V2_NECK_START_MS) / span).toFloat()
+            } else 0f
         } else 0f
         if (!v2GateLogged && morphPinH != null) {
             v2GateLogged = true
@@ -3812,7 +3829,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
                     " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f) +
                     " box=" + (((if (morphV2On) (if (morphTowardCard) w.coerceAtMost(morphToW) else w.coerceAtLeast(morphToW)) else w) * (1f - v2SqueezeNow)).toInt()) +
-                    "x" + h + " sq=" + "%.3f".format(v2SqueezeNow) +    // DRAWN numbers (post clamp+squeeze): a log must read the render view
+                    "x" + h + " neck=" + "%.1f".format(v2NeckNow) +    // DRAWN numbers (post clamp; neck is a silhouette, not a width): render view only
                     "@" + "%.0fms".format(rawT * morphDurationMs)
                 v2TraceNextIdx++
             }
@@ -3898,7 +3915,7 @@ class HyperAccessibilityService : AccessibilityService() {
         if (host != null) {
             // The card is not resized at all during a morph: this frame is one small invalidate inside the
             // view, which is why the overlay window stops being laid out 60 times a second.
-            val frame = IslandMorphFrame.compute(morphPinW(), morphNaturalH, bw, bh, morphOvershootPx)
+            val frame = IslandMorphFrame.compute(morphPinW(), morphNaturalH, bw, bh, morphOvershootPx, v2NeckNow)
             lastMorphBoxLeft = frame.left
             host.applyMorphFrame(frame, br)
             return
@@ -4329,6 +4346,50 @@ class HyperAccessibilityService : AccessibilityService() {
         )
     }
 
+    /**
+     * Round 43-3 (his keyframes verbatim): a 220 ms confirmation pulse on the pill itself, AFTER the
+     * collapse's hard lock - not part of the collapse curve (that stays crisp/zero-overshoot). Center
+     * origin, volume-constant: sy 1.0 -> 0.86 (@35%) -> 1.04 (@65%) -> 1.0, sx the inverse-louder partner
+     * 1.0 -> 1.08 -> 0.97 -> 1.0, so area reads constant at every keyframe pair. The pulse target is the
+     * pill views + the island shell: islandView carries the capsule background, pillPreviewRoot carries
+     * the icon at lock time; both scale together so silhouette and content gulp as ONE body.
+     */
+    private var v2GulpAnim: ValueAnimator? = null
+    private fun runV2GulpPulse() {
+        v2GulpAnim?.cancel()
+        val shell = islandView ?: return
+        val pill = pillPreviewRoot
+        val targets = if (pill != null) listOf(shell, pill) else listOf(shell)
+        for (v in targets) { v.pivotX = v.width / 2f; v.pivotY = v.height / 2f }
+        val keyF = floatArrayOf(0f, 0.35f, 0.65f, 1f)
+        val keySy = floatArrayOf(1f, 0.86f, 1.04f, 1f)
+        val keySx = floatArrayOf(1f, 1.08f, 0.97f, 1f)
+        fun at(keys: FloatArray, f: Float): Float {
+            for (i in 1..3) if (f <= keyF[i]) {
+                val span = keyF[i] - keyF[i - 1]
+                return keys[i - 1] + (keys[i] - keys[i - 1]) * ((f - keyF[i - 1]) / span)
+            }
+            return keys[3]
+        }
+        TraceLog.morph("v2 gulp: lock+0ms - 220ms confirm pulse begins (sy 1.0->0.86->1.04->1.0, sx 1.0->1.08->0.97->1.0)")
+        v2GulpAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = MotionVariant.V2_GULP_MS
+            interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener { an ->
+                val f = an.animatedValue as Float
+                val sy = at(keySy, f); val sx = at(keySx, f)
+                for (v in targets) { v.scaleY = sy; v.scaleX = sx }
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: Animator) {
+                    for (v in targets) { v.scaleY = 1f; v.scaleX = 1f }
+                    TraceLog.morph("v2 gulp: done - pill back at 1.0/1.0")
+                }
+            })
+            start()
+        }
+    }
+
     private fun endMorphPerf(label: String) {
         if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
         // Read the flight-end values BEFORE clearMorphCarry/pin-restore rewrite the tree to the next-morph
@@ -4531,6 +4592,46 @@ class HyperAccessibilityService : AccessibilityService() {
                 setWillNotDraw(false)
             }
 
+            /**
+             * Builds the frame's silhouette into [morphClipPath]: the plain round rect when neckPx <= 0,
+             * the neck profile otherwise - top corners rounded and FULL WIDTH, edges walking inward as
+             * IslandMorphFrame.neckInset(yFraction, neckPx), bottom corners rounded and back at full width.
+             * onDraw and dispatchDraw both call this so the background and the containment clip can never
+             * describe two different shapes (his wedge warning: the profile, not a linear taper, is what
+             * makes it read as elastic).
+             */
+            private fun fillMorphSilhouette(f: MorphFrame, out: Path) {
+                val l = f.left.toFloat(); val t = f.top.toFloat(); val r = f.right.toFloat(); val b = f.bottom.toFloat()
+                out.reset()
+                if (f.neckPx <= 0.5f) {
+                    out.addRoundRect(RectF(l, t, r, b), morphRadius, morphRadius, Path.Direction.CW)
+                    return
+                }
+                val h = (b - t).coerceAtLeast(1f)
+                val rad = morphRadius.coerceAtMost(h / 2f)
+                val steps = 20
+                out.moveTo(l + rad, t)
+                // top edge (full width - the icon edge never insets) and the top-right corner
+                out.lineTo(r - rad, t)
+                out.quadTo(r, t, r, t + rad)
+                // right edge down: first corner-exit point then the neck profile
+                for (i in 1..steps) {
+                    val y = t + rad + (h - 2f * rad) * i / steps
+                    val inRight = IslandMorphFrame.neckInset((y - t) / h, f.neckPx)
+                    out.lineTo(r - inRight, y)
+                }
+                out.quadTo(r - IslandMorphFrame.neckInset(1f, f.neckPx), b, r - rad, b)
+                // bottom edge back at full width (neckInset(1f) == 0, so the corner lands at r)
+                out.lineTo(l + rad, b)
+                out.quadTo(l - IslandMorphFrame.neckInset(1f, f.neckPx) * 0f, b, l, b - rad)
+                for (i in steps downTo 0) {
+                    val y = t + rad + (h - 2f * rad) * i / steps
+                    out.lineTo(l + IslandMorphFrame.neckInset((y - t) / h, f.neckPx), y)
+                }
+                out.quadTo(l, t, l + rad, t)
+                out.close()
+            }
+
             override fun applyMorphFrame(frame: MorphFrame, cornerRadius: Float) {
                 val previous = morphFrame
                 morphFrame = frame
@@ -4553,10 +4654,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
             override fun onDraw(canvas: Canvas) {
                 val f = morphFrame ?: run { super.onDraw(canvas); return }
-                canvas.drawRoundRect(
-                    f.left.toFloat(), f.top.toFloat(), f.right.toFloat(), f.bottom.toFloat(),
-                    morphRadius, morphRadius, morphPaint
-                )
+                fillMorphSilhouette(f, morphClipPath)
+                canvas.drawPath(morphClipPath, morphPaint)
             }
 
             override fun dispatchDraw(canvas: Canvas) {
@@ -4569,11 +4668,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 // Content stays inside the drawn box, which is what clipToOutline was doing for us. It is a
                 // containment clip on a subtree that is fading, not a mask that reveals it - the reveal
                 // look that was rejected earlier is a different thing and stays out.
-                morphClipPath.reset()
-                morphClipPath.addRoundRect(
-                    RectF(f.left.toFloat(), f.top.toFloat(), f.right.toFloat(), f.bottom.toFloat()),
-                    morphRadius, morphRadius, Path.Direction.CW
-                )
+                fillMorphSilhouette(f, morphClipPath)
                 val layer = canvas.save()
                 canvas.clipPath(morphClipPath)
                 super.dispatchDraw(canvas)

@@ -641,7 +641,20 @@ squeeze), @0.20 ~= 1030 wide, released back to 1067 by rawT 0.30 - the width spe
 (2) His collapse flatness log (ty=0 / sy=1.000 everywhere) was exact truth: nothing animated the content in
 that direction but alpha. The v2 collapse now sinks its content 1.00 -> 0.96 in scale, monotone (the coerced
 spring output cannot bounce back), crisp, restoring at end behind the +90 ms island-sleep already proven.
-## 20. What is still unproven
+## 20. Round 43: the neck, the swallowed collapse, and the confirm gulp
+
+Three of his refinements layered on the verified settle. (1) The neck replaces the uniform width-squeeze:
+a per-y inset profile `neckPx * sin(PI * y^1.4)` drawn as the frame's silhouette (custom `fillMorphSilhouette`
+path - the real path option, not the two-band fallback), top edge and top corners untouched, peak inset 5% of
+the current width at 61% down, active 40-300 ms on raw time, envelope peaking at 170 ms. Drawn and clipped by
+the SAME path (onDraw + dispatchDraw share `fillMorphSilhouette`), so background and containment cannot
+disagree. (2) The v2 collapse dropped its dedicated alpha fade entirely - the dispatchDraw containment clip
+that always existed is the disappearance now; the settle sink deepened to 1.00 -> 0.92 synced to the
+container's own curve `t` (no separate timeline), monotone, restoring at the lock behind the pill hand-off.
+(3) After the hard lock fires the 220 ms confirm gulp: sy 1.0->0.86->1.04->1.0, sx 1.0->1.08->0.97->1.0,
+center origin, on islandView + pillPreviewRoot together (shell and icon gulp as one body), volume-constant
+at every keyframe pair. The collapse itself stays crisp: the gulp begins in the same callback that ends it.
+## 21. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks
