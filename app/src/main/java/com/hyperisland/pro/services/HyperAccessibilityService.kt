@@ -3181,7 +3181,10 @@ class HyperAccessibilityService : AccessibilityService() {
                 gridRoot?.visibility = View.VISIBLE
                 // The other expand path, the other owner rule: when the carry drives the opacity it owns it for
                 // the whole morph here too, or the last writer of the frame wins and the TestLab choice is a lie.
-                if (!morphOpacityFollowsShape) setMorphContentAlpha(t)
+                // Except their own alpha now has exactly one writer for blueprint v2 morphs: the shape-fade's
+                // gate below was a second writer on gridContentSec.alpha and it overrode the v2 strike ramp
+                // on every frame of the auto path (D2 in the code-truth audit he asked for).
+                if (!morphOpacityFollowsShape && !morphV2On) setMorphContentAlpha(t)
             }
         }
         val set = AnimatorSet().apply {
@@ -3306,7 +3309,9 @@ class HyperAccessibilityService : AccessibilityService() {
                 // pill in the last frames. Both rules were measured on hardware.
                 // Both ramps go through the one owner: with the icon riding, the fade has to land on the content
                 // views and not on the row, and this path is not allowed to disagree about that.
-                if (!morphOpacityFollowsShape) {
+                // Blueprint v2's own 0-137 strike is that same one owner while V2 is active; classic styles
+                // see no change (the gate's only predicate is morphV2On).
+                if (!morphOpacityFollowsShape && !morphV2On) {
                     if (target == IslandStage.STAGE3_FULL) {
                         setMorphContentAlpha(t)
                     } else if (target == IslandStage.STAGE2_PING) {
@@ -3565,8 +3570,6 @@ class HyperAccessibilityService : AccessibilityService() {
             val want = if (MorphCarry.showsPillGlyph(t, morphCarryGrowing, morphSwapAt)) glyph else launcher
             if (icon.drawable !== want) icon.setImageDrawable(want)
         }
-        // Blueprint v2 writes LAST, as the frame's final word on the two sections it owns.
-        if (morphV2On && morphTowardCard && morphPinH != null) applyBlueprintV2(t)
     }
 
     /**
@@ -3763,6 +3766,15 @@ class HyperAccessibilityService : AccessibilityService() {
      * window keyed to it is sampled once, past its peak.
      */
     private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float, t: Float) {
+        // Blueprint v2 FIRST THING: THE CLOCK IS THE ANIMATOR'S, not the carry's. applyMorphCarry receives
+        // a legacy-scaled progress on the auto path (0.5 + 0.5 * t, kept for glyph hand-off semantics)
+        // which on b1434 fed the pendulum a half-eaten timeline: the stretch window skipped, the haptic
+        // window itself never reached (auto haptic dead), and 'kuchh dikh nahi raha' held on half the
+        // triggers. This is the one function every expand funnel hits with its OWN animator's raw t, so
+        // the overlay's clock is the same number for auto and manual morphs again: the fluid expand
+        // listener and the generic path both hand this function their animator's untransformed t
+        // (see the two updateIslandLayoutForMorph(...) calls inside the animators' update listeners).
+        if (morphV2On && morphTowardCard && morphPinH != null) applyBlueprintV2(t)
         var bw = w
         var bh = h
         var br = r
