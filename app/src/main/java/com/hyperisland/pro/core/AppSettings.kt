@@ -111,18 +111,19 @@ object AppSettings {
      */
     const val MORPH_STYLE_HYPERMORPH = 5
     /**
-     * Seventh style - the first that is HIS design end to end ("liquid pull", his sketch run through an AI for
-     * phrasing, fixed to his correction that the TOP stays locked): the island is pulled down with the
-     * expansion, the depth paid by the BOTTOM edge while the anchor at the top never moves; the text stretches
-     * volume-constant (1.15 / 0.95); the content arrives buoyant; and after the settle the container is rigid
-     * while the text bobs +-3 px and the icon +-1 px. Steps 1-4 of his spec, one shared arc, its own design -
-     * not flags on the spring styles.
+     * Seventh style: HIS second spec replaces his first under the same number ("replace the 7th one", his
+     * binding word). Blueprint v2, "Precise Snap, Organic Breath" - the container spring hard-locks at
+     * t = 0.337 with its own 2-3 px overshoot and one haptic; the text column rides an anchor pendulum
+     * (-40 arrival / +10 dp sink at the lock / the -5 and +2 bounce pair / rigid at hard lock), stretched
+     * 1.15 x 0.95 through the first 247 ms only; the icon rides the same pendulum at half buoyancy, 40 ms
+     * late, never stretched. Collapse is asymmetric on purpose: 380 ms, damping 0.90, no overshoot - "a put
+     * away feel", not a rewind. Constants live in MotionVariant where tests pin every one of them.
      */
-    const val MORPH_STYLE_LIQUIDPULL = 6
+    const val MORPH_STYLE_BLUEPRINT = 6
     // His design is the front door: every existing build keeps its chosen style (the pref wins), and every
     // fresh install starts on HIS, because the style he invented should not hide behind a default he never
     // asked for - the round-35 lesson being that an idea he cannot find reads as an idea that was ignored.
-    const val DEFAULT_MORPH_STYLE = MORPH_STYLE_LIQUIDPULL
+    const val DEFAULT_MORPH_STYLE = MORPH_STYLE_BLUEPRINT
     const val DEFAULT_MORPH_CONTENT_SCALE_PCT = 12
     const val DEFAULT_MORPH_GLYPH_SWAP_PCT = 50
     /** Extra travel on top of the geometry, in dp. 0 means: let the row arrive on the box's own math alone. */

@@ -498,7 +498,40 @@ the same line, "liquid pull (aapka design)", so the design that runs is the one 
 words about the spec - "ho sakta hai mere vision se thoda alag ho gya hoga, main test karne ke baad dekhunga" -
 are respected by constants, not by persuasion: every number above is one `const val` in MotionVariant.
 
-## 13. What is still unproven
+## 13. Round 36: blueprint v2, and the truth about why the pull was never visible
+
+His instruction replaced an entire design in one line: "replace the 7th one - ye lo, ranking bhi chahiye." The
+blueprint that arrived carries his correction about my answer style built into it ("faltu ka mat likhna"), so
+this section holds three things and three only: what now lives on the style, what b1430 really showed, and the
+binding constants.
+
+**The bow at b1430 was bent twice.** The masking theory (a sink peaking mid-race drowns) was true but only the
+second half of it: `morphVariantOn = morphLiquidOn || morphHyperOn` gated EVERY writer of the pull out of the
+style it was supposed to serve, so on b1427/b1430 the dip was dead code on its own style (the stretch and the
+float, living in wider-reaching functions, were their only running parts). His eye ("kuchh effect hai kaha")
+read the code's truth even when the code did not. The takeaway is the same one the carry-and-fade era taught:
+a feature whose writers sit inside another feature's gate is not a feature, it is a rumor.
+
+**What replaced it is not patched-on, it is read-from-his-page.** Container: spring at ζ=0.86/response 0.22 s
+his own math against his own table: that pair puts the "2-3 px" overshoot at 2.2 px of real travel and locks
+by t = 0.187, comfortably before his "Container Lock" boundary of 0.337 (320 ms of 950) - the constants row's
+0.78 would have shown ~8 px instead, and the table won because the table is what his eye reads. Text: an
+anchor-pendulum (-40 arrival, +26 px sink at the lock, the -5 / +2 pair, rigid from 0.758-0.90) joined by
+half-cosine arcs, because a pendulum's extremes are zero-velocity points, which is exactly what cos arcs
+between them draw; his claim about the deep sink being "fixed, not content-scaled" landed as a const, not an
+amplitude function. Icon: half the pendulum, 40 ms late, never stretched, zero before its delay (his "40 ms
+starts after text" respected as a seat-pin, not a lazy ramp). Opacity and stretch own the pull window alone
+(130 / 247 ms). One haptic at his lock boundary, exactly once per expand. Collapse runs his "asymmetric,
+crisp" pair (380 ms, ζ=0.90 - 0.23 dp of invisible overshoot by the arithmetic). And she said it in her own
+preamble, and it is now architecture: every number above is one `const val`, pinned by a test that reports
+the constant back by name if a refactor drifts.
+
+**Ranking, as asked.** Below in the answer, not here - this file holds mechanisms, not league tables - but
+the criterion the table used is written down: (a) what his eyes praised, (b) how few complaints it earned,
+(c) how many subsequent fixes each style consumed, (d) whose design it is. Blueprint v2 tops (b), (c) as a
+hypothesis now, and (d) by definition; the rest of the table follows.
+
+## 14. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

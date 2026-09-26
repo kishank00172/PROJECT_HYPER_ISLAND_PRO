@@ -29,7 +29,7 @@ class MotionVariantTest {
             AppSettings.MORPH_STYLE_BALANCED, AppSettings.MORPH_STYLE_CARRY,
             AppSettings.MORPH_STYLE_SHAPE_ONLY, AppSettings.MORPH_STYLE_GLASS,
             AppSettings.MORPH_STYLE_LIQUID, AppSettings.MORPH_STYLE_HYPERMORPH,
-            AppSettings.MORPH_STYLE_LIQUIDPULL,
+            AppSettings.MORPH_STYLE_BLUEPRINT,
         )
         for (s in styles) assertEquals("style $s must survive the clamp", s, MotionVariant.clampStyle(s))
         assertTrue("MAX_STYLE must cover the last style", MotionVariant.MAX_STYLE >= styles.last())
@@ -59,7 +59,7 @@ class MotionVariantTest {
         assertTrue(names.last().contains("aapka design"))
         // ...and the Context-free name the service logs is the same string the radio promises him.
         assertEquals(MotionVariant.styleName(AppSettings.MORPH_STYLE_HYPERMORPH), "hypermorph (ChatGPT)")
-        assertEquals(MotionVariant.styleName(AppSettings.MORPH_STYLE_LIQUIDPULL), "liquid pull (aapka design)")
+        assertEquals(MotionVariant.styleName(AppSettings.MORPH_STYLE_BLUEPRINT), "precise snap, organic breath (aapka v2)")
     }
 
     @Test
@@ -70,7 +70,7 @@ class MotionVariantTest {
         assertFalse(MotionVariant.isSpring(AppSettings.MORPH_STYLE_GLASS))
         assertTrue(MotionVariant.isSpring(AppSettings.MORPH_STYLE_LIQUID))
         assertTrue(MotionVariant.isSpring(AppSettings.MORPH_STYLE_HYPERMORPH))
-        assertTrue(MotionVariant.isSpring(AppSettings.MORPH_STYLE_LIQUIDPULL)) // the pull needs an elastic surface
+        assertTrue(MotionVariant.isSpring(AppSettings.MORPH_STYLE_BLUEPRINT)) // the blueprint's container is a spring too
     }
 
     // ---------------------------------------------------------------- Claude's spring
@@ -392,52 +392,6 @@ class MotionVariantTest {
     }
 
     @Test
-    fun thePullIsOneArcSharedBySinkAndStretch() {
-        // Steps 1-3 with VISIBILITY stated as a property - round 35: the old sine peaked inside the box's
-        // own race and drowned in it ("bas normally expand ho ja raha tha"). Zero far outside the calm
-        // window, a real arrival, a flat full-depth HANG wide enough to read, an eased attack and release,
-        // and the stretch pair exact.
-        assertEquals(0f, MotionVariant.pullPhase(0f), 1e-6f)
-        assertEquals(0f, MotionVariant.pullPhase(MotionVariant.PULL_START), 1e-6f)
-        assertEquals(0f, MotionVariant.pullPhase(MotionVariant.PULL_END), 1e-6f)
-        assertEquals(0f, MotionVariant.pullPhase(0.999f), 1e-6f)
-        assertTrue("the yank waits for the race to pass", MotionVariant.PULL_START > 0f)
-        assertTrue("the catch happens well inside the clock", MotionVariant.PULL_END < 1f)
-        val span = MotionVariant.PULL_END - MotionVariant.PULL_START
-        assertEquals(1f, MotionVariant.pullPhase(MotionVariant.PULL_START + 0.5f * span), 1e-3f)
-        assertTrue("a hang, not a spike (early)",
-            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.45f * span) > 0.99f)
-        assertTrue("a hang, not a spike (late)",
-            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.60f * span) > 0.99f)
-        assertTrue("getting there is an ease, not a blink",
-            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.20f * span) < 0.9f)
-        assertTrue("deep into the release and still high - the snap lands late (cos curve, ~0.78 at 80 %)",
-            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.80f * span) in 0.70f..0.90f)
-        assertTrue("then genuinely home shortly after (~0.22 at 95 %)",
-            MotionVariant.pullPhase(MotionVariant.PULL_START + 0.95f * span) in 0.15f..0.35f)
-        assertEquals(1f + MotionVariant.STRETCH_Y_MAX, MotionVariant.stretchScaleY(1f), 1e-6f)
-        assertEquals(1f - MotionVariant.SQUEEZE_X, MotionVariant.stretchScaleX(1f), 1e-6f)
-        assertEquals(1f, MotionVariant.stretchScaleY(0f), 1e-6f)
-        assertEquals(1f, MotionVariant.stretchScaleX(0f), 1e-6f)
-    }
-
-    @Test
-    fun theFloatKeepsTheHierarchyHeWrote() {
-        // Step 4 verbatim: text bobs more than the icon, the icon at least a pixel (or it is not there), the
-        // wave is one sine that never exceeds the amplitude, and a full period later it is back to zero.
-        assertTrue(MotionVariant.FLOAT_TEXT_PX > MotionVariant.FLOAT_ICON_PX)
-        assertTrue(MotionVariant.FLOAT_ICON_PX >= 1f)
-        var extreme = 0f
-        for (i in 0..100) {
-            val v = MotionVariant.floatOffsetPx(i / 100f, MotionVariant.FLOAT_TEXT_PX)
-            extreme = maxOf(extreme, kotlin.math.abs(v))
-        }
-        assertTrue(extreme <= MotionVariant.FLOAT_TEXT_PX + 1e-3f)
-        assertEquals(0f, MotionVariant.floatOffsetPx(0f, MotionVariant.FLOAT_TEXT_PX), 1e-4f)
-        assertEquals(0f, MotionVariant.floatOffsetPx(0.5f, MotionVariant.FLOAT_TEXT_PX), 1e-4f)
-    }
-
-    @Test
     fun buoyancyIsALagAndADipInsideExactEndings() {
         // The round-33 ask, "buoyancy wala effect, jaise content liquid mein hai": the content's ride progress
         // on the spring styles is its own slower, underdamped spring. Two properties make it safe on every
@@ -500,5 +454,44 @@ class MotionVariantTest {
         val h = 60 + ((160 - 60) * p).toInt()
         assertEquals("corners track the height, not a curve of their own", h / 2f,
             MotionVariant.tensionRadius(h.toFloat(), 200f), 1e-4f)
+    }
+    @Test
+    fun blueprintV2KeepsEveryNumberHeSent() {
+        // Container constants are his, pinned so a sloppy refactor reports back to him by itself.
+        assertEquals(950L, MotionVariant.V2_EXPAND_TOTAL_MS)
+        assertEquals(380L, MotionVariant.V2_COLLAPSE_TOTAL_MS)
+        assertEquals(0.86f, MotionVariant.V2_CONTAINER_DAMPING, 1e-9f)
+        assertEquals(0.90f, MotionVariant.V2_COLLAPSE_DAMPING, 1e-9f)
+
+        // Text pendulum: reads his phase table back exactly at the anchors, rigid after the hard lock.
+        assertEquals(-40f, MotionVariant.v2TextOffsetPx(0f), 1e-3f)
+        assertEquals(26f, MotionVariant.v2TextOffsetPx(0.40f), 1e-3f)
+        assertEquals(-5f, MotionVariant.v2TextOffsetPx(0.589f), 1e-3f)
+        assertEquals(2f, MotionVariant.v2TextOffsetPx(0.758f), 1e-3f)
+        assertEquals(0f, MotionVariant.v2TextOffsetPx(0.90f), 1e-3f)
+        assertEquals(0f, MotionVariant.v2TextOffsetPx(0.999f), 1e-3f)
+        var lo = 0f; var hi = 0f
+        for (i in 0..200) {
+            val v = MotionVariant.v2TextOffsetPx(i / 200f)
+            lo = minOf(lo, v); hi = maxOf(hi, v)
+        }
+        assertTrue("pendulum never bolts past its own anchors", lo >= -40.01f && hi <= 26.01f)
+
+        // Icon: exactly half, exactly 40 ms late, and before the delay EXACTLY at its seat - never early.
+        val delay = 40f / MotionVariant.V2_EXPAND_TOTAL_MS
+        assertEquals(0f, MotionVariant.v2IconOffsetPx(0f), 1e-3f)
+        assertEquals(0f, MotionVariant.v2IconOffsetPx(delay / 2f), 1e-3f)
+        assertEquals(0.5f * 13f, MotionVariant.v2IconOffsetPx(0.40f + delay), 1e-3f)
+
+        // Stretch belongs to the pull window ONLY: his numbers at mid-pull, exactly off by 247 ms.
+        assertEquals(1.15f, MotionVariant.v2StretchScaleY(0.13f), 1e-3f)
+        assertEquals(0.95f, MotionVariant.v2StretchScaleX(0.13f), 1e-3f)
+        assertEquals(1f, MotionVariant.v2StretchScaleY(0.40f), 1e-3f)
+        assertEquals(1f, MotionVariant.v2StretchScaleX(0.40f), 1e-3f)
+
+        // One haptic, at the container lock, never before, never after.
+        assertFalse(MotionVariant.v2HapticAt(0.10f))
+        assertTrue(MotionVariant.v2HapticAt(0.337f))
+        assertFalse(MotionVariant.v2HapticAt(0.90f))
     }
 }

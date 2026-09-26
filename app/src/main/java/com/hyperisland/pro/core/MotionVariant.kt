@@ -71,7 +71,7 @@ object MotionVariant {
         AppSettings.MORPH_STYLE_GLASS -> "glass settle"
         AppSettings.MORPH_STYLE_LIQUID -> "liquid capsule (Claude)"
         AppSettings.MORPH_STYLE_HYPERMORPH -> "hypermorph (ChatGPT)"
-        AppSettings.MORPH_STYLE_LIQUIDPULL -> "liquid pull (aapka design)"
+        AppSettings.MORPH_STYLE_BLUEPRINT -> "precise snap, organic breath (aapka v2)"
         else -> "balanced"
     }
 
@@ -80,7 +80,7 @@ object MotionVariant {
 
     fun isSpring(style: Int): Boolean =
         style == AppSettings.MORPH_STYLE_LIQUID || style == AppSettings.MORPH_STYLE_HYPERMORPH ||
-            style == AppSettings.MORPH_STYLE_LIQUIDPULL
+            style == AppSettings.MORPH_STYLE_BLUEPRINT
 
     // ---------------------------------------------------------------- the spring, as a curve
 
@@ -257,53 +257,67 @@ object MotionVariant {
     fun buoy(t: Float, durationMs: Long, baseResponseSec: Float): Float =
         spring(t, durationMs, baseResponseSec * BUOY_RESPONSE_SCALE, BUOY_DAMPING)
 
-    // ------------------------------------------------- the pull, his steps 1-3 as one shared arc (round 34)
-
-    /** The pull lives in the box's CALM window: after the curve's race (round 35b - the sine that peaked at
-     * frame 9 drowned in 300 px of travel; "bas normally expand ho ja raha tha"). Ends strictly inside the
-     * clock, so the catch is done before the cleanup's exactness claim has to carry it. */
-    const val PULL_START = 0.12f
-    const val PULL_END = 0.88f
-    /** How far the whole island travels down at the pull's peak, in dp (= 26 px on his 2.625 panel). */
-    const val PULL_DP = 10
-    /** The stretch and squeeze, verbatim from his step 1: enough to feel flexible, too little to blur. */
-    const val STRETCH_Y_MAX = 0.15f
-    const val SQUEEZE_X = 0.05f
-    /** Step 4, his amplitudes verbatim: the text bobs, the icon barely bobs, the island does not. */
-    const val FLOAT_TEXT_PX = 3f
-    const val FLOAT_ICON_PX = 1f
-    /** One slow breath: a full bob in 2.4 s - a liquid feel is a loop you can watch, not a one-shot curve. */
-    const val FLOAT_PERIOD_MS = 2400L
-    private const val PULL_ATTACK = 0.35f  // of the span: quarter-sine down to full depth
-    private const val PULL_HOLD = 0.30f    // ... HANG there - the depth must be met by the eye, not skimmed
+    // -------------------------------------- blueprint v2: "Precise Snap, Organic Breath" (his sent spec)
 
     /**
-     * The single arc of steps 1-3, redrawn for the eye (round 35b): a quarter-sine attack to full depth
-     * ([PULL_ATTACK] of the span), a hang at the depth ([PULL_HOLD]; his spec says the island is "thrown",
-     * and a throw reads as arriving AND pausing against a still background, not as a spike), then a
-     * quarter-cosine release that accelerates into the seat - the snap. One curve, so the box's bottom edge
-     * and the text stretch below cannot desync the way separately tuned effects would; zero outside the
-     * window and zero at both ends, because after the catch the island is rigid, and rigid is the state his
-     * step 4 demands it return to.
+     * Blueprint v2, verbatim constants from the final spec he sent ("numbers AI-processed, test ke baad
+     * tune karunga" - constants stay one [const val] each, for that exact day). The pull/float family of
+     * rounds 34-35 is REPLACED by this: the pendulum, the piecewise anchor path, the icon at half buoyancy
+     * and 40 ms late, the hard lock, and the one haptic are all read from here.
      */
-    fun pullPhase(t: Float): Float {
-        val span = PULL_END - PULL_START
-        if (t <= PULL_START || t >= PULL_END) return 0f
-        val u = (t - PULL_START) / span
-        return when {
-            u < PULL_ATTACK -> (sin((u / PULL_ATTACK) * (PI / 2.0))).toFloat()
-            u < PULL_ATTACK + PULL_HOLD -> 1f
-            else -> (cos(((u - PULL_ATTACK - PULL_HOLD) / (1f - PULL_ATTACK - PULL_HOLD)) * (PI / 2.0))).toFloat()
+    const val V2_EXPAND_TOTAL_MS = 950L
+    const val V2_COLLAPSE_TOTAL_MS = 380L
+    const val V2_CONTAINER_RESPONSE = 0.22f  // ~4 px peak overshoot at 421 dp, fully locked by 0.337 t (320 ms)
+    const val V2_CONTAINER_DAMPING = 0.86f   // his table pins "2-3 px"; his constants row said 0.78 (~8 px) - table wins, one const away
+    const val V2_COLLAPSE_RESPONSE = 0.30f
+    const val V2_COLLAPSE_DAMPING = 0.90f    // "crisp, no bounce"; settles and pins inside the 380 ms clock
+    const val V2_STRETCH_END = 0.26f         // stretch owns ONLY the pull window (0 - 247 ms), fading out after
+
+    /**
+     * The pendulum, read as anchors - (fraction of clock, px offset, gravity of zero velocity at extremes).
+     * His text row, verbatim: -40 start, +10 dp sink (26 px) at lock, -5 / +2 bounce pair, 0 by the rigid zone.
+     * Between anchors, half-cosine arcs: an oscillating system's extremes are where velocity is zero, so
+     * piecewise-halved cosines BETWEEN extremes are exactly the smooth motion he drew, not an approximation.
+     */
+    private val V2_TEXT_ANCHORS = floatArrayOf(0f, -40f, 0.40f, 26f, 0.589f, -5f, 0.758f, 2f, 0.90f, 0f)
+
+    /** Offset piecewise: cos half-arcs between (t_i, y_i) anchors. Between 0 and the first anchor: the pull
+     *  window also glides with the expansion; after the last anchor: rigid zero, by definition. */
+    private fun anchoredSegments(t: Float, anchors: FloatArray): Float {
+        if (t <= 0f) return anchors[1]
+        val n = anchors.size / 2
+        for (i in 0 until n - 1) {
+            val t0 = anchors[2 * i]; val y0 = anchors[2 * i + 1]
+            val t1 = anchors[2 * i + 2]; val y1 = anchors[2 * i + 3]
+            if (t <= t1) {
+                val u = if (t1 > t0) ((t - t0) / (t1 - t0)).coerceIn(0f, 1f) else 1f
+                val w = (1f - cos(PI.toFloat() * u)) / 2f
+                return y0 + (y1 - y0) * w
+            }
         }
+        return anchors[anchors.size - 1]
     }
 
-    /** Volume-constant, his exact pair: tall by 15 %, narrow by 5 % - the "weight" stays put. */
-    fun stretchScaleY(phase: Float): Float = 1f + STRETCH_Y_MAX * phase
-    fun stretchScaleX(phase: Float): Float = 1f - SQUEEZE_X * phase
+    /** Text column offset in px at clock t. */
+    fun v2TextOffsetPx(t: Float): Float = anchoredSegments(t, V2_TEXT_ANCHORS)
 
-    /** One shared sine for every floater; the caller scales it to its own amplitude (the hierarchy). */
-    fun floatOffsetPx(fraction: Float, amplitudePx: Float): Float =
-        (amplitudePx.toDouble() * sin(2.0 * PI * fraction.toDouble())).toFloat()
+    /**
+     * The icon rides the same pendulum at exactly half amplitude, delayed by 40 ms (his ICON_DELAY_MS) -
+     * and the delayed piece is where a naive ratio would eat his constants, so it lives in the GATE, not
+     * in the offset: u = t - delay; before the delay the icon does exactly what he wrote: rigid at its seat.
+     */
+    fun v2IconOffsetPx(t: Float): Float {
+        val delay = 40f / V2_EXPAND_TOTAL_MS
+        val u = (t - delay).coerceIn(0f, 1f)
+        return 0.5f * v2TextOffsetPx(u)
+    }
+
+    /** Stretch ring on the pull: identical bell shape to before, mapped to his 0-247 ms window. */
+    fun v2StretchScaleY(t: Float): Float = 1f + 0.15f * sin(PI.toFloat() * (t / V2_STRETCH_END).coerceIn(0f, 1f))
+    fun v2StretchScaleX(t: Float): Float = 1f - 0.05f * sin(PI.toFloat() * (t / V2_STRETCH_END).coerceIn(0f, 1f))
+
+    /** Haptic gate, exact single tick: his "Container Lock 0.337" boundary, fired once per expand. */
+    fun v2HapticAt(t: Float): Boolean = t in 0.335f..0.345f
 
     // ---------------------------------------------------------------- the profiles Claude asked for
 
@@ -360,7 +374,10 @@ object MotionVariant {
      * constant would break as soon as he moves the slider.
      */
     fun responseFor(style: Int, profile: Int, towardCard: Boolean, windowMs: Long): Float =
-        windowMs * responseScaleFor(style, profile, towardCard) / 1000f
+        if (style == AppSettings.MORPH_STYLE_BLUEPRINT) {
+            // Blueprint v2 bypasses the presets AND the slider: its constants are his.
+            if (towardCard) V2_CONTAINER_RESPONSE else V2_COLLAPSE_RESPONSE
+        } else windowMs * responseScaleFor(style, profile, towardCard) / 1000f
 
     /**
      * Damping per trigger. Claude's table says a light bounce on arrival (0.7), a confident settle on a tap
@@ -380,6 +397,8 @@ object MotionVariant {
     const val SPRING_AXIS = "down"
 
     fun dampingFor(style: Int, profile: Int, towardCard: Boolean): Float = when {
+        AppSettings.MORPH_STYLE_BLUEPRINT == style && towardCard -> V2_CONTAINER_DAMPING
+        AppSettings.MORPH_STYLE_BLUEPRINT == style -> V2_COLLAPSE_DAMPING
         style == AppSettings.MORPH_STYLE_LIQUID && !towardCard -> 1f
         style == AppSettings.MORPH_STYLE_LIQUID -> when (clampProfile(profile)) {
             // Claude wrote 0.85 for a tap-to-expand, which overshoots by 0.7 % - and the axis decides whether

@@ -107,7 +107,7 @@
                 android:id="@+id/radioMorphLiquidPull"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Liquid pull (aapka design) - the island is PULLED down with the expansion: top edge locked at its anchor, the bottom edge dips and is caught; text stretches 1.15/0.95 volume-constant, content rides in buoyant, and after the settle the container is rigid while the text bobs +-3px and the icon +-1px"
+                android:text="Precise Snap, Organic Breath (aapka blueprint v2) - 950ms expand; container hard-locks at 0.337 with 2-3px overshoot + one haptic; text rides a pendulum (-40 into a +10dp sink, -5/+2 bounces, rigid), stretched 1.15/0.95 in the first 247ms; icon at half buoyancy 40ms late, never stretched; 380ms crisp collapse, no bounce"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 

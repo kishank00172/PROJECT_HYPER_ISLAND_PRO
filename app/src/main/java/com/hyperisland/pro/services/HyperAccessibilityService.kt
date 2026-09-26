@@ -596,9 +596,9 @@ class HyperAccessibilityService : AccessibilityService() {
     /** The card's icon cell: the rigid asset of his hierarchy (no stretch, the smaller bob). */
     private var gridIconSec: android.view.View? = null
     /** The pull lives on expands of the spring styles only; set per morph, read by the tween and the carry. */
-    private var morphPullOn = false
+    private var morphV2On = false
+    private var v2HapticDone = false
     /** Step-4 float loop: active only on a settled FULL card in a spring style; cancelled on any new morph. */
-    private var islandFloatAnimator: ValueAnimator? = null
     private var morphStagger = 0f
     private var morphOpenFrame = 0f
     private var lastMorphBoxLeft = 0
@@ -3170,7 +3170,8 @@ class HyperAccessibilityService : AccessibilityService() {
         //  - no gridRoot alpha ramp (the outline clips the content; a fade just looked like blur)
         //  - no islandView scaleY squash (that scaled the TEXT, which is what read as jitter)
         val expand = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = morphWindowFor(360L)
+            duration = morphWindowFor(if (AppSettings.getMorphStyle(this) == AppSettings.MORPH_STYLE_BLUEPRINT)
+                MotionVariant.V2_EXPAND_TOTAL_MS else 360L)
             interpolator = morphCurve // same reason as setStageAnimated: and the pin is widened so it is NOT eaten
             addUpdateListener {
                 val t = it.animatedValue as Float
@@ -3261,7 +3262,11 @@ class HyperAccessibilityService : AccessibilityService() {
         val targetH = dp(getTargetHeight(target))
         val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = morphWindowFor(when (target) { IslandStage.STAGE1_IDLE -> 320L; IslandStage.STAGE2_PING -> 340L; else -> 380L })
+            duration = morphWindowFor(
+                if (AppSettings.getMorphStyle(this) == AppSettings.MORPH_STYLE_BLUEPRINT) {
+                    // his clock, not the Lab's: 950 ms in, 380 ms back - constants are the spec rn
+                    if (target == IslandStage.STAGE3_FULL) MotionVariant.V2_EXPAND_TOTAL_MS else MotionVariant.V2_COLLAPSE_TOTAL_MS
+                } else when (target) { IslandStage.STAGE1_IDLE -> 320L; IslandStage.STAGE2_PING -> 340L; else -> 380L })
             // Was: expandInterpolator out (0.34,1.56,0.64,1) and collapse in (0.55,0,0.1,1). Both were wrong
             // for the *drawn* box, and the arithmetic is in the commit: the expand curve overshoots past 1.0,
             // IslandMorphFrame.compute clamps it to the final size, and 29 of 46 frames at 120 Hz moved the
@@ -3431,9 +3436,11 @@ class HyperAccessibilityService : AccessibilityService() {
         // styles whose fade is written by the stage animator, so both owners read the same number.
         val open = MorphCarry.openProgress(morphShapeProgress(), morphTowardCard)
         morphOpenFrame = open
-        if (!morphCarryOn && !morphScaleOn && !morphIconRide && !morphGlassOn) return
+        // v2 enters here even with every classic flag off: it owns the sections, the flags are only opt-outs
+        // for THEIR writers (and "nothing visible on its own style" is exactly how the rounds-34/35 pull died).
+        if (!morphCarryOn && !morphScaleOn && !morphIconRide && !morphGlassOn && !morphV2On) return
         val g = gridRoot
-        if (morphEntryDrop) {
+        if (morphEntryDrop && !morphV2On) {
             // No sideways travel: the box widens evenly on both sides, so any x movement reads as the content
             // arriving from one side. The row hangs from the box's top edge - where the pill is - and settles
             // into its centred rest place as the box completes, so the entry is on the axis the shape grows on
@@ -3474,15 +3481,6 @@ class HyperAccessibilityService : AccessibilityService() {
                     val travelled = MotionVariant.magnetic(1f - open, morphMagnet)
                     MorphCarry.contentEntryOffset(1f - travelled, leftover, morphContentDropPx) - headroomHalf
                 } else MorphCarry.contentEntryOffset(travel, leftover, morphContentDropPx) - headroomHalf
-                // Step 1's volume-constant stretch, on the text column and NEVER on the icon ("left ka icon
-                // rigid brand asset hai"): 1.15 tall, 0.95 narrow, on the same pull arc the island sinks
-                // with - three parts, one driver, no desync. The column sits on its own hardware layer from
-                // beginMorphPerf, so this is a texture transform, not a re-raster of the text.
-                if (morphPullOn) {
-                    val stretch = MotionVariant.pullPhase(t)
-                    gridContentSec?.scaleY = MotionVariant.stretchScaleY(stretch)
-                    gridContentSec?.scaleX = MotionVariant.stretchScaleX(stretch)
-                }
             }
         } else {
             // The old entry: the host's per-frame centring is left alone, so nothing here owns translationY.
@@ -3567,6 +3565,8 @@ class HyperAccessibilityService : AccessibilityService() {
             val want = if (MorphCarry.showsPillGlyph(t, morphCarryGrowing, morphSwapAt)) glyph else launcher
             if (icon.drawable !== want) icon.setImageDrawable(want)
         }
+        // Blueprint v2 writes LAST, as the frame's final word on the two sections it owns.
+        if (morphV2On && morphTowardCard && morphPinH != null) applyBlueprintV2(t)
     }
 
     /**
@@ -3707,6 +3707,7 @@ class HyperAccessibilityService : AccessibilityService() {
         gridContentSec?.scaleX = 1f
         gridContentSec?.scaleY = 1f
         gridContentSec?.setLayerType(View.LAYER_TYPE_NONE, null)
+        gridContentSec?.translationY = 0f
         gridIconSec?.translationY = 0f
         islandView?.translationY = 0f
         pillPreviewIcon?.alpha = 1f
@@ -3721,44 +3722,6 @@ class HyperAccessibilityService : AccessibilityService() {
         // collapse to the badge pill ends with the counter and a collapse away from it ends without one -
         // decided by the ring's contents, not by whoever happened to show or hide the pill last.
         if (currentStage != IslandStage.STAGE3_FULL) pillChatCount = pillChatCount
-        // Step 4 starts here, at the end of every morph that may have landed on a full spring card; the
-        // function itself refuses every other state, so collapse/idle/ping morphs are free.
-        startOrUpdateIslandFloat()
-    }
-
-    /**
-     * His step 4, verbatim numbers: after the settle the CONTAINER is rigid and the contents float - the
-     * text column bobs +-FLOAT_TEXT_PX, the icon +-FLOAT_ICON_PX, one shared slow sine ([FLOAT_PERIOD_MS]
-     * per breath) - the hierarchy he asked for: heavy things in a liquid bob more than the rigid one. A
-     * ValueAnimator writes two translations per vsync onto hardware layers already cached by the morph, so
-     * the loop costs no re-raster; it starts only on a settled FULL card of HIS style (liquid pull; the
-     * others keep their settle states) and [stopIslandFloat] - run at every new morph - puts both views
-     * back at exactly zero.
-     */
-    private fun startOrUpdateIslandFloat() {
-        stopIslandFloat(restore = true)
-        if (currentStage != IslandStage.STAGE3_FULL || morphVariant != AppSettings.MORPH_STYLE_LIQUIDPULL) return
-        val text = gridContentSec ?: return
-        val icon = gridIconSec ?: return
-        islandFloatAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = MotionVariant.FLOAT_PERIOD_MS
-            interpolator = android.view.animation.LinearInterpolator()
-            repeatCount = ValueAnimator.INFINITE
-            addUpdateListener { anim ->
-                val f = anim.animatedValue as Float
-                text.translationY = MotionVariant.floatOffsetPx(f, MotionVariant.FLOAT_TEXT_PX)
-                icon.translationY = MotionVariant.floatOffsetPx(f, MotionVariant.FLOAT_ICON_PX)
-            }
-        }.also { it.start() }
-    }
-
-    private fun stopIslandFloat(restore: Boolean) {
-        islandFloatAnimator?.cancel()
-        islandFloatAnimator = null
-        if (restore) {
-            gridContentSec?.translationY = 0f
-            gridIconSec?.translationY = 0f
-        }
     }
 
     /** The pinned bound, falling back to the target for any frame that arrives outside a morph. */
@@ -3826,14 +3789,6 @@ class HyperAccessibilityService : AccessibilityService() {
             // motion here, it is a rectangle drawn off-screen and a content row sliding sideways, which is what
             // b1415 shipped and what he reported: "left right spring effect kon dalta hai island mei?"
             bw = MotionVariant.axisWidth(bw, morphToW, morphCarryGrowing)
-            // Steps 1-3, top edge LOCKED (his correction: "upar wala portion lock rahega") AND visible
-            // (his next one: "bas normally expand ho ja raha tha" - the round-34/35 sine peaked inside the
-            // box's own race and drowned). The dip is paid by the BOTTOM edge alone, in the CALM window
-            // after the curve has finished growing: the box holds 26 px deeper for ~6 frames and then is
-            // caught home frames 20+ while the top never moves - a yank, a hang, a snap. The depth is
-            // budgeted into the pin at begin (morphOvershootPx), so no clamp eats it, and the contentOffset
-            // pin keeps the content itself exactly still while the silhouette travels.
-            if (morphPullOn) bh += (dp(MotionVariant.PULL_DP) * MotionVariant.pullPhase(tc)).toInt()
             // Both: "cornerRadius = height / 2, radius ko independently animate mat karo". One rule instead of
             // a second animator, and it is what keeps a growing capsule a capsule; the final value is whatever
             // the style asked for, so a card with 22 dp corners still lands on 22 dp.
@@ -4110,9 +4065,12 @@ class HyperAccessibilityService : AccessibilityService() {
         gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         // --- which of the six looks this morph is, and the numbers the two outside designs brought with it.
         morphVariant = AppSettings.getMorphStyle(this)
-        // His design, gated early because the headroom budget below has to know about it: the pull is style
-        // LIQUIDPULL's whole mechanism, and it runs only on the way IN - a collapse is a return, not a throw.
-        morphPullOn = towardCard && morphVariant == AppSettings.MORPH_STYLE_LIQUIDPULL
+        // Blueprint v2 rides under style #6 ("precise snap, organic breath"), gated early because the headroom
+        // and profile machinery below read it. A confession worth keeping where the code changed: rounds 34-35's
+        // pull for this style was dead code for its own style (morphVariantOn gated every writer out) - his
+        // "kuchh effect nahi hai" on b1430 was reading the truth twice over.
+        morphV2On = morphVariant == AppSettings.MORPH_STYLE_BLUEPRINT
+        v2HapticDone = false
         morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
         morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH
         morphVariantOn = morphLiquidOn || morphHyperOn
@@ -4163,10 +4121,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // Only the second design taps on purpose; the first one's spring is the whole story.
             if (morphHyperOn) (maxOf(fromH, toH) * MotionVariant.DEFAULT_SETTLE).toInt() else 0,
         )
-        // The pull's dip rides in the same headroom: the spring's overshoot (any) plus the arc's peak, so the
-        // drawn box can reach 421 + spring + 26 px without the clamp eating the sink - round 31's lesson,
-        // applied to a number that changed one round later.
-        if (morphPullOn) morphOvershootPx += dp(MotionVariant.PULL_DP)
+        // The v2 container's own 2-3 px overshoot is already inside this budget (same formula, its damping).
         if (morphOvershootPx > 0) morphPinH = morphPinH!! + morphOvershootPx
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
         val startFrame = IslandMorphFrame.compute(morphPinW!!, morphNaturalH, fromW, fromH, morphOvershootPx)
@@ -4211,8 +4166,8 @@ class HyperAccessibilityService : AccessibilityService() {
         // buoyancy to read as liquid instead of latency, and only the way IN has a box that arrives first -
         // on the way OUT the content leaves on its own axis (the magnet, or the classic exit), which he has
         // never complained about.
-        morphBuoyOn = morphEntryDrop && towardCard && MotionVariant.isSpring(morphVariant)
-        stopIslandFloat(true)  // a new morph retires the previous card's float loop, whatever landed here
+        morphBuoyOn = morphEntryDrop && towardCard && MotionVariant.isSpring(morphVariant) &&
+            morphVariant != AppSettings.MORPH_STYLE_BLUEPRINT  // the pendulum owns blueprint's content
         islandView?.translationY = 0f
         // The column gets its own cached layer while the morph owns its scale: stretching a texture is one
         // matrix multiply per frame, stretching a software view is a re-raster of every TextView it holds.
@@ -4252,22 +4207,24 @@ class HyperAccessibilityService : AccessibilityService() {
                 "boxLeft=${lastMorphBoxLeft}px roll=${if (AppSettings.getMorphCountRoll(this)) "on" else "off"}" +
             // The variant's own numbers, printed rather than implied: when he says "3rd jaisa hi hai", the log
             // now answers whether the style he picked is the style that ran, and with what curve.
-            if (morphVariantOn) " variant=${AppSettings.getMorphStyleName(morphVariant)}" +
+            if (morphVariantOn || morphV2On) " variant=${AppSettings.getMorphStyleName(morphVariant)}" +
                 " profile=${MotionVariant.profileName(motionProfile)}" +
                 " response=${"%.2fs".format(morphResponseSec)} damping=${"%.2f".format(morphDamping)}" +
                 " gate=${(morphGate * 100).toInt()}%" +
                 " magnet=${(morphMagnet * 100).toInt()}% squeeze=${(morphSqueeze * 100).toInt()}%" +
                 " axis=${MotionVariant.SPRING_AXIS} travelV=${morphTravelV}px down" +
-                " buoy=${"%.2fs".format(morphResponseSec * MotionVariant.BUOY_RESPONSE_SCALE)}/${"%.2f".format(MotionVariant.BUOY_DAMPING)}" +
-                " pull=${MotionVariant.PULL_DP}dp stretch=${MotionVariant.STRETCH_Y_MAX}/${1f - MotionVariant.SQUEEZE_X}" +
-                " float=${MotionVariant.FLOAT_TEXT_PX.toInt()}/${MotionVariant.FLOAT_ICON_PX.toInt()}px" +
-                (if (morphPullOn) " on" else "")
+                " buoy=${"%.2fs".format(morphResponseSec * MotionVariant.BUOY_RESPONSE_SCALE)}/${"%.2f".format(MotionVariant.BUOY_DAMPING)}"
+            else if (morphV2On) " variant=blueprint-v2 container=${morphResponseSec}s/deep:${morphDamping}" +
+                " text=px(-40/+26/-5/+2/0) icon=0.5x,+40ms haptic=1x@t0.337" +
+                " collapse=${MotionVariant.V2_COLLAPSE_TOTAL_MS}ms@0.90"
             else "" 
         )
     }
 
     private fun endMorphPerf(label: String) {
         clearMorphCarry()
+        morphV2On = false
+        v2HapticDone = false
         setContentPinnedForMorph(false)
         gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
         // Size first, then release the drawn box - same message, one traversal after both. On a collapse the
@@ -5051,3 +5008,30 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
     override fun onDestroy() { invalidateContentCache(); stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }
+
+    /**
+     * "Precise Snap, Organic Breath" - the blueprint v2 he sent, written as one overlay per frame and as the
+     * FINAL word on the two sections it owns (round 34-35's writers scattered across three functions, which is
+     * half of why the style it served never rendered it): the text column rides the anchor pendulum
+     * (-40 arrival, +26 deep sink locked against the container's own lock, the -5 / +2 bounce pair, rigid at
+     * the hard lock), carries the pull-window stretch (his 1.15 / 0.95 over the first 247 ms) and the strike
+     * opacity (0 -> 1 over the first 130 ms); the icon rides the same pendulum at exactly half buoyancy, 40 ms
+     * later, NEVER stretched (his rigid-brand-asset rule); and exactly one haptic lands the instant the
+     * container hard-locks (t = 0.337 of the 950 ms clock - exactly once per expand, re-armed at the next begin).
+     */
+    private fun applyBlueprintV2(t: Float) {
+        gridContentSec?.let { sec ->
+            sec.translationY = MotionVariant.v2TextOffsetPx(t)
+            sec.scaleY = MotionVariant.v2StretchScaleY(t)
+            sec.scaleX = MotionVariant.v2StretchScaleX(t)
+            sec.alpha = if (t < 0.137f) t / 0.137f else 1f
+        }
+        gridIconSec?.let { icon ->
+            icon.translationY = MotionVariant.v2IconOffsetPx(t)
+        }
+        if (!v2HapticDone && MotionVariant.v2HapticAt(t)) {
+            islandView?.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+            v2HapticDone = true
+        }
+    }
+
