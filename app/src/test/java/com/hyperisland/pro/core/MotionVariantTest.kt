@@ -56,7 +56,7 @@ class MotionVariantTest {
         val names = (MotionVariant.MIN_STYLE..MotionVariant.MAX_STYLE).map { MotionVariant.styleName(it) }
         assertEquals("one name per style", names.size, names.toSet().size)
         assertTrue(names[0] == "balanced")
-        assertTrue(names.last().contains("aapka design"))
+        assertTrue(names.last().contains("aapka v2"))
         // ...and the Context-free name the service logs is the same string the radio promises him.
         assertEquals(MotionVariant.styleName(AppSettings.MORPH_STYLE_HYPERMORPH), "hypermorph (ChatGPT)")
         assertEquals(MotionVariant.styleName(AppSettings.MORPH_STYLE_BLUEPRINT), "precise snap, organic breath (aapka v2)")
@@ -477,11 +477,13 @@ class MotionVariantTest {
         }
         assertTrue("pendulum never bolts past its own anchors", lo >= -40.01f && hi <= 26.01f)
 
-        // Icon: exactly half, exactly 40 ms late, and before the delay EXACTLY at its seat - never early.
+        // Icon: exactly half, exactly 40 ms late. Before its delay it is FROZEN AT ITS OWN START
+        // (-20 = half of -40), like the text sits at -40 at t=0 - "starts 40 ms after the text" means
+        // its motion starts late, not that it teleports. And the deep sink is 0.5 x 26 = 13, not 6.5.
         val delay = 40f / MotionVariant.V2_EXPAND_TOTAL_MS
-        assertEquals(0f, MotionVariant.v2IconOffsetPx(0f), 1e-3f)
-        assertEquals(0f, MotionVariant.v2IconOffsetPx(delay / 2f), 1e-3f)
-        assertEquals(0.5f * 13f, MotionVariant.v2IconOffsetPx(0.40f + delay), 1e-3f)
+        assertEquals(-20f, MotionVariant.v2IconOffsetPx(0f), 1e-3f)
+        assertEquals(-20f, MotionVariant.v2IconOffsetPx(delay / 2f), 1e-3f)
+        assertEquals(13f, MotionVariant.v2IconOffsetPx(0.40f + delay), 1e-3f)
 
         // Stretch belongs to the pull window ONLY: his numbers at mid-pull, exactly off by 247 ms.
         assertEquals(1.15f, MotionVariant.v2StretchScaleY(0.13f), 1e-3f)
