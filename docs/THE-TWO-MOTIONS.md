@@ -630,7 +630,18 @@ morph - 1.00 was the restored baseline; the flight's true end sits in the @0.90 
 evidence line reads pre-restore values explicitly. No flash is possible: the collapse's island-sleep (+90 ms)
 and the overlay bed stand between the restore and any user-visible frame.
 
-## 19. What is still unproven
+## 19. Round 42: the sleeping squeeze wakes, and the collapse learns to settle
+
+Two of his catches, both log-verified. (1) `squeeze=0%` on every trace was a legacy field (service:550) whose
+only consumer (service:3838) was gated behind `morphCarryGrowing` - a style-era carrier v2 never enters - so
+it was always-on-paper, never-at-runtime. The v2 voice of it is new wiring on the CONTAINER width: a sin
+window on rawT (peak factor 4% at rawT 0.15 ~= real 142 ms), always inward, applied after the never-overshoot
+clamp. Predicted companion numbers: box @0.15 ~= 1024 x 448 (the 26 px height bounce with a -43 px width
+squeeze), @0.20 ~= 1030 wide, released back to 1067 by rawT 0.30 - the width speaks while the height arcs.
+(2) His collapse flatness log (ty=0 / sy=1.000 everywhere) was exact truth: nothing animated the content in
+that direction but alpha. The v2 collapse now sinks its content 1.00 -> 0.96 in scale, monotone (the coerced
+spring output cannot bounce back), crisp, restoring at end behind the +90 ms island-sleep already proven.
+## 20. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

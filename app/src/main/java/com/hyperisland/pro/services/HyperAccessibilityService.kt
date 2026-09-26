@@ -3324,6 +3324,16 @@ class HyperAccessibilityService : AccessibilityService() {
                         setMorphContentAlpha(t)
                     } else if (target == IslandStage.STAGE2_PING) {
                         setMorphContentAlpha(1f - (t / 0.45f).coerceIn(0f, 1f))
+                        // Round 42-2 (his log: "poore collapse mein ty=0 sy=1.000 sx=1.000 HAMESHA" - the content
+                        // never moved; only alpha and the box did): the settle-in sink. Monotone by construction -
+                        // the collapse spring's own output is coerced to [0,1], so even its 0.15% floor cannot
+                        // bounce the scale back: 1.00 -> 0.96 and stay put until the carry clears offscreen
+                        // (the island sleeps at +90 ms; the restore is provably invisible, b1441's fix).
+                        if (morphV2On && !morphTowardCard) {
+                            val sink = 1f - MotionVariant.V2_COLLAPSE_CONTENT_SINK * t.coerceIn(0f, 1f)
+                            gridContentSec?.scaleX = sink
+                            gridContentSec?.scaleY = sink
+                        }
                     } else if (target == IslandStage.STAGE1_IDLE) {
                         setMorphContentAlpha(1f - (t / 0.4f).coerceIn(0f, 1f))
                     }
@@ -3783,6 +3793,12 @@ class HyperAccessibilityService : AccessibilityService() {
         // frames, which is why "plain resize, normal content" was the exact history it drew. The haptic
         // window (0.335-0.345) sat between frames 2 and 3 in spring-time and the tick mostly never fired.
         // Rule (triage #32): the interpolator's output is a shape, not a clock; anything timed reads rawT.
+        // Round 42: the squeeze window - a pure TIME shape on rawT (never the spring's output, triage #32):
+        // sin(PI * rawT/0.30), 0 at both ends, peak 1.0 at rawT 0.15 ~= real 142 ms - one frame beside the
+        // height overshoot's ~140 ms apex, so the eye reads ONE settle, not two signals. Collapse gets 0.
+        val v2SqueezeNow = if (morphV2On && morphTowardCard && morphSqueeze > 0f) {
+            morphSqueeze * kotlin.math.sin(Math.PI * (rawT / 0.30f).coerceIn(0f, 1f)).toFloat()
+        } else 0f
         if (!v2GateLogged && morphPinH != null) {
             v2GateLogged = true
             TraceLog.morph("frame1 gate evidence: v2On=" + morphV2On + " toward=" + morphTowardCard + " pinH=true style=" + AppSettings.getMorphStyleName(morphVariant) + " t=" + "%.3f".format(t) + " rawT=" + "%.3f".format(rawT))
@@ -3795,8 +3811,8 @@ class HyperAccessibilityService : AccessibilityService() {
                 v2TraceSamples += "|@" + "%.2f".format(v2TraceMarks[v2TraceNextIdx]) + ": ty=" +
                     "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
                     " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f) +
-                    " box=" + (if (morphV2On) (if (morphTowardCard) w.coerceAtMost(morphToW) else w.coerceAtLeast(morphToW)) else w) +
-                    "x" + h +    // DRAWN numbers (post width-clamp): a log must read the render view, not the parameter view
+                    " box=" + (((if (morphV2On) (if (morphTowardCard) w.coerceAtMost(morphToW) else w.coerceAtLeast(morphToW)) else w) * (1f - v2SqueezeNow)).toInt()) +
+                    "x" + h + " sq=" + "%.3f".format(v2SqueezeNow) +    // DRAWN numbers (post clamp+squeeze): a log must read the render view
                     "@" + "%.0fms".format(rawT * morphDurationMs)
                 v2TraceNextIdx++
             }
@@ -3816,7 +3832,10 @@ class HyperAccessibilityService : AccessibilityService() {
         // (1.99% of 701 px of width-travel) past the final card - off-material by his own spec's anchor.
         // Height gets the full bounce (+6.3 px at ~176 ms, visibly "2-3 dp-ish", hard-caught by 320 ms);
         // the width is pinned to never pass its destination, whichever direction the shape is moving.
-        if (morphV2On) bw = if (morphTowardCard) bw.coerceAtMost(morphToW) else bw.coerceAtLeast(morphToW)
+        if (morphV2On) bw = (if (morphTowardCard) bw.coerceAtMost(morphToW) else bw.coerceAtLeast(morphToW))
+        // Round 42: and then the width speaks with the height's voice - squeeze pulls it inward while the
+        // height arcs, always inward (factor <= 1), so the never-overshoot rule is safe by construction.
+        bw = (bw * (1f - v2SqueezeNow)).toInt()
         var bh = h
         var br = r
         if (morphVariantOn) {
@@ -4155,6 +4174,10 @@ class HyperAccessibilityService : AccessibilityService() {
         v2TraceFrames = 0
         v2TraceNextIdx = 0
         v2TraceSamples = ""
+        // Round 42: the inherited `squeeze` voice (field service:550 = legacy carry-growing consumer at :3838,
+        // gated behind morphCarryGrowing, never armed for v2) is now armed by the blueprint itself - expand
+        // only. Collapse stays 0f: its content voice is the new monotone settle-in sink further below.
+        morphSqueeze = if (morphV2On && towardCard) MotionVariant.V2_CONTAINER_SQUEEZE else 0f
         if (!towardCard) TraceLog.morph("collapse begin evidence: contentSec alpha=" + "%.2f".format(gridContentSec?.alpha ?: -1f) + " tY=" + "%.1f".format(gridContentSec?.translationY ?: -999f) + " scaleY=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) + " layerType=" + (gridContentSec?.layerType ?: -9))
         morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
         morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH

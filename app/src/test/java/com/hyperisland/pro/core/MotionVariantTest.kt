@@ -461,6 +461,8 @@ class MotionVariantTest {
         assertEquals(950L, MotionVariant.V2_EXPAND_TOTAL_MS)
         assertEquals(380L, MotionVariant.V2_COLLAPSE_TOTAL_MS)
         assertEquals(0.62f, MotionVariant.V2_CONTAINER_DAMPING, 1e-9f) // b1440 evidence: 0.78 was masked -> band 0.60-0.65 at 0.62: +26.6 px on H
+        assertEquals(0.04f, MotionVariant.V2_CONTAINER_SQUEEZE, 1e-9f) // round 42: width voice, 3-5% band
+        assertEquals(0.04f, MotionVariant.V2_COLLAPSE_CONTENT_SINK, 1e-9f) // round 42-2: 1.00 -> 0.96 monotone
         assertEquals(0.90f, MotionVariant.V2_COLLAPSE_DAMPING, 1e-9f)
 
         // Text pendulum: reads his phase table back exactly at the anchors, rigid after the hard lock.

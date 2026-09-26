@@ -266,7 +266,14 @@ object MotionVariant {
      * and 40 ms late, the hard lock, and the one haptic are all read from here.
      */
     const val V2_EXPAND_TOTAL_MS = 950L
-    const val V2_COLLAPSE_TOTAL_MS = 380L
+    const val V2_COLLAPSE_TOTAL_MS = 380L   // "380 LOCK62- ??FIGMMo??" -> ~380 ms total, spring r=0.30 s
+    const val V2_CONTAINER_SQUEEZE = 0.04f   // round 42 (his order: enable+tune the sleeping squeeze, 3-5%
+    // sane band read at 4%): the WIDTH-side voice of the vertical bounce - the same volume-constant symmetry the
+    // text overlay already performs (sy up <-> sx down). Windowed on rawT, peak 0.15 ~= real 142 ms so the eye
+    // reads ONE settle beside the height apex at ~140 ms, fully released by rawT 0.30 (pre-lock).
+    const val V2_COLLAPSE_CONTENT_SINK = 0.04f   // round 42-2 (his: collapse has ZERO content motion - log truth:
+    // ty=0/sy=1.000 all the way): a monotone crisp settle-in, scale 1.00 -> 0.96, no overshoot, keyed to the
+    // collapse spring's own monotone output coerced - a shrink that LOOKS intentional instead of flat.
     const val V2_CONTAINER_RESPONSE = 0.22f  // ~4 px peak overshoot at 421 dp, fully locked by 0.337 t (320 ms)
     const val V2_CONTAINER_DAMPING = 0.62f   // b1440's logged evidence: 0.78's +6.3 px height (~2.5 dp) and +14 px
     // width were masked by the content's 35 px move at the same instant; his band (0.60-0.65) read at 0.62 =>
