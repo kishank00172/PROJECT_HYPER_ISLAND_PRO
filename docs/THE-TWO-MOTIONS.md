@@ -577,7 +577,29 @@ And the GPU layers are primed once per process right after the first build (`bui
 texture allocation never lands mid-animation again. The state resets inside hide are byte-for-byte the
 discard era's, so nothing that trusted them regresses.
 
-## 16. What is still unproven
+## 16. Round 39: the interpolator's output is a shape, not a clock
+
+The device said "plain resize, normal content" and the trace said "overlay firing" - both true, once. The log
+that exposed it was of my own making (the t=0.000 on the very line claiming the path was active): `it
+.animatedValue` returns the interpolated value, the morph's interpolator IS the spring, and the pendulum read
+that number AS IF it were time. Computed exactly: with response 0.22 s / damping 0.86 on the 950 ms clock,
+the spring output crosses 0.335 at real 39.6 ms (haptic window mostly never fires - it sits between frames 2
+and 3), 0.40 at 45.3 ms, 0.90 at 113.0 ms, 1.000 at about 179 ms. Which means ALL of the pendulum's authored
+anchors (-40, +26 sink, -5, +2, rigid) executed inside the animation's first ~7 frames of 57 - a 95 ms flicker
+at the far start that reads as "content did not animate". Nothing was missing; the clock auction it off.
+The mechanics of the same famous household: a curve's y-value is not its x-axis. The fix does not un-spring
+anything: `updateIslandLayoutForMorph` now carries TWO parameters - `t` (the shape, unchanged contract - what
+the drawn size follows) and `rawT` (the animator's uncurved fraction, computed at every callsite as
+currentPlayTime/duration) - and the overlay, the stretch, the samples and the haptic all consume rawT only.
+Classic styles are untouched: their windows, authored against the shape all along, keep reading `t`.
+
+The mess can now audit itself on-device: every V2 morph counts its tween frames (57 for 950 ms at 60 fps -
+a count near 1 would have proven the one-shot theory the auditor saved for last) and samples
+ty/sy/sx/alpha at the 20/40/60/80/100% marks of REAL time, printing them as `v2 trajectory: frames=N |@...`
+at the morph's end. On a collapse the fade's own alpha shows up in the same samples - directly answering
+"does the content interpolate through the collapse curve" with numbers at 76/152/228/304/380 ms.
+
+## 17. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

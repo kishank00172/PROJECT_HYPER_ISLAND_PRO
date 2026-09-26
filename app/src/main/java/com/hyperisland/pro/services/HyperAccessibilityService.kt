@@ -600,6 +600,10 @@ class HyperAccessibilityService : AccessibilityService() {
     private var v2HapticDone = false
     private var v2GateLogged = false
     private var v2OverlayLogged = false
+    private var v2TraceFrames = 0
+    private var v2TraceNextIdx = 0
+    private var v2TraceSamples = ""
+    private val v2TraceMarks = floatArrayOf(0.2f, 0.4f, 0.6f, 0.8f, 0.999f)
     /** Step-4 float loop: active only on a settled FULL card in a spring style; cancelled on any new morph. */
     private var morphStagger = 0f
     private var morphOpenFrame = 0f
@@ -1493,7 +1497,7 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = morphCurve // the spring styles need this; the old four get the same curve as before
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t), t)
+                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t), t, ((it.currentPlayTime.toFloat() / it.duration.toFloat()).coerceIn(0f, 1f)))
                 applyMorphCarry(t)
                 morphMeter?.frame(System.nanoTime(), t)
                 pillPreviewRoot?.alpha = t
@@ -3162,7 +3166,7 @@ class HyperAccessibilityService : AccessibilityService() {
             duration = 120L
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(startW, pingW, t), startH, startR, t)
+                updateIslandLayoutForMorph(lerpEven(startW, pingW, t), startH, startR, t, ((it.currentPlayTime.toFloat() / it.duration.toFloat()).coerceIn(0f, 1f)))
                 applyMorphCarry(0f) // the ping half still wears the pill's glyph and pill's icon size
                 morphMeter?.frame(System.nanoTime(), t)
             }
@@ -3177,7 +3181,7 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = morphCurve // same reason as setStageAnimated: and the pin is widened so it is NOT eaten
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t), t)
+                updateIslandLayoutForMorph(lerpEven(pingW, targetW, t), lerpEven(startH, targetH, t), lerp(startR, targetR, t), t, ((it.currentPlayTime.toFloat() / it.duration.toFloat()).coerceIn(0f, 1f)))
                 applyMorphCarry(0.5f + 0.5f * t) // the expand half finishes the travel the ping phase started
                 morphMeter?.frame(System.nanoTime(), t)
                 gridRoot?.visibility = View.VISIBLE
@@ -3282,7 +3286,7 @@ class HyperAccessibilityService : AccessibilityService() {
             interpolator = morphCurve
             addUpdateListener {
                 val t = it.animatedValue as Float
-                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t), t)
+                updateIslandLayoutForMorph(lerpEven(curW, targetW, t), lerpEven(curH, targetH, t), lerp(curR, targetR, t), t, ((it.currentPlayTime.toFloat() / it.duration.toFloat()).coerceIn(0f, 1f)))
                 applyMorphCarry(t)
                 morphMeter?.frame(System.nanoTime(), t)
                 // One owner of the pill's fade for every stage change, notification or not - and which way it
@@ -3770,7 +3774,30 @@ class HyperAccessibilityService : AccessibilityService() {
      * what made them vanish in b1411 - a spring's progress is 0.11 after one frame and 0.32 after two, so every
      * window keyed to it is sampled once, past its peak.
      */
-    private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float, t: Float) {
+    private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float, t: Float, rawT: Float = t) {
+        // TWO clocks, on purpose and at last named as two parameters: `t` is the shape (the interpolator's
+        // output - what the DRAWN size follows, including the spring's own pace), `rawT` is the TIME (the
+        // animator's uncurved fraction). Window-authored effects (the pendulum, the stretch, the haptic;
+        // anything whose table says "0-130 ms") consume rawT, because on b1437 `t` was the spring's output
+        // and the entire 0-0.9 pendulum executed inside the spring's first 113 ms of a 950 ms morph - 7
+        // frames, which is why "plain resize, normal content" was the exact history it drew. The haptic
+        // window (0.335-0.345) sat between frames 2 and 3 in spring-time and the tick mostly never fired.
+        // Rule (triage #32): the interpolator's output is a shape, not a clock; anything timed reads rawT.
+        if (!v2GateLogged && morphPinH != null) {
+            v2GateLogged = true
+            TraceLog.morph("frame1 gate evidence: v2On=" + morphV2On + " toward=" + morphTowardCard + " pinH=true style=" + AppSettings.getMorphStyleName(morphVariant) + " t=" + "%.3f".format(t) + " rawT=" + "%.3f".format(rawT))
+        }
+        if (morphV2On) {
+            // The auditor's demand: per-frame proof, not endpoint faith. Count every overlay-eligible frame,
+            // sample the section at 20/40/60/80/100% of the morph's real time, print the whole line at end.
+            v2TraceFrames++
+            while (v2TraceNextIdx < v2TraceMarks.size && rawT >= v2TraceMarks[v2TraceNextIdx]) {
+                v2TraceSamples += "|@" + "%.2f".format(v2TraceMarks[v2TraceNextIdx]) + ": ty=" +
+                    "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
+                    " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f)
+                v2TraceNextIdx++
+            }
+        }
         // Blueprint v2 FIRST THING: THE CLOCK IS THE ANIMATOR'S, not the carry's. applyMorphCarry receives
         // a legacy-scaled progress on the auto path (0.5 + 0.5 * t, kept for glyph hand-off semantics)
         // which on b1434 fed the pendulum a half-eaten timeline: the stretch window skipped, the haptic
@@ -3779,11 +3806,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // the overlay's clock is the same number for auto and manual morphs again: the fluid expand
         // listener and the generic path both hand this function their animator's untransformed t
         // (see the two updateIslandLayoutForMorph(...) calls inside the animators' update listeners).
-        if (!v2GateLogged && morphPinH != null) {
-            v2GateLogged = true
-            TraceLog.morph("frame1 gate evidence: v2On=" + morphV2On + " toward=" + morphTowardCard + " pinH=true style=" + AppSettings.getMorphStyleName(morphVariant) + " t=" + "%.3f".format(t))
-        }
-        if (morphV2On && morphTowardCard && morphPinH != null) applyBlueprintV2(t)
+        if (morphV2On && morphTowardCard && morphPinH != null) applyBlueprintV2(rawT)
         var bw = w
         var bh = h
         var br = r
@@ -4120,6 +4143,9 @@ class HyperAccessibilityService : AccessibilityService() {
         v2HapticDone = false
         v2GateLogged = false
         v2OverlayLogged = false
+        v2TraceFrames = 0
+        v2TraceNextIdx = 0
+        v2TraceSamples = ""
         if (!towardCard) TraceLog.morph("collapse begin evidence: contentSec alpha=" + "%.2f".format(gridContentSec?.alpha ?: -1f) + " tY=" + "%.1f".format(gridContentSec?.translationY ?: -999f) + " scaleY=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) + " layerType=" + (gridContentSec?.layerType ?: -9))
         morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
         morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH
@@ -4272,6 +4298,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun endMorphPerf(label: String) {
+        if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
         clearMorphCarry()
         morphV2On = false
         v2HapticDone = false
