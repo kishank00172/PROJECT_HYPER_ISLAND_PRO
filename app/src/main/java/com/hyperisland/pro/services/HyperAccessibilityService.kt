@@ -3170,7 +3170,7 @@ class HyperAccessibilityService : AccessibilityService() {
         //  - no gridRoot alpha ramp (the outline clips the content; a fade just looked like blur)
         //  - no islandView scaleY squash (that scaled the TEXT, which is what read as jitter)
         val expand = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = morphWindowFor(if (AppSettings.getMorphStyle(this) == AppSettings.MORPH_STYLE_BLUEPRINT)
+            duration = morphWindowFor(if (AppSettings.getMorphStyle(this@HyperAccessibilityService) == AppSettings.MORPH_STYLE_BLUEPRINT)
                 MotionVariant.V2_EXPAND_TOTAL_MS else 360L)
             interpolator = morphCurve // same reason as setStageAnimated: and the pin is widened so it is NOT eaten
             addUpdateListener {
@@ -3263,7 +3263,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val targetR = dp(getTargetRadius(target)).toFloat()
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = morphWindowFor(
-                if (AppSettings.getMorphStyle(this) == AppSettings.MORPH_STYLE_BLUEPRINT) {
+                if (AppSettings.getMorphStyle(this@HyperAccessibilityService) == AppSettings.MORPH_STYLE_BLUEPRINT) {
                     // his clock, not the Lab's: 950 ms in, 380 ms back - constants are the spec rn
                     if (target == IslandStage.STAGE3_FULL) MotionVariant.V2_EXPAND_TOTAL_MS else MotionVariant.V2_COLLAPSE_TOTAL_MS
                 } else when (target) { IslandStage.STAGE1_IDLE -> 320L; IslandStage.STAGE2_PING -> 340L; else -> 380L })
