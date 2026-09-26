@@ -598,6 +598,8 @@ class HyperAccessibilityService : AccessibilityService() {
     /** The pull lives on expands of the spring styles only; set per morph, read by the tween and the carry. */
     private var morphV2On = false
     private var v2HapticDone = false
+    private var v2GateLogged = false
+    private var v2OverlayLogged = false
     /** Step-4 float loop: active only on a settled FULL card in a spring style; cancelled on any new morph. */
     private var morphStagger = 0f
     private var morphOpenFrame = 0f
@@ -1011,7 +1013,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun postShowIsland() = mainHandler.post { showIslandInternal() }
     private fun postHideIsland() = mainHandler.post { hideIslandInternal() }
-    private fun postUpdateIsland() = mainHandler.post { if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal() else updateAllToCurrentState() }
+    private fun postUpdateIsland() = mainHandler.post { ensureIslandAwake(); updateAllToCurrentState() }
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
     /** Remember which app should take the foreground after a quick action, so the card comes down when it does. */
     private fun markActionTakeoverWait(pkg: String?) {
@@ -1157,7 +1159,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postPreviewReplyAnimation(replySecond: Boolean) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
-            if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
+            ensureIslandAwake()
             if (isReplyMode) {
                 exitReplyMode()
                 mainHandler.postDelayed({ runReplyAnimationPreview(replySecond) }, 720)
@@ -1223,7 +1225,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postPreviewPillIcon(targetPackageName: String, count: Int) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
-            if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
+            ensureIslandAwake()
             val app = getAppName(targetPackageName)
             pillChatCount = count.coerceIn(1, 99)
             val model = NotificationModel(
@@ -1249,7 +1251,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postPreviewShadePull() {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
-            if (this@HyperAccessibilityService.visualRoot == null) showIslandInternal()
+            ensureIslandAwake()
             pillChatCount = 7
             pillPreviewIcon?.setImageDrawable(loadGenericPillGlyph("org.telegram.messenger"))
             pillPreviewCount?.text = "7"
@@ -3184,7 +3186,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 // Except their own alpha now has exactly one writer for blueprint v2 morphs: the shape-fade's
                 // gate below was a second writer on gridContentSec.alpha and it overrode the v2 strike ramp
                 // on every frame of the auto path (D2 in the code-truth audit he asked for).
-                if (!morphOpacityFollowsShape && !morphV2On) setMorphContentAlpha(t)
+                if (!morphOpacityFollowsShape && !(morphV2On && morphTowardCard)) setMorphContentAlpha(t)
             }
         }
         val set = AnimatorSet().apply {
@@ -3309,9 +3311,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 // pill in the last frames. Both rules were measured on hardware.
                 // Both ramps go through the one owner: with the icon riding, the fade has to land on the content
                 // views and not on the row, and this path is not allowed to disagree about that.
-                // Blueprint v2's own 0-137 strike is that same one owner while V2 is active; classic styles
-                // see no change (the gate's only predicate is morphV2On).
-                if (!morphOpacityFollowsShape && !morphV2On) {
+                // Blueprint v2's own 0-137 strike is that same one owner while V2 is active AND expanding;
+                // on a COLLAPSE the fade below is alpha's only owner - round 37 gated by style instead of by
+                // direction and left collapsed text frozen visible on the shrinking pill (his "ghost/masked
+                // content"). Classic styles see no change (the added predicates are the v2 gate only).
+                if (!morphOpacityFollowsShape && !(morphV2On && morphTowardCard)) {
                     if (target == IslandStage.STAGE3_FULL) {
                         setMorphContentAlpha(t)
                     } else if (target == IslandStage.STAGE2_PING) {
@@ -3583,6 +3587,7 @@ class HyperAccessibilityService : AccessibilityService() {
      * container hard-locks (t = 0.337 of the 950 ms clock - exactly once per expand, re-armed at the next begin).
      */
     private fun applyBlueprintV2(t: Float) {
+        if (!v2OverlayLogged) { v2OverlayLogged = true; TraceLog.morph("v2 overlay firing: pendulum path ACTIVE, first t=" + "%.3f".format(t)) }
         gridContentSec?.let { sec ->
             sec.translationY = MotionVariant.v2TextOffsetPx(t)
             sec.scaleY = MotionVariant.v2StretchScaleY(t)
@@ -3774,6 +3779,10 @@ class HyperAccessibilityService : AccessibilityService() {
         // the overlay's clock is the same number for auto and manual morphs again: the fluid expand
         // listener and the generic path both hand this function their animator's untransformed t
         // (see the two updateIslandLayoutForMorph(...) calls inside the animators' update listeners).
+        if (!v2GateLogged && morphPinH != null) {
+            v2GateLogged = true
+            TraceLog.morph("frame1 gate evidence: v2On=" + morphV2On + " toward=" + morphTowardCard + " pinH=true style=" + AppSettings.getMorphStyleName(morphVariant) + " t=" + "%.3f".format(t))
+        }
         if (morphV2On && morphTowardCard && morphPinH != null) applyBlueprintV2(t)
         var bw = w
         var bh = h
@@ -4109,6 +4118,9 @@ class HyperAccessibilityService : AccessibilityService() {
         // "kuchh effect nahi hai" on b1430 was reading the truth twice over.
         morphV2On = morphVariant == AppSettings.MORPH_STYLE_BLUEPRINT
         v2HapticDone = false
+        v2GateLogged = false
+        v2OverlayLogged = false
+        if (!towardCard) TraceLog.morph("collapse begin evidence: contentSec alpha=" + "%.2f".format(gridContentSec?.alpha ?: -1f) + " tY=" + "%.1f".format(gridContentSec?.translationY ?: -999f) + " scaleY=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) + " layerType=" + (gridContentSec?.layerType ?: -9))
         morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
         morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH
         morphVariantOn = morphLiquidOn || morphHyperOn
@@ -4264,6 +4276,7 @@ class HyperAccessibilityService : AccessibilityService() {
         morphV2On = false
         v2HapticDone = false
         setContentPinnedForMorph(false)
+        TraceLog.morph("morph end evidence: contentSec alpha=" + "%.2f".format(gridContentSec?.alpha ?: -1f) + " tY=" + "%.1f".format(gridContentSec?.translationY ?: -999f) + " scaleY=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) + " layerType=" + (gridContentSec?.layerType ?: -9) + " (0=NONE)")
         gridRoot?.setLayerType(View.LAYER_TYPE_NONE, null)
         // Size first, then release the drawn box - same message, one traversal after both. On a collapse the
         // pinned view is still card-sized at this instant, so clearing the frame before the resize would
@@ -4330,6 +4343,14 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun showIslandInternal() {
         invalidateContentCache() // the live views are new, so what they hold is unknown until the first update
         hideIslandInternal()
+        if (visualRoot != null && islandView != null) {
+            // WARM WAKE: the window survived the hide - wake it instead of building a twin of it.
+            setIslandTouchable(true)
+            visualRoot?.visibility = View.VISIBLE
+            updateAllToCurrentState()
+            TraceLog.line("ISLAND", "wake: showIsland warm path - no build run")
+            return
+        }
         val h = dp(AppSettings.getIslandHeightDp(this)); val w = dp(AppSettings.getIslandWidthDp(this)); val r = dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
         val rateVote = refreshRateVote()
         // Seed the frame budget from the vote, so a 120 Hz panel is not judged on an assumed 16 ms frame.
@@ -4763,6 +4784,7 @@ class HyperAccessibilityService : AccessibilityService() {
         frameLayoutWatcher = layoutWatcher
         islandView?.viewTreeObserver?.addOnGlobalLayoutListener(layoutWatcher)
         try { windowManager?.addView(visualRoot, visualParams) } catch (_: Exception) { hideIslandInternal() }
+        prewarmIslandLayersOnce()
     }
 
     private fun updateOutsideWatcherForState() {
@@ -4792,7 +4814,59 @@ class HyperAccessibilityService : AccessibilityService() {
         forceRegionUpdate()
     }
     fun updateAllToCurrentState() { val w = dp(getTargetWidth(currentStage)); val h = dp(getTargetHeight(currentStage)); val r = dp(getTargetRadius(currentStage)).toFloat(); updateIslandLayout(w, h, r) }
-    private fun hideIslandInternal() { detachFrameWatchers(); endRingSwap("hide"); morphAnimator?.cancel(); ghostAnimator?.cancel(); autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher(); try { windowManager?.removeViewImmediate(visualRoot!!) } catch (_: Exception) {}; visualRoot = null; currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost() }
+    /**
+     * "Sleep, don't discard" (Problem C of the combined audit): the island used to be DETACHED on every hide,
+     * so every wake re-inflated the whole view tree on the very path the first expansion runs - the cold-start
+     * that reads snappy. Now it sleeps: the view stays attached (invisible to everything by GONE, unreachable
+     * to the user's finger by FLAG_NOT_TOUCHABLE - printed in the log as the audit's "region recompute"),
+     * and its build cost is paid exactly once in the process's lifetime. The state resets below are unchanged
+     * from the discard days, deliberately: sleeping shares the discard's own state contract, only the window
+     * survives.
+     */
+    private fun hideIslandInternal() {
+        detachFrameWatchers(); endRingSwap("hide"); morphAnimator?.cancel(); ghostAnimator?.cancel()
+        autoCollapseRunnable?.let { mainHandler.removeCallbacks(it) }; removeOutsideWatcher()
+        setIslandTouchable(false)
+        visualRoot?.visibility = View.GONE
+        currentStage = IslandStage.STAGE1_IDLE; isReplyMode = false; isGhostReplyMode = false; replyGhostView?.clearGhost()
+        TraceLog.line("ISLAND", "sleep: view retained (window untouchable, see flags line above)")
+    }
+
+    /** The audit's "zero-area touch region while hidden": one flag on the whole window, and the log prints the
+     *  bits so the claim is verified off the device (0x10 set = the window cannot take a touch at all). */
+    private fun setIslandTouchable(on: Boolean) {
+        val root = visualRoot ?: return
+        val params = visualParams ?: return
+        val mask = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        val want = if (on) params.flags and mask.inv() else params.flags or mask
+        if (want != params.flags) {
+            params.flags = want
+            try { windowManager?.updateViewLayout(root, params) } catch (_: Exception) {}
+        }
+        TraceLog.line("ISLAND", "touchable=$on flags=0x" + params.flags.toString(16))
+    }
+
+    /** Every site that used to say "no window? build" now says "wake the island" - with a retained window the
+     *  null check alone can leave a sleeper GONE while its content updates into the dark. */
+    private fun ensureIslandAwake() {
+        if (visualRoot == null || islandView == null) { showIslandInternal(); return }
+        setIslandTouchable(true)
+        visualRoot?.visibility = View.VISIBLE
+        TraceLog.line("ISLAND", "wake: warm path - retained view")
+    }
+
+    /** Problem C.3: once per PROCESS, prime the GPU layers at a calm moment (right after the island's first
+     *  build, pill-state), so the first-ever expansion doesn't pay texture allocation mid-animation. */
+    private var islandPrewarmed = false
+    private fun prewarmIslandLayersOnce() {
+        if (islandPrewarmed) return
+        islandPrewarmed = true
+        visualRoot?.post {
+            gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null); gridRoot?.buildLayer()
+            gridContentSec?.setLayerType(View.LAYER_TYPE_HARDWARE, null); gridContentSec?.buildLayer()
+            TraceLog.line("MORPH", "prewarm: GPU layers primed once for this process")
+        }
+    }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {

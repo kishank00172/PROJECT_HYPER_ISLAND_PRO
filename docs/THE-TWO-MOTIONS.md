@@ -548,7 +548,36 @@ quietly re-wrote the one property the blueprint declares its own (the text secti
 is the v2 gate. And it is on record now: a clock transformed for one consumer is not a clock, it is half
 an effect; reusing it for a second is how two mathematically correct effects ship nothing.
 
-## 15. What is still unproven
+## 15. Round 38: prove it on the device (A), an over-gate walked backwards (B), and the island learns to sleep (C)
+
+The combined audit's contract was explicit this time: runtime values, not static assurance. Three changes.
+
+**A - instrumentation, honest uncertainty.** Statically, post-D1 both paths should fire: the tween's gate gets
+its three values from begin, before any frame. That fact is now printed instead of asserted: the tween's first
+pinned frame of every morph logs `frame1 gate evidence: v2On=..., toward=..., pinH=true, style=...`, and the
+overlay's own first execution logs `v2 overlay firing`. If the device prints the first without the second, the
+gate is the bug and its three values say which arm closed; if it prints both and nothing is visible, the next
+variable is his device, and the trace line's t value brackets where it happens. Either way the next answer
+arrives with numbers attached, which is the entire discipline the round was ordered under.
+
+**B - the ghost was my own gate.** Round 37's D2 was written `&& !morphV2On` - by style, not by direction - so
+on any blueprint COLLAPSE the shape-fade stepped off and the text's alpha had no writer at all: frozen visible
+at 1.0 while the pill shrank underneath, which is precisely "ghost/masked content during collapse". The gate
+is now by direction (`!(morphV2On && morphTowardCard)`): the blueprint owns alpha on expand, the fade owns it
+home. Begin and end of every morph now log the content section's alpha/scale/translationY/layerType, so a
+repeat is a one-line read. The stale-hardware-layer fear in their B.2 is N/A: Android re-renders hardware
+layers on every property invalidation by design.
+
+**C - the island sleeps instead of dying.** Every hide used to detach the whole window (`removeViewImmediate`
++ null), so every wake paid full inflation on the expansion's first frames - the cold-start that read "snappy".
+Now `hideIslandInternal` GONEs the view, flags the window NOT_TOUCHABLE (0x10 logged as the audit's required
+region proof), and keeps the window attached for the process's life; `ensureIslandAwake()` replaces the four
+"null check means not-visible" guards, which were quietly wrong the moment non-null stopped meaning visible.
+And the GPU layers are primed once per process right after the first build (`buildLayer()` at pill-state) so
+texture allocation never lands mid-animation again. The state resets inside hide are byte-for-byte the
+discard era's, so nothing that trusted them regresses.
+
+## 16. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks
