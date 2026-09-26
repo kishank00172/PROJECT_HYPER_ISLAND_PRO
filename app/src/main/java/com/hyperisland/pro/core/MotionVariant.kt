@@ -268,7 +268,10 @@ object MotionVariant {
     const val V2_EXPAND_TOTAL_MS = 950L
     const val V2_COLLAPSE_TOTAL_MS = 380L
     const val V2_CONTAINER_RESPONSE = 0.22f  // ~4 px peak overshoot at 421 dp, fully locked by 0.337 t (320 ms)
-    const val V2_CONTAINER_DAMPING = 0.86f   // his table pins "2-3 px"; his constants row said 0.78 (~8 px) - table wins, one const away
+    const val V2_CONTAINER_DAMPING = 0.78f   // his binding order over the constant-vs-table clash: 0.78 gives
+    // ~2% of the travel = +6.6 px on height (~2.5 dp, VISIBLE - the "2-3 px overshoot" he keeps quoting),
+    // peaked at ~176 ms and caught before his 320 ms lock. (The 0.86 alternative was - meri - table-reader's
+    // pick: 0.5% = 0.8dp = invisible, and "container shows no overshoot feel" was its log exactly.)
     const val V2_COLLAPSE_RESPONSE = 0.30f
     const val V2_COLLAPSE_DAMPING = 0.90f    // "crisp, no bounce"; settles and pins inside the 380 ms clock
     const val V2_STRETCH_END = 0.26f         // stretch owns ONLY the pull window (0 - 247 ms), fading out after

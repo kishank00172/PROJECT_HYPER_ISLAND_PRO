@@ -3794,7 +3794,9 @@ class HyperAccessibilityService : AccessibilityService() {
             while (v2TraceNextIdx < v2TraceMarks.size && rawT >= v2TraceMarks[v2TraceNextIdx]) {
                 v2TraceSamples += "|@" + "%.2f".format(v2TraceMarks[v2TraceNextIdx]) + ": ty=" +
                     "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
-                    " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f)
+                    " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f) +
+                    " box=" + bw + "x" + bh +
+                    "@" + "%.0fms".format(rawT * morphDurationMs)
                 v2TraceNextIdx++
             }
         }
@@ -3808,6 +3810,12 @@ class HyperAccessibilityService : AccessibilityService() {
         // (see the two updateIslandLayoutForMorph(...) calls inside the animators' update listeners).
         if (morphV2On && morphTowardCard && morphPinH != null) applyBlueprintV2(rawT)
         var bw = w
+        // The container's own axis rule for v2: the spring may only overshoot DOWNWARD. `0.78` spends its
+        // whole overshoot on the lerp's shape, and if the width were left free it would draw +14 px
+        // (1.99% of 701 px of width-travel) past the final card - off-material by his own spec's anchor.
+        // Height gets the full bounce (+6.3 px at ~176 ms, visibly "2-3 dp-ish", hard-caught by 320 ms);
+        // the width is pinned to never pass its destination, whichever direction the shape is moving.
+        if (morphV2On) bw = if (morphTowardCard) bw.coerceAtMost(morphToW) else bw.coerceAtLeast(morphToW)
         var bh = h
         var br = r
         if (morphVariantOn) {
@@ -4272,7 +4280,7 @@ class HyperAccessibilityService : AccessibilityService() {
             "start $label dur=${durationMs}ms style=${AppSettings.getMorphStyleName(this)} " +
             "toward=${if (morphTowardCard) "card" else "pill"} " +
                 "carry=${if (morphCarryOn) "on" else "off"} scale=${if (morphScaleOn) "%.2f".format(morphScaleFrom) else "off"} " +
-                "swap=${(morphSwapAt * 100).toInt()}% ride=classic(b1378) " +
+                "swap=${(morphSwapAt * 100).toInt()}% ride=" + (if (morphV2On) "v2(blueprint,0.78) " else "classic(b1378) ") +
                 "glass=${if (morphGlassOn) "on defocus=cut" else "off"} " +
                 "entry=${if (morphEntryDrop) "drop" else "centred"} drop=${AppSettings.getMorphContentDropDp(this)}dp " +
                 "stagger=${(morphStagger * 100).toInt()}% goneBy=${(morphOutBy * 100).toInt()}% " +

@@ -599,7 +599,24 @@ ty/sy/sx/alpha at the 20/40/60/80/100% marks of REAL time, printing them as `v2 
 at the morph's end. On a collapse the fade's own alpha shows up in the same samples - directly answering
 "does the content interpolate through the collapse curve" with numbers at 76/152/228/304/380 ms.
 
-## 17. What is still unproven
+## 17. Round 40: a log label is not a curve - but the feel it accused was real
+
+The auditor found `ride=classic(b1378)` printed on every morph line and reasoned, sensibly, that the container
+ran a legacy curve while the content pendulum ran a new one. Is stringi illumination so Go string-check run:
+The label is a STATIC STRING in the beginMorphPerf trace print (service:4275 area) - it names the pill-glyph
+carry's b1378 lineage, it can never change per morph because it is a literal. The container's actual curve
+lives in the interpolator `morphCurve` (service:361) gated to spring for every spring style including v2, and
+its values come from MotionVariant.responseFor/dampingFor per morph, with the v2 override branches. BUT - his
+marrow was closer than his label: the container's damping showed 0.86, MY pick from the table-versus-constants
+clash in the original spec sheet, and 0.86 costs 0.5% of the travel (~0.8 dp of overshoot, sub-visible). So
+"container shows no overshoot feel" was the exact output of a choice of mine, faithfully printed, and his
+binding order landed instead: 0.78 - 1.99% of travel, +6.3 px on height (~2.5 dp, the visible "2-3 px" he has
+always pictured, peaked at real 176 ms, hard-caught before his 320 ms lock). The width is clamped at its
+destination axis for v2 morphs (uncurbed it would dip off-card by 14 px, ghost-persist territory); height
+keeps the bounce. The ride-label in the begin trace is variantized too, seeing the truth is now one grep away
+instead of one theory.
+
+## 18. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks
