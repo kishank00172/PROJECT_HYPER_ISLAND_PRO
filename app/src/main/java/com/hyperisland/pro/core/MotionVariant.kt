@@ -271,6 +271,14 @@ object MotionVariant {
     // envelope sin peak at the window's centre = 170 ms; maxInset = 5% of the current drawn width,
     // "previously tried 9% - too strong"). Top edge full width always; it REPLACES the uniform squeeze
     // for the v2 expand (same slot, better silhouette - no double-narrowing).
+    // Round 45 (his screenshot evidence - torn-paper silhouette): DISABLED at runtime. Autopsy: the
+    // round-43 path builder distributed its 20 profile steps across the straight band (h - 2*radius);
+    // round 44 then made v2's radius the capsule rule (h/2), shrinking that band to ~0 px - 21 profile
+    // points collapsed into a 1-px strip and the corner quads swept from mid-height, which rasterises
+    // as exactly the jagged, asymmetric edge he photographed. Two rounds, never geometrically co-tested -
+    // triage entry recorded. The math stays pinned + unit-tested; the silhouette path gains a degenerate-
+    // band guard; re-enabling gets its own round with device screenshot proof, not a drive-by.
+    const val V2_NECK_ENABLED = false
     const val V2_NECK_MAX_INSET = 0.05f
     const val V2_NECK_START_MS = 40L
     const val V2_NECK_END_MS = 300L

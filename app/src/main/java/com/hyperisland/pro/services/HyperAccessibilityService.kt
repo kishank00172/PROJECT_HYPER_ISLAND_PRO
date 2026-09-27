@@ -3810,7 +3810,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // 40-300 ms on the raw clock, sin envelope peaking at the centre = 170 ms, 5% of the CURRENT drawn
         // width ("9% was too strong" - his number). Collapse gets 0, classic styles get 0.
         val v2SqueezeNow = 0f   // retired runtime path; the constant stays pinned in MotionVariant
-        val v2NeckNow = if (morphV2On && morphTowardCard) {
+        val v2NeckNow = if (MotionVariant.V2_NECK_ENABLED && morphV2On && morphTowardCard) {
             val ms = rawT * morphDurationMs
             if (ms >= MotionVariant.V2_NECK_START_MS && ms <= MotionVariant.V2_NECK_END_MS) {
                 val span = (MotionVariant.V2_NECK_END_MS - MotionVariant.V2_NECK_START_MS).toFloat()
@@ -4622,12 +4622,18 @@ class HyperAccessibilityService : AccessibilityService() {
             private fun fillMorphSilhouette(f: MorphFrame, out: Path) {
                 val l = f.left.toFloat(); val t = f.top.toFloat(); val r = f.right.toFloat(); val b = f.bottom.toFloat()
                 out.reset()
-                if (f.neckPx <= 0.5f) {
-                    out.addRoundRect(RectF(l, t, r, b), morphRadius, morphRadius, Path.Direction.CW)
+                val hDeg = (b - t).coerceAtLeast(1f)
+                val radDeg = morphRadius.coerceAtMost(hDeg / 2f)
+                // Round 45 guard (the b1444 catastrophe): with the capsule rule the straight band
+                // (h - 2*radius) collapses to ~0; stepping a 20-point profile into < 12 px stacks the
+                // whole waist into a degenerate tooth row - the torn-paper edge in his screenshot.
+                // If the band cannot carry a profile, the honest shape is the plain capsule.
+                if (f.neckPx <= 0.5f || hDeg - 2f * radDeg < 12f) {
+                    out.addRoundRect(RectF(l, t, r, b), radDeg, radDeg, Path.Direction.CW)
                     return
                 }
-                val h = (b - t).coerceAtLeast(1f)
-                val rad = morphRadius.coerceAtMost(h / 2f)
+                val h = hDeg
+                val rad = radDeg
                 val steps = 20
                 out.moveTo(l + rad, t)
                 // top edge (full width - the icon edge never insets) and the top-right corner

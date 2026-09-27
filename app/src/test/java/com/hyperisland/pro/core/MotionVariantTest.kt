@@ -464,6 +464,7 @@ class MotionVariantTest {
         assertEquals(0.04f, MotionVariant.V2_CONTAINER_SQUEEZE, 1e-9f) // round 42: width voice, 3-5% band
         assertEquals(0.08f, MotionVariant.V2_COLLAPSE_CONTENT_SINK, 1e-9f) // round 42-2: round 43: 1.00 -> 0.92 on the container's own curve, clip-only (no fade)
         assertEquals(0.05f, MotionVariant.V2_NECK_MAX_INSET, 1e-9f)       // round 43-1: his 5% (9% was too strong)
+        assertEquals(false, MotionVariant.V2_NECK_ENABLED)   // round 45: torn-paper silhouette -> off until its own proof round
         assertEquals(40L, MotionVariant.V2_NECK_START_MS)
         assertEquals(300L, MotionVariant.V2_NECK_END_MS)
         assertEquals(220L, MotionVariant.V2_GULP_MS)                      // round 43-3: post-lock confirm gulp

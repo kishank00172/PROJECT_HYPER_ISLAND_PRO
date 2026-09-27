@@ -668,7 +668,19 @@ STAGE2_PING, but a manual tap-outside collapse targets STAGE1_IDLE - the pulse n
 path in b1443's recording. Gate widened to every non-expand stage; the pulse now logs its interpolated
 mid-keyframe values (`v2 gulp proof: f=0.35 sy=0.86 sx=1.08 ... f=0.65 sy=1.04 sx=0.97`) so the
 volume-constant inverse pairing is a printed number, not a claim.
-## 22. What is still unproven
+## 22. Round 45: the torn-paper autopsy, the boring-safe restore
+
+His screenshot was right and the shape was genuinely broken: the round-43 neck path had distributed its
+profile steps across the silhouette's straight band (h - 2*radius), and the round-44 capsule rule then
+collapsed that band to ~0 px - 21 profile points in a 1-pixel strip plus corner quads sweeping from
+mid-height: a torn, asymmetric edge by construction. Two separately-correct rounds, never geometrically
+co-combined. His priority order is respected verbatim: the neck is OFF at runtime (V2_NECK_ENABLED=false,
+pinned), the silhouette is the plain per-frame capsule rounded rect (expand AND collapse now share the
+capsule rule), and the path code keeps its unit tests plus gains a degenerate-band guard for its eventual
+dedicated proof round. The collapse hard-cut (issue 1 of round 44) was unrelated code - the neck gate is
+expand-only (morphTowardCard), so collapse never entered the polyline branch; its fix was the radius rule
+itself, and the fresh rad=/L= trajectory fields verify on device.
+## 23. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks
