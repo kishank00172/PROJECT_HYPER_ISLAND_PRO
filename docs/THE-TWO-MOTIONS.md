@@ -654,7 +654,21 @@ container's own curve `t` (no separate timeline), monotone, restoring at the loc
 (3) After the hard lock fires the 220 ms confirm gulp: sy 1.0->0.86->1.04->1.0, sx 1.0->1.08->0.97->1.0,
 center origin, on islandView + pillPreviewRoot together (shell and icon gulp as one body), volume-constant
 at every keyframe pair. The collapse itself stays crisp: the gulp begins in the same callback that ends it.
-## 21. What is still unproven
+## 21. Round 44: capsule radius in lockstep, and the gulp that actually fires manually
+
+His two recording-verified issues, both traced to concrete wiring. (1) "collapse reads like a sharp
+rectangle" - the radius lerp existed per frame (generic listener, `lerp(curR, targetR, t)`), but the CAPSULE
+rule (`tensionRadius = min(h/2, asked)`) was gated by `morphVariantOn = liquid || hyper`, and v2 is neither:
+the v2 collapse radiused with the raw lerped dp, a small round at mid-collapse heights that reads square
+until the very small final size. Fix: v2 always takes the capsule rule, per frame, in lockstep with h - the
+trajectory sampler now prints the DRAWN radius (`rad=`) and the DRAWN left edge in the pinned surface (`L=`)
+so "left-anchored vs center-anchored" is a number, not a debate (centered math: L must grow as the width
+shrinks; a left-anchored bug would print L=0 all the way). (2) The gulp's round-43 gate only covered
+STAGE2_PING, but a manual tap-outside collapse targets STAGE1_IDLE - the pulse never fired on the manual
+path in b1443's recording. Gate widened to every non-expand stage; the pulse now logs its interpolated
+mid-keyframe values (`v2 gulp proof: f=0.35 sy=0.86 sx=1.08 ... f=0.65 sy=1.04 sx=0.97`) so the
+volume-constant inverse pairing is a printed number, not a claim.
+## 22. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

@@ -3359,7 +3359,9 @@ class HyperAccessibilityService : AccessibilityService() {
                 override fun onAnimationEnd(a: Animator) {
                     // Round 43-3: capture BEFORE endMorphPerf resets the v2 flags - the gulp fires exactly
                     // at the hard lock (this end is the lock), separate from the crisp collapse curve.
-                    val v2CollapseLocked = morphV2On && target == IslandStage.STAGE2_PING
+                    // Round 44 fix (his recording: manual tap-outside collapse targets STAGE1_IDLE - the
+                    // round-43 gate only covered STAGE2_PING, so the pulse never fired on the manual path):
+                    val v2CollapseLocked = morphV2On && target != IslandStage.STAGE3_FULL
                     endMorphPerf("stage->$target")
                     if (v2CollapseLocked) runV2GulpPulse()
                     gridRoot?.translationY = 0f
@@ -3828,7 +3830,14 @@ class HyperAccessibilityService : AccessibilityService() {
                 v2TraceSamples += "|@" + "%.2f".format(v2TraceMarks[v2TraceNextIdx]) + ": ty=" +
                     "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
                     " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f) +
-                    " box=" + (((if (morphV2On) (if (morphTowardCard) w.coerceAtMost(morphToW) else w.coerceAtLeast(morphToW)) else w) * (1f - v2SqueezeNow)).toInt()) +
+                    " box=" + run {
+                        // Round 44: the numbers his frames demanded - the DRAWN radius (lockstep rule) and the
+                        // DRAWN left edge inside the pinned surface. If a collapse ever anchors on the left,
+                        // L stays 0 while the width shrinks; centered math must show L growing with the shrink.
+                        val dw = (((if (morphV2On) (if (morphTowardCard) w.coerceAtMost(morphToW) else w.coerceAtLeast(morphToW)) else w) * (1f - v2SqueezeNow)).toInt())
+                        val radNow = (if (morphV2On || morphVariantOn) MotionVariant.tensionRadius(h.toFloat(), r) else r).toInt()
+                        dw.toString() + " L=" + (if (morphPinH != null) (morphPinW() - dw) / 2 else 0) + " rad=" + radNow
+                    } +
                     "x" + h + " neck=" + "%.1f".format(v2NeckNow) +    // DRAWN numbers (post clamp; neck is a silhouette, not a width): render view only
                     "@" + "%.0fms".format(rawT * morphDurationMs)
                 v2TraceNextIdx++
@@ -3855,6 +3864,12 @@ class HyperAccessibilityService : AccessibilityService() {
         bw = (bw * (1f - v2SqueezeNow)).toInt()
         var bh = h
         var br = r
+        // Round 44 (his Issue 1, the geometric cause): v2 never saw the capsule rule - morphVariantOn is
+        // gated to liquid/hyper - so the collapse radius was the raw lerped dp, which at mid-shrink heights
+        // reads as a rectangle that only goes round at the small final size. The capsule rule (radius =
+        // height/2, capped at the asked value) is "rounded pill at EVERY size", computed in lockstep with
+        // the per-frame h, every frame - exactly his demanded interpolation.
+        if (morphV2On) br = MotionVariant.tensionRadius(bh.toFloat(), r)
         if (morphVariantOn) {
             // Both designs redraw the box each frame and both do it in phases; this is the only place the drawn
             // size is decided, so the phases go here rather than into the six animators that call it. The two
@@ -4375,10 +4390,14 @@ class HyperAccessibilityService : AccessibilityService() {
         v2GulpAnim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = MotionVariant.V2_GULP_MS
             interpolator = android.view.animation.LinearInterpolator()
+            var loggedFirst = false; var loggedSecond = false
             addUpdateListener { an ->
                 val f = an.animatedValue as Float
                 val sy = at(keySy, f); val sx = at(keySx, f)
                 for (v in targets) { v.scaleY = sy; v.scaleX = sx }
+                // Round 44 proof numbers (his demand): interpolated, not keyframe, values at real instants.
+                if (!loggedFirst && f >= 0.35f) { loggedFirst = true; TraceLog.morph("v2 gulp proof: f=%.2f sy=%.3f sx=%.3f (dip peak, axes inverse)".format(f, sy, sx)) }
+                if (!loggedSecond && f >= 0.65f) { loggedSecond = true; TraceLog.morph("v2 gulp proof: f=%.2f sy=%.3f sx=%.3f (overshoot, still inverse)".format(f, sy, sx)) }
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
