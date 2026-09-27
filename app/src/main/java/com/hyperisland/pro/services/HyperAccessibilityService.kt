@@ -4376,28 +4376,27 @@ class HyperAccessibilityService : AccessibilityService() {
         val pill = pillPreviewRoot
         val targets = if (pill != null) listOf(shell, pill) else listOf(shell)
         for (v in targets) { v.pivotX = v.width / 2f; v.pivotY = v.height / 2f }
-        val keyF = floatArrayOf(0f, 0.35f, 0.65f, 1f)
-        val keySy = floatArrayOf(1f, 0.86f, 1.04f, 1f)
-        val keySx = floatArrayOf(1f, 1.08f, 0.97f, 1f)
-        fun at(keys: FloatArray, f: Float): Float {
-            for (i in 1..3) if (f <= keyF[i]) {
-                val span = keyF[i] - keyF[i - 1]
-                return keys[i - 1] + (keys[i] - keys[i - 1]) * ((f - keyF[i - 1]) / span)
+        // Round 46: the keyframe TABLE is gone - one continuous curve drives every frame (his diagnosis:
+        // corners between linear segments read mechanical no matter how correct the numbers are), and
+        // this time the curve's own decile samples print in one line so the shape is a logged fact.
+        val deciles = StringBuilder("v2 gulp curve: ")
+        var dd = 1
+        run {
+            var probe = 0.1f
+            while (probe <= 1.001f) {
+                deciles.append("|@").append("%.1f".format(probe)).append(":").append("%.3f".format(MotionVariant.v2GulpScaleY(probe)))
+                    .append("/").append("%.3f".format(MotionVariant.v2GulpScaleX(probe)))
+                probe += 0.1f
             }
-            return keys[3]
         }
-        TraceLog.morph("v2 gulp: lock+0ms - 220ms confirm pulse begins (sy 1.0->0.86->1.04->1.0, sx 1.0->1.08->0.97->1.0)")
+        TraceLog.morph(deciles.toString())
         v2GulpAnim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = MotionVariant.V2_GULP_MS
-            interpolator = android.view.animation.LinearInterpolator()
-            var loggedFirst = false; var loggedSecond = false
+            interpolator = android.view.animation.LinearInterpolator()   // drives TIME uniformly; the SHAPE is fully analytic - no corner can exist between frames of a smooth function
             addUpdateListener { an ->
                 val f = an.animatedValue as Float
-                val sy = at(keySy, f); val sx = at(keySx, f)
+                val sy = MotionVariant.v2GulpScaleY(f); val sx = MotionVariant.v2GulpScaleX(f)
                 for (v in targets) { v.scaleY = sy; v.scaleX = sx }
-                // Round 44 proof numbers (his demand): interpolated, not keyframe, values at real instants.
-                if (!loggedFirst && f >= 0.35f) { loggedFirst = true; TraceLog.morph("v2 gulp proof: f=%.2f sy=%.3f sx=%.3f (dip peak, axes inverse)".format(f, sy, sx)) }
-                if (!loggedSecond && f >= 0.65f) { loggedSecond = true; TraceLog.morph("v2 gulp proof: f=%.2f sy=%.3f sx=%.3f (overshoot, still inverse)".format(f, sy, sx)) }
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {

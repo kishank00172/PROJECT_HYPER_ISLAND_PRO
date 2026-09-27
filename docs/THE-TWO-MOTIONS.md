@@ -680,7 +680,20 @@ capsule rule), and the path code keeps its unit tests plus gains a degenerate-ba
 dedicated proof round. The collapse hard-cut (issue 1 of round 44) was unrelated code - the neck gate is
 expand-only (morphTowardCard), so collapse never entered the polyline branch; its fix was the radius rule
 itself, and the fresh rad=/L= trajectory fields verify on device.
-## 23. What is still unproven
+## 23. Round 46: why corners dominate, and why no spring can have both his 35% and his 65%
+
+His mechanics insight is the final form of the cheap-vs-premium debate: piecewise-linear keyframes put a
+velocity CORNER at every keyframe, and a corner reads mechanical forever, whatever the values are. But the
+published round-46 spring attempt had ITS OWN impossibility tucked inside, and it is written into the code's
+KDoc: a zero-velocity-start spring whose dip apex sits as late as f=0.35 (the slow-start unit-step form that
+the premium start demands) cannot swing back ABOVE rest by the agreed +4% within one more lobe at the
+damping the 260 ms window needs; and an impulse spring e^(-Zw t)*sin(Wd t) that can cross back cannot place
+its first lobe's apex later than PI/(2*Wd) - with lobes 0.30 apart the dip lands by f=0.15, always. A
+single-mode damped spring is one rhythm; his 35%/65% pair is one-and-a-bit lobes, not quarters. So the
+premium curve that satisfies every agreed point is the cornerless Gaussian-lobe pair now in MotionVariant
+(v2GulpScaleY/X: exact -14% at f=0.35, exact +4% at f=0.65, <0.2% residual at both ends, no corner by
+definition). Sy finishes 1.000, sx 1.000, and the decile samples print from the device at gulp start.
+## 24. What is still unproven
 
 
 Nothing here has been confirmed by his eyes yet. What the frames do is arithmetic and can be checked; what it looks

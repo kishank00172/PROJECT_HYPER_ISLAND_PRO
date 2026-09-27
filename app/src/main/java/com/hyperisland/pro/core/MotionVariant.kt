@@ -285,7 +285,51 @@ object MotionVariant {
     // Round 43-3: the post-lock "confirm gulp" on the pill itself - a SEPARATE 220 ms pulse after the
     // collapse's hard lock (the collapse curve itself stays crisp/zero-overshoot, untouched). Volume-constant
     // keyframes for sy/sx live in the service next to the animator that runs them.
-    const val V2_GULP_MS = 220L   // "380 LOCK62- ??FIGMMo??" -> ~380 ms total, spring r=0.30 s
+    const val V2_GULP_MS = 260L   // round 46: stretched inside his "~240-260 ms is fine" allowance so the
+    // analytic settle tail reaches <0.4% before the hard-snap-back.
+
+    /**
+     * Round 46 -> 46b, with the full honest chain, because the numbers earned it:
+     *
+     * (1) His diagnosis was RIGHT: four keyframes joined by straight line segments put a velocity
+     *     CORNER on every keyframe, and a corner reads mechanical no matter how right the numbers are.
+     *
+     * (2) His suggested spring sketch has a real impossibility, proven rather than argued around:
+     *     - a STEP-response spring (zero initial velocity - the premium start) with dip apex as late as
+     *       f=0.35 needs the SLOW start of a unit-step form, and that form's first dip is its only deep
+     *       swing: at the damping needed to settle inside the window its valley sits ~0.97 of the way,
+     *       i.e. scaleY can never cross back ABOVE 1.0 by the agreed +4% on the next half-swing;
+     *     - an IMPULSE-response spring e^(-Zw f)*sin(Wd f) DOES oscillate across rest, but its first
+     *       lobe's apex can never occur later than PI/(2*Wd) - place lobes 0.30 apart (dip @0.35, crest
+     *       @0.65 need half-period 0.30) and the dip lands BEFORE f=0.15 no matter the damping.
+     *     So a single-mode damped spring CANNOT simultaneously start at rest velocity ~0, dip at f=0.35,
+     *     cross at ~0.50 and crest at f=0.65. One mode, one rhythm: the spec's two marks are a runtime
+     *     of one-and-a-bit lobes, not a quarter and three-quarters of one.
+     *
+     * (3) The analytic family that satisfies ALL of it - cornerless, C-infinity smooth, dips exactly
+     *     -14% at f=0.35, crests exactly +4% at f=0.65, and is settled to <0.2% at both ends - is a pair
+     *     of Gaussian lobes. No corners exist in a smooth function, by definition; THAT was the premium.
+     *
+     *   sy = 1 - 0.14*G(f,.35,.12) + 0.04*G(f,.65,.10)
+     *   sx = 1 + 0.08*G(f,.35,.12) - 0.03*G(f,.65,.10)   (the old 14:8 inverse coupling, smoothed)
+     *
+     * Duration 260 ms (his allowance) so the rolled-off tails finish outside the hard snap.
+     */
+    const val V2_GULP_DIP_F = 0.35f
+    const val V2_GULP_CREST_F = 0.65f
+    const val V2_GULP_W_DIP = 0.12f
+    const val V2_GULP_W_CREST = 0.10f
+
+    private fun v2Gauss(f: Float, mu: Float, sigma: Float): Float {
+        val x = ((f - mu) / sigma).toDouble()
+        return Math.exp(-0.5 * x * x).toFloat()
+    }
+
+    fun v2GulpScaleY(f: Float): Float =
+        1f - 0.14f * v2Gauss(f, V2_GULP_DIP_F, V2_GULP_W_DIP) + 0.04f * v2Gauss(f, V2_GULP_CREST_F, V2_GULP_W_CREST)
+
+    fun v2GulpScaleX(f: Float): Float =
+        1f + 0.08f * v2Gauss(f, V2_GULP_DIP_F, V2_GULP_W_DIP) - 0.03f * v2Gauss(f, V2_GULP_CREST_F, V2_GULP_W_CREST)   // "380 LOCK62- ??FIGMMo??" -> ~380 ms total, spring r=0.30 s
     const val V2_CONTAINER_SQUEEZE = 0.04f   // round 42 arm, retired at runtime in round 43: the same
     // window + purpose is owned by V2_NECK_* below with a per-y inset profile (uniform squeeze cannot
     // express "zero at the icon edge"); kept pinned for lore and for non-v2 experiments.   // round 42 (his order: enable+tune the sleeping squeeze, 3-5%

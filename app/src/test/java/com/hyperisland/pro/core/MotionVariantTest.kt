@@ -467,7 +467,15 @@ class MotionVariantTest {
         assertEquals(false, MotionVariant.V2_NECK_ENABLED)   // round 45: torn-paper silhouette -> off until its own proof round
         assertEquals(40L, MotionVariant.V2_NECK_START_MS)
         assertEquals(300L, MotionVariant.V2_NECK_END_MS)
-        assertEquals(220L, MotionVariant.V2_GULP_MS)                      // round 43-3: post-lock confirm gulp
+        assertEquals(260L, MotionVariant.V2_GULP_MS)   // round 46: stretched for the analytic settle tail
+        // Round 46b: cornerless Gaussian fit - both of his agreed peaks exactly, settled at both ends
+        assertEquals(0.860f, MotionVariant.v2GulpScaleY(0.35f), 0.012f)
+        assertEquals(1.080f, MotionVariant.v2GulpScaleX(0.35f), 0.012f)
+        assertEquals(1.040f, MotionVariant.v2GulpScaleY(0.65f), 0.010f)
+        assertEquals(0.970f, MotionVariant.v2GulpScaleX(0.65f), 0.012f)
+        assertEquals(1f, MotionVariant.v2GulpScaleY(0f), 0.002f)
+        assertEquals(1f, MotionVariant.v2GulpScaleX(0f), 0.002f)
+        assertEquals(1f, MotionVariant.v2GulpScaleY(1f), 0.002f)
         assertEquals(0.90f, MotionVariant.V2_COLLAPSE_DAMPING, 1e-9f)
 
         // Text pendulum: reads his phase table back exactly at the anchors, rigid after the hard lock.
