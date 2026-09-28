@@ -9,8 +9,10 @@ import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.RemoteInput
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RadialGradient
@@ -75,6 +77,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
+import com.hyperisland.pro.BuildConfig
 import com.hyperisland.pro.core.FrameWatch
 import com.hyperisland.pro.core.GpuLayerPrewarm
 import com.hyperisland.pro.core.GcSnapshot
@@ -105,6 +108,8 @@ import java.lang.reflect.Proxy
  * - Full Screen Touch Interceptor as "Off-Switch"
  * - HyperOS Keyboard Stabilization
  */
+private const val DEBUG_CMD_ACTION = "com.hyperisland.pro.DEBUG"   // b1453: adb-driven acceptance hooks (debug builds only)
+
 class HyperAccessibilityService : AccessibilityService() {
 
     private enum class IslandStage { STAGE1_IDLE, STAGE2_PING, STAGE3_FULL }
@@ -685,11 +690,38 @@ class HyperAccessibilityService : AccessibilityService() {
     private val outlineRect = Rect()
     private var outlineRadius = 0f
 
+    // b1453: root-free adb driver for acceptance work; registered only in debug builds (receiver is
+    // receiver-exported so `am broadcast` from the shell reaches it) and every command re-checks
+    // BuildConfig.DEBUG. All handlers call exactly the same code paths the UI/settings use, and the
+    // whole onReceive is wrapped per the b1452 standing rule.
+    private val debugCmdReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            runCatching {
+                if (!BuildConfig.DEBUG || intent.action != DEBUG_CMD_ACTION) return@runCatching
+                val cmd = intent.getStringExtra("cmd") ?: return@runCatching
+                when (cmd) {
+                    "freeze" -> AppSettings.setDebugMorphFreezeP(this@HyperAccessibilityService, intent.getFloatExtra("p", -1f))
+                    "freeze_off" -> AppSettings.setDebugMorphFreezeP(this@HyperAccessibilityService, -1f)
+                    "measured" -> AppSettings.setDebugMorphMeasured(this@HyperAccessibilityService, intent.getBooleanExtra("on", true))
+                    "expand" -> postExpandIsland()      // identical path to expandIslandFromApp()
+                    "collapse" -> postCollapseIsland()  // identical path to the drag-down / outside-tap collapse
+                    else -> TraceLog.line("DEBUG", "unknown debug cmd ignored: " + cmd)
+                }
+                TraceLog.line("DEBUG", "debug cmd handled: " + cmd +
+                    " freezeP=" + AppSettings.getDebugMorphFreezeP(this@HyperAccessibilityService) +
+                    " measured=" + AppSettings.getDebugMorphMeasured(this@HyperAccessibilityService))
+            }.onFailure { TraceLog.line("DEBUG", "debug cmd failed: " + it.javaClass.simpleName) }
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
         startTracing()
+        if (BuildConfig.DEBUG) {
+            runCatching { registerReceiver(debugCmdReceiver, IntentFilter(DEBUG_CMD_ACTION), Context.RECEIVER_EXPORTED) }
+        }
         if (AppSettings.isIslandEnabled(this)) postShowIsland()
     }
 
@@ -5610,7 +5642,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r
         // Round 47-A hairline edge: 1dp inset stroke at 9% white on the silhouette (his spec colour)
         if (AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) setStroke(dp(1), 0x17FFFFFF) }
-    override fun onDestroy() { invalidateContentCache(); stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
+    override fun onDestroy() { runCatching { unregisterReceiver(debugCmdReceiver) }; invalidateContentCache(); stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }
 
 
