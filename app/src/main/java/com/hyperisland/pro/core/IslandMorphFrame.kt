@@ -56,7 +56,7 @@ object IslandMorphFrame {
      * hz=120`, i.e. thirty-nine perfectly delivered frames drawing the *same* box. The animation was not
      * slow; the shape was never asked for.
      */
-    fun compute(boundW: Int, boundH: Int, w: Int, h: Int, headH: Int = 0, neckPx: Float = 0f): MorphFrame {
+    fun compute(boundW: Int, boundH: Int, w: Int, h: Int, headH: Int = 0, neckPx: Float = 0f, topAnchored: Boolean = false): MorphFrame {
         val boxW = w.coerceIn(0, boundW.coerceAtLeast(0))
         val boxH = h.coerceIn(0, (boundH + headH).coerceAtLeast(0))
         val left = (boundW - boxW) / 2
@@ -76,7 +76,12 @@ object IslandMorphFrame {
         // below a content that does not move at all. No excursion, no sign flip, no end snap; "jerky" had
         // all three (his report, b1422). Below the natural height the offset tracks the box one to one, which
         // is the reveal the pinned view was built for.
-        val contentOffsetY = ((boxH - boundH - headH) / 2).coerceAtMost(-headH / 2)
+        val contentOffsetY = if (topAnchored) 0 else ((boxH - boundH - headH) / 2).coerceAtMost(-headH / 2)
+        // Round A2 issue-1: the centring offset above was authored for CENTRE-anchored content. Round-47-A
+        // made the card content TOP-anchored (band = the pill geometry). Applying a centring offset to a
+        // top-anchored stack is exactly the "content sits ~100px above its final spot, teleports at the
+        // last frame" his screenshots proved: top lock says the content's final top IS the box's top at
+        // every frame, so the only legal offset for it is 0 (the clip alone does the swallow).
         return MorphFrame(left, 0, left + boxW, boxH, contentOffsetY, neckPx.coerceAtLeast(0f))
     }
 

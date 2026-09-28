@@ -495,6 +495,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             val page = if (notificationRing.isEmpty()) 0 else currentRingIndex + 1
             val unread = notificationRing.getOrNull(currentRingIndex)?.unreadCount ?: 0
+            pagerSeekTo(currentRingIndex, animate = false)   // A2-4b: count changes must re-draw the dots (it was wired to swaps only)
             TraceLog.count(
                 "$before->$value chats=$value page=$page/${notificationRing.size} unread=$unread " +
                     "badge=\"$badge\" cause=$lastRingOp"
@@ -1553,6 +1554,7 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun playFluidTransitionAnimation(next: NotificationModel) {
+        pagerSeekTo(currentRingIndex, animate = true)   // the 200ms slide starts at the same instant the swap does (his rule; swap untouched)
         val isFlash = notificationQueue.size >= 35
         val exit = ValueAnimator.ofFloat(0f, 1f).apply { duration = if (isFlash) 120L else 300L; interpolator = AccelerateInterpolator(); addUpdateListener { this@HyperAccessibilityService.gridRoot?.alpha = 1f - it.animatedValue as Float; this@HyperAccessibilityService.gridRoot?.translationY = it.animatedValue as Float * 20f } }
         val entry = ValueAnimator.ofFloat(0f, 1f).apply { duration = if (isFlash) 150L else 400L; interpolator = morphInterpolator; addUpdateListener { this@HyperAccessibilityService.gridRoot?.alpha = it.animatedValue as Float; this@HyperAccessibilityService.gridRoot?.translationY = -20f * (1f - it.animatedValue as Float) } }
@@ -1578,6 +1580,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun updateNotificationContent(model: NotificationModel) {
         currentPendingIntent = model.contentIntent; currentPackageName = model.packageName; currentNotificationKey = model.notificationKey; currentReplyAction = null
+        updateAmbientGlow(model.packageName)
         // `getApplicationIcon` is a binder round trip; it used to run on every one of these calls, and the
         // stall sampler caught the main thread sitting in `transactNative` 93 times for 23.3 s total.
         if (model.packageName != lastIconPkg) {
@@ -1588,7 +1591,9 @@ class HyperAccessibilityService : AccessibilityService() {
             lastAppNameShown = model.appName
             appNameText?.text = model.appName
         }
-        val ringIndicator = if (notificationRing.size > 1) " · ${currentRingIndex + 1}/${notificationRing.size}" else ""
+        // Round A2 correction-4 (his screenshots beat my report): "now · 3/4" lived HERE, inside the
+        // timestamp STRING - not a separate view. Position voice now belongs to the pager dots alone.
+        val ringIndicator = ""
         val stamp = "${timeLabelFor(model)}$ringIndicator"
         if (UpdateGate.textChanged(lastStampShown, stamp)) {
             lastStampShown = stamp
@@ -3831,6 +3836,13 @@ class HyperAccessibilityService : AccessibilityService() {
                     kotlin.math.sin(Math.PI * (ms - MotionVariant.V2_NECK_START_MS) / span).toFloat()
             } else 0f
         } else 0f
+        if (morphV2On) {
+            // Round A2 item-0 (his acceptance-need: deterministic screenshots at any progress p - String pref,
+            // adb-writable; -1 = off). After p the funnel stops writing: the island itself freezes at p and
+            // endMorphPerf skips the restore (below), so a frozen frame survives for the screenshot.
+            val fz = AppSettings.getDebugMorphFreezeP(this)
+            if (fz in 0f..1f && rawT > fz) return
+        }
         if (!v2GateLogged && morphPinH != null) {
             v2GateLogged = true
             TraceLog.morph("frame1 gate evidence: v2On=" + morphV2On + " toward=" + morphTowardCard + " pinH=true style=" + AppSettings.getMorphStyleName(morphVariant) + " t=" + "%.3f".format(t) + " rawT=" + "%.3f".format(rawT))
@@ -3851,7 +3863,8 @@ class HyperAccessibilityService : AccessibilityService() {
                         val radNow = (if (morphV2On || morphVariantOn) MotionVariant.tensionRadius(h.toFloat(), r) else r).toInt()
                         dw.toString() + " L=" + (if (morphPinH != null) (morphPinW() - dw) / 2 else 0) + " rad=" + radNow
                     } +
-                    "x" + h + " neck=" + "%.1f".format(v2NeckNow) +    // DRAWN numbers (post clamp; neck is a silhouette, not a width): render view only
+                    "x" + h + " neck=" + "%.1f".format(v2NeckNow) + " cTop=" +
+                    ((gridRoot?.translationY ?: 0f).toInt()) +    // A2 issue-1 proof by number: 0 on every frame (top-anchored); the old centre-offset used to live exactly here
                     "@" + "%.0fms".format(rawT * morphDurationMs)
                 v2TraceNextIdx++
             }
@@ -3943,7 +3956,7 @@ class HyperAccessibilityService : AccessibilityService() {
         if (host != null) {
             // The card is not resized at all during a morph: this frame is one small invalidate inside the
             // view, which is why the overlay window stops being laid out 60 times a second.
-            val frame = IslandMorphFrame.compute(morphPinW(), morphNaturalH, bw, bh, morphOvershootPx, v2NeckNow)
+            val frame = IslandMorphFrame.compute(morphPinW(), morphNaturalH, bw, bh, morphOvershootPx, v2NeckNow, AppSettings.getUiV2LayoutAEnabled(this))
             lastMorphBoxLeft = frame.left
             host.applyMorphFrame(frame, br)
             return
@@ -4422,6 +4435,9 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun endMorphPerf(label: String) {
+        if (morphV2On && AppSettings.getDebugMorphFreezeP(this) in 0f..1f) {
+            TraceLog.morph("v2 freeze: holding frame - restore skipped; set debug_morph_freeze_p to -1 to resume"); return
+        }
         if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
         // Read the flight-end values BEFORE clearMorphCarry/pin-restore rewrite the tree to the next-morph
         // baseline - the b1440 "alpha 0.00 at 40% vs 1.00 at end" contradiction lived exactly in this order.
@@ -4689,10 +4705,35 @@ class HyperAccessibilityService : AccessibilityService() {
                 invalidate()
             }
 
+            /** Round A2-4c: the ambient glow, corrected on his screenshot evidence. The 47-A draft used
+             * straight SRC_OVER at 0.30 alpha over a PURE BLACK surface - spec-compliant, and measurably
+             * invisible (a 30% blue over black IS ~4% luminance). SCREEN vs black renders the gradient as
+             * written, still no new dependency, still one Paint, shader keyed by (colour, centre). */
+            private fun drawAmbientGlow(canvas: Canvas, l: Float, t: Float) {
+                if (glowColor == 0 || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return
+                val baseA = gridRoot?.alpha ?: 0f
+                if (baseA <= 0.01f) return
+                val cx = l + dp(38).toFloat(); val cy = t + dp(38).toFloat(); val rad = dp(88).toFloat()
+                val key = glowColor.toString() + ":" + cx.toInt() + ":" + cy.toInt()
+                if (key != glowShaderKey) {
+                    glowPaint.shader = RadialGradient(cx, cy, rad,
+                        (glowColor and 0x00FFFFFF) or 0x4D000000.toInt(), glowColor and 0x00FFFFFF, Shader.TileMode.CLAMP)
+                    glowShaderKey = key
+                    if (glowPaint.xfermode == null) glowPaint.xfermode =
+                        android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
+                }
+                glowPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
+                canvas.drawCircle(cx, cy, rad, glowPaint)
+            }
+
             override fun onDraw(canvas: Canvas) {
-                val f = morphFrame ?: run { super.onDraw(canvas); return }
+                val f = morphFrame ?: run { super.onDraw(canvas); drawAmbientGlow(canvas, 0f, 0f); return }
                 fillMorphSilhouette(f, morphClipPath)
                 canvas.drawPath(morphClipPath, morphPaint)
+                val layer = canvas.save()
+                canvas.clipPath(morphClipPath)
+                drawAmbientGlow(canvas, f.left.toFloat(), f.top.toFloat())
+                canvas.restoreToCount(layer)
             }
 
             override fun dispatchDraw(canvas: Canvas) {
