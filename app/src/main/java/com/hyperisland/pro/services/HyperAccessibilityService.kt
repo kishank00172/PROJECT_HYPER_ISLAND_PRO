@@ -76,6 +76,7 @@ import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
 import com.hyperisland.pro.core.FrameWatch
+import com.hyperisland.pro.core.GpuLayerPrewarm
 import com.hyperisland.pro.core.GcSnapshot
 import com.hyperisland.pro.core.IslandGesture
 import com.hyperisland.pro.core.IslandMorphFrame
@@ -3706,10 +3707,18 @@ class HyperAccessibilityService : AccessibilityService() {
         if (q == lastBlurPx) return
         lastBlurPx = q
         val effect = if (q > 0f) RenderEffect.createBlurEffect(q, q, Shader.TileMode.CLAMP) else null
-        headerLine?.setRenderEffect(effect)
-        titleText?.setRenderEffect(effect)
-        messageText?.setRenderEffect(effect)
-        actionScroll?.setRenderEffect(effect)
+        applyRenderEffectCosmetically("glassBlur", effect, headerLine, titleText, messageText, actionScroll)
+    }
+
+    /** b1452 standing rule: cosmetic RenderEffect writes never crash the service - the view must still be in
+      * the hierarchy (the band/body rebuild orphans headerLine), and the batch is guarded by one runCatching. */
+    private fun applyRenderEffectCosmetically(tag: String, effect: RenderEffect?, vararg views: View?) {
+        runCatching {
+            for (v in views) {
+                if (v == null || v.parent == null) continue
+                v.setRenderEffect(effect)
+            }
+        }.onFailure { TraceLog.line("MORPH", "render effect skipped (" + tag + "): " + it.javaClass.simpleName) }
     }
 
     /** Header, title, message, actions - each with its own slice of the shape's travel, reading order first. */
@@ -3759,10 +3768,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // A blur that survives the morph is a card nobody can read, and it would stay until the next text
         // change. -1 forces the next morph to write its first step whatever this one ended on.
         lastBlurPx = -1f
-        headerLine?.setRenderEffect(null)
-        titleText?.setRenderEffect(null)
-        messageText?.setRenderEffect(null)
-        actionScroll?.setRenderEffect(null)
+        applyRenderEffectCosmetically("staggerClear", null, headerLine, titleText, messageText, actionScroll)
         gridRoot?.scaleX = 1f
         gridRoot?.scaleY = 1f
         gridRoot?.translationX = 0f
@@ -3786,7 +3792,7 @@ class HyperAccessibilityService : AccessibilityService() {
         gridContentSec?.alpha = 1f // the fade's home since round 33: restored here like every other alpha
         gridContentSec?.scaleX = 1f
         gridContentSec?.scaleY = 1f
-        gridContentSec?.setLayerType(View.LAYER_TYPE_NONE, null)
+        if (gridContentSec?.parent != null) gridContentSec?.setLayerType(View.LAYER_TYPE_NONE, null)   // b1452: orphan-safe (band/body dropped it)
         gridContentSec?.translationY = 0f
         gridIconSec?.translationY = 0f
         islandView?.translationY = 0f
@@ -4339,7 +4345,7 @@ class HyperAccessibilityService : AccessibilityService() {
         islandView?.translationY = 0f
         // The column gets its own cached layer while the morph owns its scale: stretching a texture is one
         // matrix multiply per frame, stretching a software view is a re-raster of every TextView it holds.
-        gridContentSec?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        if (gridContentSec?.parent != null) gridContentSec?.setLayerType(View.LAYER_TYPE_HARDWARE, null)   // b1452: orphan-safe
         // The stagger fades the same views the blur is resolving; two entrances on one element is a third
         // thing nobody can name, so the glass form runs on focus alone.
         // The liquid style times the content with a gate instead of a stagger; two windows on one fade is a
@@ -4711,10 +4717,10 @@ class HyperAccessibilityService : AccessibilityService() {
              * straight SRC_OVER at 0.30 alpha over a PURE BLACK surface - spec-compliant, and measurably
              * invisible (a 30% blue over black IS ~4% luminance). SCREEN vs black renders the gradient as
              * written, still no new dependency, still one Paint, shader keyed by (colour, centre). */
-            private fun drawAmbientGlow(canvas: Canvas, l: Float, t: Float) {
-                if (glowColor == 0 || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return
+            private fun drawAmbientGlow(canvas: Canvas, l: Float, t: Float) = runCatching {
+                if (glowColor == 0 || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return@runCatching
                 val baseA = gridRoot?.alpha ?: 0f
-                if (baseA <= 0.01f) return
+                if (baseA <= 0.01f) return@runCatching
                 val cx = l + dp(38).toFloat(); val cy = t + dp(38).toFloat(); val rad = dp(88).toFloat()
                 val key = glowColor.toString() + ":" + cx.toInt() + ":" + cy.toInt()
                 if (key != glowShaderKey) {
@@ -4726,7 +4732,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
                 glowPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
                 canvas.drawCircle(cx, cy, rad, glowPaint)
-            }
+            }   // b1452 standing rule: a cosmetic painter must never crash the service
 
             override fun onDraw(canvas: Canvas) {
                 val f = morphFrame ?: run { super.onDraw(canvas); drawAmbientGlow(canvas, 0f, 0f); return }
@@ -5098,14 +5104,51 @@ class HyperAccessibilityService : AccessibilityService() {
     /** Problem C.3: once per PROCESS, prime the GPU layers at a calm moment (right after the island's first
      *  build, pill-state), so the first-ever expansion doesn't pay texture allocation mid-animation. */
     private var islandPrewarmed = false
+    private var startupSmokeLogged = false
     private fun prewarmIslandLayersOnce() {
-        if (islandPrewarmed) return
-        islandPrewarmed = true
-        visualRoot?.post {
-            gridRoot?.setLayerType(View.LAYER_TYPE_HARDWARE, null); gridRoot?.buildLayer()
-            gridContentSec?.setLayerType(View.LAYER_TYPE_HARDWARE, null); gridContentSec?.buildLayer()
-            TraceLog.line("MORPH", "prewarm: GPU layers primed once for this process")
-        }
+        visualRoot?.post { doPrewarm(deferLeft = 1) }   // the post{} lambda that crashed b1451, now guarded inside
+    }
+    private fun doPrewarm(deferLeft: Int) {
+        if (islandPrewarmed) { startupSmokeOnce("done"); return }
+        var builtAny = false
+        var waiting = false
+        var reason = "n/a"
+        runCatching {
+            for ((name, v) in listOf("gridRoot" to gridRoot, "gridContentSec" to gridContentSec)) {
+                val act = GpuLayerPrewarm.plan(v != null, v?.parent != null,
+                    v?.isAttachedToWindow == true, v?.width ?: 0, v?.height ?: 0, deferLeft, islandPrewarmed)
+                when (act) {
+                    GpuLayerPrewarm.Action.BUILD -> {
+                        v?.setLayerType(View.LAYER_TYPE_HARDWARE, null); v?.buildLayer(); builtAny = true
+                    }
+                    GpuLayerPrewarm.Action.DEFER -> {   // b1452: one retry via onPreDraw, then never again
+                        waiting = true; reason = name + " attached=false"
+                        TraceLog.line("MORPH", "prewarm deferred once: " + name + " attached=" + v?.isAttachedToWindow +
+                            " parent=" + (v?.parent != null) + " " + v?.width + "x" + v?.height + " layerType=" + v?.layerType)
+                        v?.viewTreeObserver?.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+                            override fun onPreDraw(): Boolean {
+                                v.viewTreeObserver.removeOnPreDrawListener(this)
+                                doPrewarm(deferLeft = 0)
+                                return true
+                            }
+                        })
+                    }
+                    GpuLayerPrewarm.Action.SKIP_PERMANENT -> {
+                        TraceLog.line("MORPH", "prewarm skip: " + name + " not in hierarchy (parent=" + (v?.parent != null) + ")")
+                    }
+                    GpuLayerPrewarm.Action.ALREADY_DONE -> {}
+                }
+            }
+        }.onFailure { reason = it.javaClass.simpleName + ": " + (it.message ?: ""); TraceLog.line("MORPH", "prewarm skipped: " + reason) }
+        if (builtAny) islandPrewarmed = true   // the once-flag flips AFTER a successful buildLayer only
+        startupSmokeOnce(if (islandPrewarmed) "done" else if (waiting) "deferred" else "skipped(" + reason + ")")
+    }
+    private fun startupSmokeOnce(status: String) {
+        if (startupSmokeLogged) return
+        startupSmokeLogged = true
+        val iv = islandView
+        TraceLog.line("BOOT", "startup smoke: attached=" + (iv?.isAttachedToWindow == true) +
+            " size=" + (iv?.width ?: 0) + "x" + (iv?.height ?: 0) + " prewarm=" + status)
     }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
