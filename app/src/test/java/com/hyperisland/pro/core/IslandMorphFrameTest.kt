@@ -180,4 +180,17 @@ class IslandMorphFrameTest {
         assertTrue(IslandMorphFrame.neckInset(0.5f, 100f) < 97f)
     }
 
+
+    @Test
+    fun topAnchored_contentNeverOffsets_evenWithSpringHeadroom() {
+        // Round A2 issue-1: content position = final layout position, always. The old centring formula
+        // (asserted below with its own number) is what put the screenshots' content ~100px up.
+        for (h in intArrayOf(104, 200, 421, 448)) {
+            val f = IslandMorphFrame.compute(1067, 421, 1067, h, headH = 27, topAnchored = true)
+            assertEquals(0, f.contentOffsetY)
+        }
+        val legacy = IslandMorphFrame.compute(1067, 421, 1067, 104, headH = 27)
+        assertTrue(legacy.contentOffsetY < -100)
+    }
+
 }

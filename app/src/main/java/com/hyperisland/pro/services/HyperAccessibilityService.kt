@@ -1716,21 +1716,24 @@ class HyperAccessibilityService : AccessibilityService() {
 
         if (actions.isEmpty()) {
             this@HyperAccessibilityService.actionScroll?.visibility = View.GONE
+            // A2-3: with no chips the message may use 3 lines (still respecting the <112dp one-line rule)
+            if (AppSettings.getIslandExpandedHeightDp(this) >= 112) messageText?.maxLines = 3
             return
         }
+        if (AppSettings.getIslandExpandedHeightDp(this) >= 112) messageText?.maxLines = 2
 
         this@HyperAccessibilityService.actionScroll?.visibility = View.VISIBLE
         this@HyperAccessibilityService.actionScroll?.alpha = 1f
 
         val totalWidthDp = AppSettings.getIslandExpandedWidthDp(this) - 56
         val availableWidthDp = (totalWidthDp * 0.8).toInt()
-        val btnWidth = when (actions.size) {
+        val btnWidth = minOf(when (actions.size) {
             1 -> (availableWidthDp * 0.70).toInt()
             2 -> (availableWidthDp * 0.46).toInt()
             else -> (availableWidthDp * 0.31).toInt()
-        }
+        }, dp(120))   // A2-2: each chip ellipsised at 120dp max
 
-        actions.forEach { action ->
+        actions.take(3).forEach { action ->   // A2-2: max 3 chips, extras dropped from the row
             val actionTitle = action.title?.toString().orEmpty().ifBlank { "Action" }
 
             val isReplyAction = actionTitle.contains("Reply", true) || !action.remoteInputs.isNullOrEmpty()
@@ -1739,8 +1742,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 // TRUE MORPH SOURCE: the Reply action tile itself contains the hidden textbox.
                 // Click karne par yehi tile expand hoga — separate replyBar side/bottom se nahi aayega.
                 val tileBg = createIslandBackground(dp(16).toFloat()).apply {
-                    setColor(Color.parseColor("#222222"))
-                    setStroke(dp(1), Color.parseColor("#444444"))
+                    setColor(0xFF0096FF.toInt())   // A2-2 primary chip: RemoteInput action stays primary (still routes to enterReplyMode)
                 }
 
                 val tile = LinearLayout(this).apply {
@@ -1756,8 +1758,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 val label = TextView(this).apply {
                     text = actionTitle
-                    setTextColor(Color.WHITE)
-                    textSize = 11f
+                    setTextColor(Color.WHITE)   // A2-2: primary chip keeps white on the blue fill
+                    textSize = 12f
                     gravity = Gravity.CENTER
                     typeface = Typeface.DEFAULT_BOLD
                     maxLines = 1
@@ -1810,20 +1812,20 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 this@HyperAccessibilityService.footerActions?.addView(
                     tile,
-                    LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) }
+                    LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(8) }   // A2-2: 8dp gap
                 )
             } else {
                 val btn = TextView(this).apply {
                     text = actionTitle
-                    setTextColor(Color.WHITE)
-                    textSize = 11f
+                    setTextColor(0xE6FFFFFF.toInt())   // A2-2: secondary chip
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER
-                    setPadding(dp(12), 0, dp(12), 0)
+                    setPadding(dp(16), 0, dp(16), 0)
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
                     background = createIslandBackground(dp(16).toFloat()).apply {
-                        setColor(Color.parseColor("#222222"))
-                        setStroke(dp(1), Color.parseColor("#444444"))
+                        setColor(0x1FFFFFFF)
                     }
                     isClickable = true
                     setOnClickListener {
@@ -1851,7 +1853,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
                 this@HyperAccessibilityService.footerActions?.addView(
                     btn,
-                    LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(6) }
+                    LinearLayout.LayoutParams(dp(btnWidth), dp(32)).apply { marginStart = dp(8) }   // A2-2: 8dp gap
                 )
             }
         }
@@ -5385,7 +5387,10 @@ class HyperAccessibilityService : AccessibilityService() {
             timeStampText?.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }
         }
 
-        // Chips row (top 108, height 36, gap 8): Reply -> existing reply-mode; Open -> contentIntent path
+        // Round A2-2 (their correction: the hardcoded Reply/Open chips were a spec OWN error - removed
+        // entirely; the notification's REAL actions get the chip style in setupActionTiles instead).
+        chipsRow = null; chipReply = null; chipOpen = null
+        if (false) {
         chipReply = TextView(ctx).apply {
             text = "Reply"; setTextColor(Color.WHITE); textSize = 12f; typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER; setPadding(dp(18), 0, dp(18), 0)
@@ -5403,24 +5408,57 @@ class HyperAccessibilityService : AccessibilityService() {
             addView(chipReply, LinearLayout.LayoutParams(-2, -1))
             addView(chipOpen, LinearLayout.LayoutParams(-2, -1).apply { marginStart = dp(8) })
         }
-        val asView: android.view.View? = actionScroll
-        val asIdx = asView?.let { contentSec.indexOfChild(it) } ?: -1
-        contentSec.addView(chipsRow, if (asIdx >= 0) asIdx else contentSec.childCount,
-            LinearLayout.LayoutParams(-2, dp(36)).apply { topMargin = dp(12) })
 
-        // Icon: 44dp squircle (30% radius) + 1dp #2EFFFFFF ring; top-left exactly (16,16)
-        val sq = dp(44) * 0.30f
-        gridIconSec?.let { ic ->
-            ic.layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(16); topMargin = dp(16) }
-            ic.background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.TRANSPARENT); cornerRadius = sq; setStroke(dp(1), 0x2EFFFFFF) }
-            appIconView?.layoutParams = FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER)
-            appIconView?.outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, sq) }
-            }
-            appIconView?.clipToOutline = true
         }
-        contentSec.setPadding(dp(12), 0, 0, 0)   // icon right edge 16+44=60, +12 = the 72dp text edge
-        contentSec.layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { topMargin = dp(16); marginEnd = dp(16) }
+
+        // ---- Round A2-3: BAND + BODY, built around the camera keep-out (his layout v2) ----
+        // Band = exactly the pill's geometry (height from settings), so the band's icon sits on the SAME
+        // pixels as the pill's icon at every frame of the morph: leading icon 32dp squircle @left 14dp,
+        // app name from x=54dp; trailing = [pager][8dp][timestamp] at 14dp from the right edge.
+        // Body = the 100dp region under the band: title, message, REAL actions, vertically centred.
+        val contentGrid = gridRoot as? LinearLayout
+        if (contentGrid != null) {
+            val sqIcon = dp(32) * 0.30f
+            val band = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val trail = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END }
+            for (v in listOf(gridIconSec, appNameText, pagerRow, timeStampText)) (v?.parent as? ViewGroup)?.removeView(v)
+            for (v in listOf(titleText, messageText, actionScroll, replyBar)) (v?.parent as? ViewGroup)?.removeView(v)
+            (contentSec.parent as? ViewGroup)?.removeView(contentSec)
+            contentGrid.removeAllViews()
+            contentGrid.orientation = LinearLayout.VERTICAL
+            gridIconSec?.let { ic ->
+                band.addView(ic, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginStart = dp(14) })
+                ic.background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.TRANSPARENT); cornerRadius = sqIcon; setStroke(dp(1), 0x2EFFFFFF) }
+                appIconView?.layoutParams = FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER)
+                appIconView?.outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, sqIcon) }
+                }
+                appIconView?.clipToOutline = true
+            }
+            appNameText?.let { band.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }) }   // 14+32+8 = x=54dp
+            trail.addView(pagerRow, LinearLayout.LayoutParams(-2, -2))
+            trail.addView(timeStampText, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
+            band.addView(trail, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(14) })
+            contentGrid.addView(band, LinearLayout.LayoutParams(-1, dp(AppSettings.getIslandHeightDp(this))))
+            val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
+            body.addView(titleText, LinearLayout.LayoutParams(-1, dp(20)))
+            body.addView(messageText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+            body.addView(actionScroll, LinearLayout.LayoutParams(-1, dp(32)).apply { topMargin = dp(8) })
+            replyBar?.let { body.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+            contentGrid.addView(body, LinearLayout.LayoutParams(-1, dp(100)).apply { topMargin = dp(4); leftMargin = dp(16); rightMargin = dp(16) })
+            // keep-out: the cutout rect in card-local coords; fallback = pill centre +/- 23dp (his rule)
+            visualRoot?.post {
+                val cut = visualRoot?.rootWindowInsets?.displayCutout?.boundingRectTop
+                val screenW = resources.displayMetrics.widthPixels
+                val cardW = islandLayoutParams?.width ?: dp(AppSettings.getIslandExpandedWidthDp(this))
+                val viewLeft = (screenW - cardW) / 2
+                val cutL = cut?.let { it.left - viewLeft } ?: (cardW / 2 - dp(23))
+                val nameMaxW = cutL - dp(12) - dp(54)
+                if (nameMaxW > dp(40)) appNameText?.maxWidth = nameMaxW
+                TraceLog.morph("v2 keep-out: rect=" + (cut?.toShortString() ?: "fallback(pill-centre+/-23dp)") +
+                    " viewLeft=" + viewLeft + " appNameMaxW=" + nameMaxW + "px")
+            }
+        }
         (gridRoot?.layoutParams as? FrameLayout.LayoutParams)?.gravity = Gravity.START
 
         // Pill icon: 32dp squircle, same 30% rule
@@ -5432,9 +5470,8 @@ class HyperAccessibilityService : AccessibilityService() {
             ic.clipToOutline = true
         }
 
-        // Adaptive contract: chips need >= 152dp; two message lines need >= 112dp
+        // Adaptive contract (A2): two message lines need >= 112dp
         val eh = AppSettings.getIslandExpandedHeightDp(this)
-        if (eh < 152) chipsRow?.visibility = View.GONE
         if (eh < 112) messageText?.maxLines = 1
         rebuildPagerDots(false)
         TraceLog.morph("v2 layoutA applied: cardH=" + eh + "dp chips=" + (if (eh >= 152) "shown" else "hidden(<152)") +
