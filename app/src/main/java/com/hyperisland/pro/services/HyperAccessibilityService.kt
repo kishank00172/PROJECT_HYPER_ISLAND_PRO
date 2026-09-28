@@ -13,6 +13,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Outline
@@ -451,6 +453,18 @@ class HyperAccessibilityService : AccessibilityService() {
     private var messageText: TextView? = null
     private var footerActions: LinearLayout? = null
     private var actionScroll: HorizontalScrollView? = null
+    // Round 47-A (his approved spec): the new card chrome pieces
+    private var chipsRow: LinearLayout? = null
+    private var chipReply: TextView? = null
+    private var chipOpen: TextView? = null
+    private var pagerRow: LinearLayout? = null       // "slide bar" = pager dots, his term clarified
+    private var pagerActive: View? = null
+    // Ambient glow: reuse ONE Paint, rebuild the shader only when the (colour, quantized centre) key changes
+    private val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val glowColorCache = HashMap<String, Int>()
+    private var glowColor = 0
+    private var glowShaderKey = ""
+    private var layoutAApplied = false
 
     // Pill badge notification preview — compact, non-intrusive default surface
     private var pillPreviewRoot: FrameLayout? = null
@@ -4900,6 +4914,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 )
             }
             addView(this@HyperAccessibilityService.pillPreviewRoot, FrameLayout.LayoutParams(-1, -1))
+            applyUiV2LayoutA()
 
             // Reply Morph V2 layer: full island coordinate space, above normal content, outside action scroll clipping.
             this@HyperAccessibilityService.morphLayer = FrameLayout(this@HyperAccessibilityService).apply {
@@ -5300,7 +5315,180 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun lerpEven(s: Int, e: Int, p: Float): Int { val v = (s + ((e - s) * p)).roundToInt(); return if (v % 2 != 0) v + 1 else v }
     private fun lerp(s: Float, e: Float, p: Float) = s + ((e - s) * p)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r }
+    /**
+     * Round 47-A (his approved spec, verbatim numbers, own flag KEY_UI_V2_LAYOUT_A for bisecting):
+     * one post-pass over the already-built views. 4dp grid: pad 16 | header 14 | gap 6 | title 20 |
+     * gap 4 | message 36 | gap 12 | chips 36 | pad 16 = 160dp card height. Left edge of ALL text = 72dp
+     * (16 pad + 44 icon + 12 gap). Squircle = 30% corner radius. Nothing here draws a shadow/elevation.
+     */
+    private fun applyUiV2LayoutA() {
+        if (!AppSettings.getUiV2LayoutAEnabled(this) || layoutAApplied) return
+        val contentSec = gridContentSec ?: return
+        val ctx: android.content.Context = this
+        layoutAApplied = true
+
+        appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
+        timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
+        titleText?.apply { textSize = 16f; if (android.os.Build.VERSION.SDK_INT >= 28) lineHeight = dp(20) }
+        messageText?.apply {
+            textSize = 14f; setTextColor(0x9EFFFFFF.toInt()); maxLines = 2
+            if (android.os.Build.VERSION.SDK_INT >= 28) lineHeight = dp(18)
+        }
+
+        // Header row (top 16, height 14): name left, right cluster = pager | 8dp | timestamp
+        (contentSec.getChildAt(0) as? ViewGroup)?.let { header ->
+            header.layoutParams = LinearLayout.LayoutParams(-1, dp(14))
+            appNameText?.layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            pagerRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
+            val tsIdx = header.indexOfChild(timeStampText)
+            header.addView(pagerRow, if (tsIdx >= 0) tsIdx else 1, LinearLayout.LayoutParams(-2, -2))
+            timeStampText?.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }
+        }
+
+        // Chips row (top 108, height 36, gap 8): Reply -> existing reply-mode; Open -> contentIntent path
+        chipReply = TextView(ctx).apply {
+            text = "Reply"; setTextColor(Color.WHITE); textSize = 12f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER; setPadding(dp(18), 0, dp(18), 0)
+            background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(0xFF0096FF.toInt()); cornerRadius = dp(18).toFloat() }
+            setOnClickListener { enterReplyMode(null) }
+        }
+        chipOpen = TextView(ctx).apply {
+            text = "Open"; setTextColor(0xE6FFFFFF.toInt()); textSize = 12f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER; setPadding(dp(18), 0, dp(18), 0)
+            background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(0x1FFFFFFF); cornerRadius = dp(18).toFloat() }
+            setOnClickListener { openCurrentNotification() }
+        }
+        chipsRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(chipReply, LinearLayout.LayoutParams(-2, -1))
+            addView(chipOpen, LinearLayout.LayoutParams(-2, -1).apply { marginStart = dp(8) })
+        }
+        val asIdx = contentSec.indexOfChild(actionScroll)
+        contentSec.addView(chipsRow, if (asIdx >= 0) asIdx else contentSec.childCount,
+            LinearLayout.LayoutParams(-2, dp(36)).apply { topMargin = dp(12) })
+
+        // Icon: 44dp squircle (30% radius) + 1dp #2EFFFFFF ring; top-left exactly (16,16)
+        val sq = dp(44) * 0.30f
+        gridIconSec?.let { ic ->
+            ic.layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(16); topMargin = dp(16) }
+            ic.background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.TRANSPARENT); cornerRadius = sq; setStroke(dp(1), 0x2EFFFFFF) }
+            appIconView?.layoutParams = FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER)
+            appIconView?.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, sq) }
+            }
+            appIconView?.clipToOutline = true
+        }
+        contentSec.setPadding(dp(12), 0, 0, 0)   // icon right edge 16+44=60, +12 = the 72dp text edge
+        contentSec.layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { topMargin = dp(16); marginEnd = dp(16) }
+        (gridRoot?.layoutParams as? FrameLayout.LayoutParams)?.gravity = Gravity.START
+
+        // Pill icon: 32dp squircle, same 30% rule
+        val sq2 = dp(32) * 0.30f
+        pillPreviewIcon?.let { ic ->
+            ic.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, sq2) }
+            }
+            ic.clipToOutline = true
+        }
+
+        // Adaptive contract: chips need >= 152dp; two message lines need >= 112dp
+        val eh = AppSettings.getIslandExpandedHeightDp(this)
+        if (eh < 152) chipsRow?.visibility = View.GONE
+        if (eh < 112) messageText?.maxLines = 1
+        rebuildPagerDots(false)
+        TraceLog.morph("v2 layoutA applied: cardH=" + eh + "dp chips=" + (if (eh >= 152) "shown" else "hidden(<152)") +
+            " msgLines=" + (messageText?.maxLines ?: -1) + " icon=44dp squircle(r=30%) pillIcon-32 squircle hairlines on")
+    }
+
+    /**
+     * The ambient glow. Dominant colour: 16x16 downsample of the app icon, averaged over non-transparent
+     * pixels, cached per package (NO new dependency); #0096FF fallback. Only real samples are cached, so a
+     * first draw with an un-loaded icon does not poison the package's colour forever.
+     */
+    private fun updateAmbientGlow(pkg: String?) {
+        if (!AppSettings.getUiV2LayoutAEnabled(this) || pkg == null) return
+        val cached = glowColorCache[pkg]
+        if (cached != null) { glowColor = cached; return }
+        var c = 0xFF0096FF.toInt(); var sampled = false
+        try {
+            val dw = appIconView?.drawable
+            if (dw != null) {
+                val bmp = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
+                val cv = Canvas(bmp); dw.setBounds(0, 0, 16, 16); dw.draw(cv)
+                val px = IntArray(256); bmp.getPixels(px, 0, 16, 0, 0, 16, 16)
+                var r = 0L; var g = 0L; var b = 0L; var n = 0
+                for (i in px) if ((i ushr 24) > 40) { r += (i shr 16) and 255; g += (i shr 8) and 255; b += i and 255; n++ }
+                if (n > 0) {
+                    c = (255 shl 24) or (((r / n).toInt() and 255) shl 16) or (((g / n).toInt() and 255) shl 8) or ((b / n).toInt() and 255)
+                    sampled = true
+                }
+            }
+        } catch (_: Exception) {}
+        if (sampled) glowColorCache[pkg] = c
+        glowColor = c
+    }
+
+    /** Pager ("slide bar"): slots of 12dp advance 16dp; dots 4dp, active capsule 12x4dp, all centred. */
+    private var pagerWindowFirst = 0
+    private var pagerBuiltIdx = -1   // which slot index the active capsule's HOST currently stands for
+    private fun rebuildPagerDots(animate: Boolean) { pagerSeekTo(currentRingIndex, animate, forceRebuild = true) }
+    private fun pagerSeekTo(idx: Int, animate: Boolean, forceRebuild: Boolean = false) {
+        val row = pagerRow ?: return
+        val pages = notificationRing.size
+        if (!AppSettings.getUiV2LayoutAEnabled(this) || pages <= 1) { row.visibility = View.GONE; return }
+        row.visibility = View.VISIBLE
+        val idxC = idx.coerceIn(0, pages - 1)
+        val winFirst = when {
+            pages <= 5 -> 0
+            idxC >= pages - 3 -> pages - 5
+            idxC - 2 >= 0 -> idxC - 2
+            else -> 0
+        }
+        val slotW = dp(12); val gap = dp(4)
+        val leftMore = winFirst > 0
+        fun slotBuilder(): FrameLayout = FrameLayout(this).apply {
+            minimumWidth = slotW; minimumHeight = dp(12); setClipChildren(false); setClipToPadding(false)
+        }
+        if (forceRebuild || winFirst != pagerWindowFirst || pagerActive == null) {
+            pagerWindowFirst = winFirst
+            row.removeAllViews()
+            if (leftMore) row.addView(View(this).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x2EFFFFFF) }
+            }, FrameLayout.LayoutParams(dp(3), dp(3)).apply { setMargins(0, dp(4) + dp(1), gap, 0) })
+            val last = (winFirst + 4).coerceAtMost(pages - 1)
+            for (i in winFirst..last) {
+                val host = slotBuilder()
+                if (i == idxC) {
+                    pagerActive = View(this).apply {
+                        background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(0xD9FFFFFF.toInt()); cornerRadius = dp(2).toFloat() }
+                    }
+                    host.addView(pagerActive, FrameLayout.LayoutParams(slotW, dp(4), Gravity.CENTER))
+                } else {
+                    host.addView(View(this).apply {
+                        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x4DFFFFFF) }
+                    }, FrameLayout.LayoutParams(dp(4), dp(4), Gravity.CENTER))
+                }
+                row.addView(host, LinearLayout.LayoutParams(slotW, dp(12)).apply { marginStart = gap })
+            }
+            if (last < pages - 1) row.addView(View(this).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x2EFFFFFF) }
+            }, FrameLayout.LayoutParams(dp(3), dp(3)).apply { setMargins(gap, dp(4) + dp(1), 0, 0) })
+            pagerActive?.translationX = 0f
+            pagerBuiltIdx = idxC
+        }
+        // The active capsule slides RELATIVE to the slot its host was built at: delta slots * slot advance.
+        // (Absolute offsets counted from the window edge were round-47-A draft's own trigonometry bug.)
+        val targetX = if (pagerBuiltIdx >= 0) (idxC - pagerBuiltIdx) * (slotW + gap) else 0
+        pagerActive?.let { a ->
+            if (animate) a.animate().translationX(targetX.toFloat()).setDuration(200)
+                .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+            else { a.translationX = targetX.toFloat(); a.animate().cancel() }
+        }
+    }
+
+    private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r
+        // Round 47-A hairline edge: 1dp inset stroke at 9% white on the silhouette (his spec colour)
+        if (AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) setStroke(dp(1), 0x17FFFFFF) }
     override fun onDestroy() { invalidateContentCache(); stopStallWatch(); stopDisplayWatch(); hideIslandInternal(); if (instance === this) instance = null; super.onDestroy() }
 }
 
