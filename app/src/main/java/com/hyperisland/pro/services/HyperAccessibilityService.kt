@@ -5323,7 +5323,7 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun applyUiV2LayoutA() {
         if (!AppSettings.getUiV2LayoutAEnabled(this) || layoutAApplied) return
-        val contentSec = gridContentSec ?: return
+        val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
 
@@ -5363,7 +5363,8 @@ class HyperAccessibilityService : AccessibilityService() {
             addView(chipReply, LinearLayout.LayoutParams(-2, -1))
             addView(chipOpen, LinearLayout.LayoutParams(-2, -1).apply { marginStart = dp(8) })
         }
-        val asIdx = contentSec.indexOfChild(actionScroll)
+        val asView: android.view.View? = actionScroll
+        val asIdx = asView?.let { contentSec.indexOfChild(it) } ?: -1
         contentSec.addView(chipsRow, if (asIdx >= 0) asIdx else contentSec.childCount,
             LinearLayout.LayoutParams(-2, dp(36)).apply { topMargin = dp(12) })
 
