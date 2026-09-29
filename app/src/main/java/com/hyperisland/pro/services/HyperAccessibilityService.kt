@@ -3873,8 +3873,23 @@ class HyperAccessibilityService : AccessibilityService() {
         gridContentSec?.scaleY = 1f
         if (gridContentSec?.parent != null) gridContentSec?.setLayerType(View.LAYER_TYPE_NONE, null)   // b1452: orphan-safe (band/body dropped it)
         gridContentSec?.translationY = 0f
-        bandTextSec?.alpha = 1f; bandTextSec?.translationY = 0f; bandTextSec?.scaleX = 1f; bandTextSec?.scaleY = 1f
-        bodySec?.alpha = 1f; bodySec?.translationY = 0f; bodySec?.scaleX = 1f; bodySec?.scaleY = 1f
+        // b1455 2e (Sol's teleport investigation, measure-first): print the exact pre-restore state of the
+        // live sections. If |last-anim vs rest| < 1px there is no teleport left from THIS handoff; if not,
+        // the number names the jump size. applyEndFrame profiles skip the restore ONLY when it is a logged
+        // true no-op - silently skipping a non-trivial restore is how stale-attribute bugs are born.
+        val hsTy1 = bandTextSec?.translationY ?: 0f; val hsTy2 = bodySec?.translationY ?: 0f
+        val hsDeltaPx = maxOf(kotlin.math.abs(hsTy1), kotlin.math.abs(hsTy2))
+        val hs = experienceProfile().handshake
+        TraceLog.morph("v2 handshake invariant: dTy=" + "%.2f".format(hsTy1) + "/" + "%.2f".format(hsTy2) +
+            " preAlpha=" + "%.2f".format(bandTextSec?.alpha ?: -1f) +
+            " preScaleY=" + "%.3f".format(bandTextSec?.scaleY ?: -1f) +
+            " |lastAnim-rest|=" + "%.2f".format(hsDeltaPx) + "px (target<1.0) variant=" + AppSettings.getExperienceVariant(this))
+        if (!(hs.applyEndFrame && hsDeltaPx < 0.5f)) {
+            bandTextSec?.alpha = 1f; bandTextSec?.translationY = 0f; bandTextSec?.scaleX = 1f; bandTextSec?.scaleY = 1f
+            bodySec?.alpha = 1f; bodySec?.translationY = 0f; bodySec?.scaleX = 1f; bodySec?.scaleY = 1f
+        } else {
+            TraceLog.morph("v2 handshake: restore skipped as a logged no-op (delta=" + "%.2f".format(hsDeltaPx) + "px)")
+        }
         gridIconSec?.translationY = 0f
         islandView?.translationY = 0f
         pillPreviewIcon?.alpha = 1f
