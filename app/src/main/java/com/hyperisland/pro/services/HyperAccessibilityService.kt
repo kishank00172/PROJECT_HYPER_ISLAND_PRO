@@ -5710,6 +5710,13 @@ class HyperAccessibilityService : AccessibilityService() {
         if (!AppSettings.getUiV2LayoutAEnabled(this) || pages <= 1) { row.visibility = View.GONE; return }
         row.visibility = View.VISIBLE
         val idxC = idx.coerceIn(0, pages - 1)
+        // b1455 2d-lite (Sol's pager spec, the zero-risk half): absolute announcement per profile.
+        // The rebind-vs-translate-capsule rewrite + mid-drag progress stay in their own later commit -
+        // they live in the gesture-sync region and deserve a device-confirmed "dots still dead?" first.
+        if (experienceProfile().pager.talkBackLabel) {
+            row.contentDescription = "Page " + (idxC + 1) + " of " + pages
+            row.importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
         val winFirst = when {
             pages <= 5 -> 0
             idxC >= pages - 3 -> pages - 5
