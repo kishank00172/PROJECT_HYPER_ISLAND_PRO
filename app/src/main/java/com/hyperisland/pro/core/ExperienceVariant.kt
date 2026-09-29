@@ -70,7 +70,7 @@ object ExperienceProfiles {
             twoLayer = false, coreRadiusDp = 62, auraRadiusDp = 0, auraOffsetYDp = 0,
             coreAlpha = 0.18f, auraAlpha = 0f,
             stopFractions = floatArrayOf(0f, 0.45f, 1f),
-            stopAlphaMul = floatArrayOf(1f, 0.55f, 0.22f),
+            stopAlphaMul = floatArrayOf(0.55f, 0.22f, 0f),   // claude's own numbers: 0f->55%a, .45f->22%a, 1f->0 (must reach zero at the edge; a hard disc rim is exactly the "cheap" look)
             blurPx = 18,
         ),
         gulp = GulpSpec(
