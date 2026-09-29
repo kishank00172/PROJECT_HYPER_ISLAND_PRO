@@ -613,6 +613,20 @@ class HyperAccessibilityService : AccessibilityService() {
     /** The card's text column - everything the morph's fade may touch, and all it touches since round 33.
      * The icon section fades with nobody: it is the shared element. */
     private var gridContentSec: android.view.View? = null
+    /** b1454: with 47-A's band/body the old gridContentSec is retired from the hierarchy, so the morph
+      * overlay (pendulum ty, stretch sxy, alpha) must write to the LIVE sections - the dead-view writes
+      * were the real cause of "content bounce nahi karta, sirf icon" (issue #5) and of the collapse
+      * clipping text at the silhouette edge (content alpha never changed on the visible views). */
+    private var bandView: android.view.View? = null
+    private var bandTextSec: android.view.View? = null
+    private var bodySec: android.view.View? = null
+    private fun v2ContentSecs(): List<android.view.View?> {
+        val l = mutableListOf<android.view.View?>()
+        if (bandTextSec != null) l += bandTextSec
+        if (bodySec != null) l += bodySec
+        if (l.isEmpty()) l += gridContentSec
+        return l
+    }
     /** The card's icon cell: the rigid asset of his hierarchy (no stretch, the smaller bob). */
     private var gridIconSec: android.view.View? = null
     /** The pull lives on expands of the spring styles only; set per morph, read by the tween and the carry. */
@@ -705,6 +719,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     "measured" -> AppSettings.setDebugMorphMeasured(this@HyperAccessibilityService, intent.getBooleanExtra("on", true))
                     "expand" -> postExpandIsland()      // identical path to expandIslandFromApp()
                     "collapse" -> postCollapseIsland()  // identical path to the drag-down / outside-tap collapse
+                    "layout_dump" -> debugLayoutDump()
                     else -> TraceLog.line("DEBUG", "unknown debug cmd ignored: " + cmd)
                 }
                 TraceLog.line("DEBUG", "debug cmd handled: " + cmd +
@@ -3194,6 +3209,9 @@ class HyperAccessibilityService : AccessibilityService() {
                     currentRingIndex = dragPrevIndex
                     dragPrevModel?.let { updateNotificationContent(it) }
                 }
+                // b1454 issue #4: the indicator must ride MANUAL swipes as well, not only
+                // playFluidTransitionAnimation's swaps - the dots were static-on-every-swipe ("dead showpiece").
+                pagerSeekTo(currentRingIndex, animate = true)
                 endRingSwap(if (commit) "settled" else "sprung back")
             }
             ?.start()
@@ -3667,11 +3685,11 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun applyBlueprintV2(t: Float) {
         if (!v2OverlayLogged) { v2OverlayLogged = true; TraceLog.morph("v2 overlay firing: pendulum path ACTIVE, first t=" + "%.3f".format(t)) }
-        gridContentSec?.let { sec ->
-            sec.translationY = MotionVariant.v2TextOffsetPx(t)
-            sec.scaleY = MotionVariant.v2StretchScaleY(t)
-            sec.scaleX = MotionVariant.v2StretchScaleX(t)
-            sec.alpha = if (t < 0.137f) t / 0.137f else 1f
+        for (sec in v2ContentSecs()) {
+            sec?.translationY = MotionVariant.v2TextOffsetPx(t)
+            sec?.scaleY = MotionVariant.v2StretchScaleY(t)
+            sec?.scaleX = MotionVariant.v2StretchScaleX(t)
+            sec?.alpha = if (t < 0.137f) t / 0.137f else 1f
         }
         gridIconSec?.let { icon ->
             icon.translationY = MotionVariant.v2IconOffsetPx(t)
@@ -3702,7 +3720,10 @@ class HyperAccessibilityService : AccessibilityService() {
         // early - that part of the design was measured on hardware and stays - while the icon rides the
         // whole way down, swaps to the pill glyph, and lands where the pill takes it over. Not a new look:
         // the b1378 hand-off recovered one mechanism at a time, like the last time a refactor lost it.
-        (gridContentSec ?: gridRoot ?: return).alpha = a
+        val secs = v2ContentSecs()
+        var wrote = false
+        for (sec in secs) { sec?.alpha = a; if (sec != null) wrote = true }
+        if (!wrote) (gridRoot ?: return).alpha = a
         if (morphStagger > 0f) applyMorphStagger(a)
     }
 
@@ -3739,7 +3760,7 @@ class HyperAccessibilityService : AccessibilityService() {
         if (q == lastBlurPx) return
         lastBlurPx = q
         val effect = if (q > 0f) RenderEffect.createBlurEffect(q, q, Shader.TileMode.CLAMP) else null
-        applyRenderEffectCosmetically("glassBlur", effect, headerLine, titleText, messageText, actionScroll)
+        applyRenderEffectCosmetically("glassBlur", effect, bandTextSec ?: headerLine, titleText, messageText, actionScroll)
     }
 
     /** b1452 standing rule: cosmetic RenderEffect writes never crash the service - the view must still be in
@@ -3754,8 +3775,23 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     /** Header, title, message, actions - each with its own slice of the shape's travel, reading order first. */
+    /** b1454 issue #7 tooling: exact geometry of the band/body stack, so sparse-content cards are placed
+      * by numbers and not by eyeballing a screenshot. Driven from the debug receiver (cmd layout_dump). */
+    private fun debugLayoutDump() {
+        fun v(name: String, v: android.view.View?): String {
+            if (v == null) return name + "=null"
+            val pv = v.parent as? android.view.View
+            return name + "[top=" + v.top + " h=" + v.height + " vis=" + v.visibility +
+                (if (pv != null) " parent=" + (pv.javaClass.simpleName) + ":" + pv.height else "") + "]"
+        }
+        TraceLog.line("DEBUG", "layout dump: island=" + (islandView?.width ?: -1) + "x" + (islandView?.height ?: -1) +
+            " " + v("grid", gridRoot) + " " + v("band", bandView) + " " + v("bandText", bandTextSec) +
+            " " + v("body", bodySec) + " " + v("title", titleText) + " " + v("msg", messageText) +
+            " " + v("actions", actionScroll) + " stage=" + currentStage)
+    }
+
     private fun applyMorphStagger(base: Float) {
-        val kids = arrayOf<android.view.View?>(headerLine, titleText, messageText, actionScroll)
+        val kids = arrayOf<android.view.View?>(bandTextSec ?: headerLine, titleText, messageText, actionScroll)
         val n = kids.size
         if (n == 0) return
         val on = morphStagger > 0f
@@ -3800,7 +3836,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // A blur that survives the morph is a card nobody can read, and it would stay until the next text
         // change. -1 forces the next morph to write its first step whatever this one ended on.
         lastBlurPx = -1f
-        applyRenderEffectCosmetically("staggerClear", null, headerLine, titleText, messageText, actionScroll)
+        applyRenderEffectCosmetically("staggerClear", null, bandTextSec ?: headerLine, titleText, messageText, actionScroll)
         gridRoot?.scaleX = 1f
         gridRoot?.scaleY = 1f
         gridRoot?.translationX = 0f
@@ -3826,6 +3862,8 @@ class HyperAccessibilityService : AccessibilityService() {
         gridContentSec?.scaleY = 1f
         if (gridContentSec?.parent != null) gridContentSec?.setLayerType(View.LAYER_TYPE_NONE, null)   // b1452: orphan-safe (band/body dropped it)
         gridContentSec?.translationY = 0f
+        bandTextSec?.alpha = 1f; bandTextSec?.translationY = 0f; bandTextSec?.scaleX = 1f; bandTextSec?.scaleY = 1f
+        bodySec?.alpha = 1f; bodySec?.translationY = 0f; bodySec?.scaleX = 1f; bodySec?.scaleY = 1f
         gridIconSec?.translationY = 0f
         islandView?.translationY = 0f
         pillPreviewIcon?.alpha = 1f
@@ -3893,8 +3931,8 @@ class HyperAccessibilityService : AccessibilityService() {
             v2TraceFrames++
             while (v2TraceNextIdx < v2TraceMarks.size && rawT >= v2TraceMarks[v2TraceNextIdx]) {
                 v2TraceSamples += "|@" + "%.2f".format(v2TraceMarks[v2TraceNextIdx]) + ": ty=" +
-                    "%.1f".format(gridContentSec?.translationY ?: -999f) + " sy=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) +
-                    " sx=" + "%.3f".format(gridContentSec?.scaleX ?: -1f) + " a=" + "%.2f".format(gridContentSec?.alpha ?: -1f) +
+                    "%.1f".format((bandTextSec ?: gridContentSec)?.translationY ?: -999f) + " sy=" + "%.3f".format((bandTextSec ?: gridContentSec)?.scaleY ?: -1f) +
+                    " sx=" + "%.3f".format((bandTextSec ?: gridContentSec)?.scaleX ?: -1f) + " a=" + "%.2f".format((bandTextSec ?: gridContentSec)?.alpha ?: -1f) +
                     " box=" + run {
                         // Round 44: the numbers his frames demanded - the DRAWN radius (lockstep rule) and the
                         // DRAWN left edge inside the pinned surface. If a collapse ever anchors on the left,
@@ -4276,7 +4314,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // gated behind morphCarryGrowing, never armed for v2) is now armed by the blueprint itself - expand
         // only. Collapse stays 0f: its content voice is the new monotone settle-in sink further below.
         morphSqueeze = if (morphV2On && towardCard) MotionVariant.V2_CONTAINER_SQUEEZE else 0f
-        if (!towardCard) TraceLog.morph("collapse begin evidence: contentSec alpha=" + "%.2f".format(gridContentSec?.alpha ?: -1f) + " tY=" + "%.1f".format(gridContentSec?.translationY ?: -999f) + " scaleY=" + "%.3f".format(gridContentSec?.scaleY ?: -1f) + " layerType=" + (gridContentSec?.layerType ?: -9))
+        if (!towardCard) TraceLog.morph("collapse begin evidence: contentSec alpha=" + "%.2f".format((bandTextSec ?: gridContentSec)?.alpha ?: -1f) + " tY=" + "%.1f".format((bandTextSec ?: gridContentSec)?.translationY ?: -999f) + " scaleY=" + "%.3f".format((bandTextSec ?: gridContentSec)?.scaleY ?: -1f) + " layerType=" + (gridContentSec?.layerType ?: -9))
         morphLiquidOn = morphVariant == AppSettings.MORPH_STYLE_LIQUID
         morphHyperOn = morphVariant == AppSettings.MORPH_STYLE_HYPERMORPH
         morphVariantOn = morphLiquidOn || morphHyperOn
@@ -4481,9 +4519,9 @@ class HyperAccessibilityService : AccessibilityService() {
         if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
         // Read the flight-end values BEFORE clearMorphCarry/pin-restore rewrite the tree to the next-morph
         // baseline - the b1440 "alpha 0.00 at 40% vs 1.00 at end" contradiction lived exactly in this order.
-        val endPreA = gridContentSec?.alpha ?: -1f
-        val endPreTy = gridContentSec?.translationY ?: -999f
-        val endPreSy = gridContentSec?.scaleY ?: -1f
+        val endPreA = (bandTextSec ?: gridContentSec)?.alpha ?: -1f
+        val endPreTy = (bandTextSec ?: gridContentSec)?.translationY ?: -999f
+        val endPreSy = (bandTextSec ?: gridContentSec)?.scaleY ?: -1f
         clearMorphCarry()
         morphV2On = false
         v2HapticDone = false
@@ -4751,13 +4789,16 @@ class HyperAccessibilityService : AccessibilityService() {
              * written, still no new dependency, still one Paint, shader keyed by (colour, centre). */
             private fun drawAmbientGlow(canvas: Canvas, l: Float, t: Float) = runCatching {
                 if (glowColor == 0 || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return@runCatching
+                // b1454 issue #6: the glow is the expanded card's ambience only - the pill never wears the
+                // last notification's colour (the leak was gridRoot.alpha staying 1.0 while gone).
+                if (currentStage != IslandStage.STAGE3_FULL || gridRoot?.visibility != View.VISIBLE) return@runCatching
                 val baseA = gridRoot?.alpha ?: 0f
                 if (baseA <= 0.01f) return@runCatching
-                val cx = l + dp(38).toFloat(); val cy = t + dp(38).toFloat(); val rad = dp(88).toFloat()
+                val cx = l + dp(38).toFloat(); val cy = t + dp(38).toFloat(); val rad = dp(96).toFloat()
                 val key = glowColor.toString() + ":" + cx.toInt() + ":" + cy.toInt()
                 if (key != glowShaderKey) {
                     glowPaint.shader = RadialGradient(cx, cy, rad,
-                        (glowColor and 0x00FFFFFF) or 0x4D000000.toInt(), glowColor and 0x00FFFFFF, Shader.TileMode.CLAMP)
+                        (glowColor and 0x00FFFFFF) or 0x42000000.toInt(), glowColor and 0x00FFFFFF, Shader.TileMode.CLAMP)
                     glowShaderKey = key
                     if (glowPaint.xfermode == null) glowPaint.xfermode =
                         android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
@@ -5510,10 +5551,12 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
                 appIconView?.clipToOutline = true
             }
-            appNameText?.let { band.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }) }   // 14+32+8 = x=54dp
+            val bandText = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            appNameText?.let { bandText.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }) }   // 14+32+8 = x=54dp
             trail.addView(pagerRow, LinearLayout.LayoutParams(-2, -2))
             trail.addView(timeStampText, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
-            band.addView(trail, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(14) })
+            bandText.addView(trail, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(14) })
+            band.addView(bandText, LinearLayout.LayoutParams(0, -2, 1f))
             contentGrid.addView(band, LinearLayout.LayoutParams(-1, dp(AppSettings.getIslandHeightDp(this))))
             val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
             body.addView(titleText, LinearLayout.LayoutParams(-1, dp(20)))
@@ -5521,6 +5564,7 @@ class HyperAccessibilityService : AccessibilityService() {
             body.addView(actionScroll, LinearLayout.LayoutParams(-1, dp(32)).apply { topMargin = dp(8) })
             replyBar?.let { body.addView(it, LinearLayout.LayoutParams(-1, -2)) }
             contentGrid.addView(body, LinearLayout.LayoutParams(-1, dp(100)).apply { topMargin = dp(4); leftMargin = dp(16); rightMargin = dp(16) })
+            bandView = band; bandTextSec = bandText; bodySec = body
             // keep-out: the cutout rect in card-local coords; fallback = pill centre +/- 23dp (his rule)
             visualRoot?.post {
                 val cut = visualRoot?.rootWindowInsets?.displayCutout?.boundingRectTop
