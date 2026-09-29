@@ -4484,6 +4484,19 @@ class HyperAccessibilityService : AccessibilityService() {
      * pill views + the island shell: islandView carries the capsule background, pillPreviewRoot carries
      * the icon at lock time; both scale together so silhouette and content gulp as ONE body.
      */
+    /** b1455 2c: profile keyframes -> continuous values with cosine ease INSIDE each segment, so Sol's
+      * amplitude/timing tables survive while no linear-segment corner can render (Round 46's lesson). */
+    private fun profileScaleAt(times: FloatArray, values: FloatArray, ms: Float): Float {
+        if (ms <= times.first()) return values.first()
+        val last = times.size - 1
+        if (ms >= times[last]) return values[last]
+        var i = 0
+        while (i < last && ms > times[i + 1]) i++
+        val f = ((ms - times[i]) / (times[i + 1] - times[i])).coerceIn(0f, 1f)
+        val e = (1f - kotlin.math.cos(Math.PI * f).toFloat()) * 0.5f
+        return values[i] + (values[i + 1] - values[i]) * e
+    }
+
     private var v2GulpAnim: ValueAnimator? = null
     private fun runV2GulpPulse() {
         v2GulpAnim?.cancel()
@@ -4494,26 +4507,32 @@ class HyperAccessibilityService : AccessibilityService() {
         // Round 46: the keyframe TABLE is gone - one continuous curve drives every frame (his diagnosis:
         // corners between linear segments read mechanical no matter how correct the numbers are), and
         // this time the curve's own decile samples print in one line so the shape is a logged fact.
-        val deciles = StringBuilder("v2 gulp curve: ")
-        var dd = 1
+        val gulpP = experienceProfile().gulp
+        val deciles = StringBuilder("v2 gulp curve (" + AppSettings.getExperienceVariant(this) + ", " + gulpP.durationMs + "ms): ")
         run {
             var probe = 0.1f
             while (probe <= 1.001f) {
-                deciles.append("|@").append("%.1f".format(probe)).append(":").append("%.3f".format(MotionVariant.v2GulpScaleY(probe)))
-                    .append("/").append("%.3f".format(MotionVariant.v2GulpScaleX(probe)))
+                val gms = probe * gulpP.durationMs
+                deciles.append("|@").append("%.1f".format(probe)).append(":").append("%.3f".format(profileScaleAt(gulpP.times, gulpP.scaleY, gms)))
+                    .append("/").append("%.3f".format(profileScaleAt(gulpP.times, gulpP.scaleX, gms)))
                 probe += 0.1f
             }
         }
         TraceLog.morph(deciles.toString())
         v2GulpAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = MotionVariant.V2_GULP_MS
-            interpolator = android.view.animation.LinearInterpolator()   // drives TIME uniformly; the SHAPE is fully analytic - no corner can exist between frames of a smooth function
+            duration = gulpP.durationMs.toLong()   // b1455 2c: profile-driven absorb pulse (times/scales tables)
+            interpolator = android.view.animation.LinearInterpolator()   // uniform time; cosine segment-ease keeps it corner-free
             addUpdateListener { an ->
-                val f = an.animatedValue as Float
-                val sy = MotionVariant.v2GulpScaleY(f); val sx = MotionVariant.v2GulpScaleX(f)
+                val ms = (an.animatedValue as Float) * gulpP.durationMs
+                val sy = profileScaleAt(gulpP.times, gulpP.scaleY, ms); val sx = profileScaleAt(gulpP.times, gulpP.scaleX, ms)
                 for (v in targets) { v.scaleY = sy; v.scaleX = sx }
             }
             addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationStart(a: Animator) {
+                    if (gulpP.hapticAtMs > 0) mainHandler.postDelayed({
+                        runCatching { shell.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM) }
+                    }, gulpP.hapticAtMs.toLong())
+                }
                 override fun onAnimationEnd(a: Animator) {
                     for (v in targets) { v.scaleY = 1f; v.scaleX = 1f }
                     TraceLog.morph("v2 gulp: done - pill back at 1.0/1.0")
