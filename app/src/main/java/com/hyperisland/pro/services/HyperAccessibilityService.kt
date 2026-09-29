@@ -468,6 +468,9 @@ class HyperAccessibilityService : AccessibilityService() {
     private var pagerActive: View? = null
     // Ambient glow: reuse ONE Paint, rebuild the shader only when the (colour, quantized centre) key changes
     private val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    /** b1455 2b: second layer for SOL/MIX two-layer glow; rebuilt only on key change, like the core. */
+    private val glowAuraPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private var glowAuraKey = ""
     private val glowColorCache = HashMap<String, Int>()
     private var glowColor = 0
     private var glowShaderKey = ""
@@ -4802,17 +4805,47 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (currentStage != IslandStage.STAGE3_FULL || gridRoot?.visibility != View.VISIBLE) return@runCatching
                 val baseA = gridRoot?.alpha ?: 0f
                 if (baseA <= 0.01f) return@runCatching
-                val cx = l + dp(38).toFloat(); val cy = t + dp(38).toFloat(); val rad = dp(96).toFloat()
-                val key = glowColor.toString() + ":" + cx.toInt() + ":" + cy.toInt()
-                if (key != glowShaderKey) {
-                    glowPaint.shader = RadialGradient(cx, cy, rad,
-                        (glowColor and 0x00FFFFFF) or 0x42000000.toInt(), glowColor and 0x00FFFFFF, Shader.TileMode.CLAMP)
-                    glowShaderKey = key
-                    if (glowPaint.xfermode == null) glowPaint.xfermode =
-                        android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
+                // b1455 2b: glow SHAPE now comes from the active experience profile (colour extraction
+                // untouched - same updateAmbientGlow source). Two-layer pool for SOL/MIX: core at the
+                // icon, aura pooled below; Claude's single-layer + 18px MaskFilter bloom in his profile.
+                val gp = experienceProfile().glow
+                val cx = l + dp(38).toFloat(); val cy = t + dp(38).toFloat()
+
+                fun stopsFor(alphaScale: Float): IntArray {
+                    val arr = IntArray(gp.stopFractions.size)
+                    for (i in arr.indices) arr[i] = ((gp.stopAlphaMul[i] * alphaScale * 255).toInt().coerceIn(0, 255) shl 24) or (glowColor and 0x00FFFFFF)
+                    return arr
                 }
+                fun xferNow(p: android.graphics.Paint) {
+                    if (p.xfermode == null) p.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
+                }
+
+                val coreRad = dp(gp.coreRadiusDp).toFloat()
+                val coreKey = glowColor.toString() + ":" + System.identityHashCode(gp) + ":" + cx.toInt() + ":" + cy.toInt()
+                if (coreKey != glowShaderKey) {
+                    glowPaint.shader = RadialGradient(cx, cy, coreRad, stopsFor(gp.coreAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                    glowPaint.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(dp(gp.blurPx).toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null
+                    glowShaderKey = coreKey
+                    TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
+                        " variant=" + AppSettings.getExperienceVariant(this@HyperAccessibilityService) +
+                        " coreR=" + gp.coreRadiusDp + " twoLayer=" + gp.twoLayer + " blur=" + gp.blurPx)
+                }
+                xferNow(glowPaint)
                 glowPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
-                canvas.drawCircle(cx, cy, rad, glowPaint)
+                canvas.drawCircle(cx, cy, coreRad, glowPaint)
+
+                if (gp.twoLayer) {
+                    val aRad = dp(gp.auraRadiusDp).toFloat(); val ay = cy + dp(gp.auraOffsetYDp).toFloat()
+                    val auraKey = coreKey + ":aura"
+                    if (auraKey != glowAuraKey) {
+                        glowAuraPaint.shader = RadialGradient(cx, ay, aRad, stopsFor(gp.auraAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                        glowAuraPaint.maskFilter = glowPaint.maskFilter
+                        glowAuraKey = auraKey
+                    }
+                    xferNow(glowAuraPaint)
+                    glowAuraPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(cx, ay, aRad, glowAuraPaint)
+                }
             }   // b1452 standing rule: a cosmetic painter must never crash the service
 
             override fun onDraw(canvas: Canvas) {
