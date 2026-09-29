@@ -78,6 +78,8 @@ import android.widget.TextView
 import com.hyperisland.pro.core.AppSettings
 import com.hyperisland.pro.core.ChatDisplayPolicy
 import com.hyperisland.pro.BuildConfig
+import com.hyperisland.pro.core.ExperienceProfiles
+import com.hyperisland.pro.core.ExperienceVariant
 import com.hyperisland.pro.core.FrameWatch
 import com.hyperisland.pro.core.GpuLayerPrewarm
 import com.hyperisland.pro.core.GcSnapshot
@@ -617,6 +619,10 @@ class HyperAccessibilityService : AccessibilityService() {
       * overlay (pendulum ty, stretch sxy, alpha) must write to the LIVE sections - the dead-view writes
       * were the real cause of "content bounce nahi karta, sirf icon" (issue #5) and of the collapse
       * clipping text at the silhouette edge (content alpha never changed on the visible views). */
+    /** b1455: live variant resolution - painters read this, never the enum directly. Plumbing only for
+      * Phase 2a; individual painters start consuming profiles one knob at a time, each in its own commit. */
+    private fun experienceProfile() = ExperienceProfiles.of(ExperienceVariant.parse(AppSettings.getExperienceVariant(this)))
+
     private var bandView: android.view.View? = null
     private var bandTextSec: android.view.View? = null
     private var bodySec: android.view.View? = null
@@ -719,12 +725,14 @@ class HyperAccessibilityService : AccessibilityService() {
                     "measured" -> AppSettings.setDebugMorphMeasured(this@HyperAccessibilityService, intent.getBooleanExtra("on", true))
                     "expand" -> postExpandIsland()      // identical path to expandIslandFromApp()
                     "collapse" -> postCollapseIsland()  // identical path to the drag-down / outside-tap collapse
+                    "variant" -> AppSettings.setExperienceVariant(this@HyperAccessibilityService, intent.getStringExtra("name"))
                     "layout_dump" -> debugLayoutDump()
                     else -> TraceLog.line("DEBUG", "unknown debug cmd ignored: " + cmd)
                 }
                 TraceLog.line("DEBUG", "debug cmd handled: " + cmd +
                     " freezeP=" + AppSettings.getDebugMorphFreezeP(this@HyperAccessibilityService) +
-                    " measured=" + AppSettings.getDebugMorphMeasured(this@HyperAccessibilityService))
+                    " measured=" + AppSettings.getDebugMorphMeasured(this@HyperAccessibilityService) +
+                    " variant=" + AppSettings.getExperienceVariant(this@HyperAccessibilityService))
             }.onFailure { TraceLog.line("DEBUG", "debug cmd failed: " + it.javaClass.simpleName) }
         }
     }
