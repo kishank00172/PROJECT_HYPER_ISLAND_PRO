@@ -10,6 +10,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.hyperisland.pro.R
 import com.hyperisland.pro.core.AppSettings
+import com.hyperisland.pro.core.TraceLog
 import com.hyperisland.pro.core.MotionVariant
 import com.hyperisland.pro.services.HyperAccessibilityService
 
@@ -173,6 +174,7 @@ class TestLabActivity : Activity() {
       *  writes the same pref the adb debug receiver writes - one source of truth. */
     private fun bindExperienceVariantLab() {
         val group = findViewById<RadioGroup>(R.id.radioExperienceVariant)
+        TraceLog.gesture("variant-lab opened: current pref = " + AppSettings.getExperienceVariant(this))
         group.check(when (AppSettings.getExperienceVariant(this)) {
             "claude" -> R.id.radioVariantClaude
             "sol" -> R.id.radioVariantSol
@@ -185,6 +187,7 @@ class TestLabActivity : Activity() {
                 else -> "mix"
             }
             AppSettings.setExperienceVariant(this, name)
+            TraceLog.gesture("variant-lab wrote pref = " + name + " (readback = " + AppSettings.getExperienceVariant(this) + ")")
             Toast.makeText(this, "Variant: " + name, Toast.LENGTH_SHORT).show()
         }
     }

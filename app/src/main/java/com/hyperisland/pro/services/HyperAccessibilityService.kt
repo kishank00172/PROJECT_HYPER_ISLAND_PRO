@@ -100,6 +100,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import java.lang.reflect.Proxy
@@ -161,7 +162,15 @@ class HyperAccessibilityService : AccessibilityService() {
                     val gp = experienceProfile().glow
                     val iconEdge = (if (isBandIcon) dp(32) else dp(26)).toFloat()
                     val sizeK = iconEdge / dp(32).toFloat()
-                    val cx = width / 2f; val cy = height / 2f
+                    // b1455b (his: "pill me glow camera cutout ke around kyu hai?"): centre the halo on the
+                    // ICON CHILD itself - the preview host is a wide strip (icon at the left, count at the
+                    // right, camera hole in-between); centring on width/2 put the halo over the cutout.
+                    val ic = if (isBandIcon) appIconView else pillPreviewIcon
+                    var cx = width / 2f; var cy = height / 2f
+                    if (ic != null && ic.width > 0) {
+                        cx = ic.left + ic.translationX + ic.width / 2f
+                        cy = ic.top + ic.translationY + ic.height / 2f
+                    }
                     val coreR = dp(gp.coreRadiusDp).toFloat() * sizeK
                     val key = glowColor.toString() + ":" + width + "x" + height + ":" + System.identityHashCode(gp) + ":" + isBandIcon
                     if (key != glowKey) {
@@ -689,6 +698,7 @@ class HyperAccessibilityService : AccessibilityService() {
       * Phase 2a; individual painters start consuming profiles one knob at a time, each in its own commit. */
     private fun experienceProfile() = ExperienceProfiles.of(ExperienceVariant.parse(AppSettings.getExperienceVariant(this)))
 
+    private var outsideDownX = 0f; private var outsideDownY = 0f; private var outsideDownAt = 0L
     private var bandView: android.view.View? = null
     private var bandTextSec: android.view.View? = null
     private var bodySec: android.view.View? = null
@@ -4736,21 +4746,26 @@ class HyperAccessibilityService : AccessibilityService() {
                 when (action) {
                     MotionEvent.ACTION_DOWN -> {
                         outsideGestureActive = !insideIsland
-                        if (outsideGestureActive) {
-                            // b1455 phantom-touch fix (his report: "swipe kar rha hota hu ye touch register
-                            // kar leta hai"): dismiss-on-outside-tap stays, but CONSUMING the stream here was
-                            // eating every outside swipe whole (return true at DOWN claims the pointer). The
-                            // outsideWatcherView does the same dismissal with `false` - stream passes through
-                            // to the app below; we must not be greedier than it.
-                            if (isReplyMode) exitReplyMode() else postSwipeUpIsland()
-                            TraceLog.gesture("outside-tap dismiss at (" + event.rawX.toInt() + "," + event.rawY.toInt() + ") - stream passed below (not consumed)")
-                            return false
-                        }
+                        if (outsideGestureActive) { outsideDownX = event.rawX; outsideDownY = event.rawY; outsideDownAt = event.eventTime }
+                        // NEVER consume: the stream below owns the whole gesture (his swipe complaint).
+                        // The dismiss decision waits for UP - tap-only, swipe-safe.
+                        return false
                     }
                     MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         if (outsideGestureActive) {
                             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                                 outsideGestureActive = false
+                                if (action == MotionEvent.ACTION_UP) {
+                                    val dx = event.rawX - outsideDownX; val dy = event.rawY - outsideDownY
+                                    val slop = android.view.ViewConfiguration.get(this@HyperAccessibilityService).scaledTouchSlop.toFloat()
+                                    val tapped = (dx * dx + dy * dy) <= (3f * slop * slop) && (event.eventTime - outsideDownAt) <= 280L
+                                    if (tapped) {
+                                        TraceLog.gesture("outside TAP (pure tap " + kotlin.math.hypot(dx, dy).toInt() + "px) -> " + (if (isReplyMode) "exitReply" else "collapse"))
+                                        if (isReplyMode) exitReplyMode() else postSwipeUpIsland()
+                                    } else {
+                                        TraceLog.gesture("outside touch released as DRAG (" + kotlin.math.hypot(dx, dy).toInt() + "px, " + (event.eventTime - outsideDownAt) + "ms) - island kept alive, stream untouched")
+                                    }
+                                }
                             }
                             return false
                         }
@@ -5160,7 +5175,9 @@ class HyperAccessibilityService : AccessibilityService() {
             // (clipToOutline is on this container), so expanding/collapsing reveals or masks text
             // instead of re-measuring it at 48 intermediate widths. That re-wrap per frame was the
             // expand/collapse jitter — MATCH_PARENT here was the root cause.
-            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(expandedContentWidthPx(), -1, Gravity.START or Gravity.CENTER_VERTICAL))
+            addView(this@HyperAccessibilityService.gridRoot, FrameLayout.LayoutParams(expandedContentWidthPx(), -1,
+                if (AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) Gravity.START or Gravity.TOP
+                else Gravity.START or Gravity.CENTER_VERTICAL))
 
             // Compact pill badge preview: stable pill, spread content.
             // Icon stays left, count badge stays right — no cramped center cluster.
