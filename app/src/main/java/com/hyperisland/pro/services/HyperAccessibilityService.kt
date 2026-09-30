@@ -129,6 +129,69 @@ class HyperAccessibilityService : AccessibilityService() {
         val displayTimeMs: Long = 0L
     )
 
+    /** b1455 owner-transfer (his verdict: "glow sabhi icon ka personal material hoga, icon ke saath
+      *  lock karo - coordinates se nahi"): the halo is DRAWN BY THE ICON'S OWN FRAME, under the icon,
+      *  every frame. It rides wherever the icon rides - pendulum, drag, pager, anything - because it IS
+      *  the icon's own painting, not coordinates copied from elsewhere. Profile still supplies shape /
+      *  alpha / blur; colour source stays updateAmbientGlow. */
+    private inner class GlowHostIconFrame(context: Context, private val isBandIcon: Boolean) : FrameLayout(context) {
+        private var glowKey = ""
+        private val coreP = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val auraP = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        init {
+            val scr = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
+            coreP.xfermode = scr; auraP.xfermode = scr
+            setWillNotDraw(false)
+        }
+
+        /** band icon: the card's ambience (b1454's pill-leak rule kept); preview icon: it IS the pill. */
+        private fun glowAllowed(): Boolean {
+            if (!AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService) || glowColor == 0) return false
+            return if (isBandIcon) {
+                currentStage == IslandStage.STAGE3_FULL && (gridRoot?.visibility == View.VISIBLE) && (gridRoot?.alpha ?: 0f) > 0.01f
+            } else {
+                currentStage != IslandStage.STAGE3_FULL && visibility == View.VISIBLE
+            }
+        }
+
+        override fun dispatchDraw(canvas: Canvas) {
+            val baseA = if (isBandIcon) (gridRoot?.alpha ?: 1f) else alpha
+            runCatching {
+                if (glowAllowed() && baseA > 0.01f && width > 0) {
+                    val gp = experienceProfile().glow
+                    val iconEdge = (if (isBandIcon) dp(32) else dp(26)).toFloat()
+                    val sizeK = iconEdge / dp(32).toFloat()
+                    val cx = width / 2f; val cy = height / 2f
+                    val coreR = dp(gp.coreRadiusDp).toFloat() * sizeK
+                    val key = glowColor.toString() + ":" + width + "x" + height + ":" + System.identityHashCode(gp) + ":" + isBandIcon
+                    if (key != glowKey) {
+                        fun stops(alphaScale: Float): IntArray {
+                            val a = IntArray(gp.stopFractions.size)
+                            for (i in a.indices) a[i] = ((gp.stopAlphaMul[i] * alphaScale * 255).toInt().coerceIn(0, 255) shl 24) or (glowColor and 0x00FFFFFF)
+                            return a
+                        }
+                        coreP.shader = android.graphics.RadialGradient(cx, cy, coreR, stops(gp.coreAlpha), gp.stopFractions, android.graphics.Shader.TileMode.CLAMP)
+                        coreP.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(gp.blurPx.toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null
+                        auraP.maskFilter = null
+                        if (gp.twoLayer) {
+                            val aR = dp(gp.auraRadiusDp).toFloat() * sizeK
+                            auraP.shader = android.graphics.RadialGradient(cx, cy + dp(gp.auraOffsetYDp).toFloat() * sizeK, aR, stops(gp.auraAlpha), gp.stopFractions, android.graphics.Shader.TileMode.CLAMP)
+                        }
+                        glowKey = key
+                    }
+                    coreP.alpha = (255 * baseA).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(cx, cy, coreR, coreP)
+                    if (gp.twoLayer) {
+                        val aR = dp(gp.auraRadiusDp).toFloat() * sizeK
+                        auraP.alpha = (255 * baseA).toInt().coerceIn(0, 255)
+                        canvas.drawCircle(cx, cy + dp(gp.auraOffsetYDp).toFloat() * sizeK, aR, auraP)
+                    }
+                }
+            }
+            super.dispatchDraw(canvas)   // b1452 rule: cosmetic halo must never swallow a draw
+        }
+    }
+
     private class InstagramGradientCameraDrawable : Drawable() {
         private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -4837,7 +4900,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     " nextGlowBase=(0,0) -> jumpX=" + f.left + " jumpY=" + f.top)
                 morphFrame = null
                 background = this@HyperAccessibilityService.islandBackground
-                clipToOutline = true
+                clipToOutline = false   // steady-state: background shape carries the corners; clipping was only for the morph silhouette (b1455 teleport fix owns a clean rest)
                 for (i in 0 until childCount) getChildAt(i).translationY = 0f
                 invalidate()
             }
@@ -4847,6 +4910,7 @@ class HyperAccessibilityService : AccessibilityService() {
              * invisible (a 30% blue over black IS ~4% luminance). SCREEN vs black renders the gradient as
              * written, still no new dependency, still one Paint, shader keyed by (colour, centre). */
             private fun drawAmbientGlow(canvas: Canvas, l: Float, t: Float) = runCatching {
+                if (true) return@runCatching   // b1455 owner-transfer: GlowHostIconFrame owns every halo now (this site superseded; kept dormant for rollback reference)
                 if (glowColor == 0 || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return@runCatching
                 // b1454 issue #6: the glow is the expanded card's ambience only - the pill never wears the
                 // last notification's colour (the leak was gridRoot.alpha staying 1.0 while gone).
@@ -5056,7 +5120,7 @@ class HyperAccessibilityService : AccessibilityService() {
             this@HyperAccessibilityService.islandMorph = this
             this@HyperAccessibilityService.gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(1), dp(1), dp(1), dp(1)); visibility = View.GONE; alpha = 0f; weightSum = 1f
-                val iconSec = FrameLayout(context).also { this@HyperAccessibilityService.gridIconSec = it }.apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
+                val iconSec = GlowHostIconFrame(context, isBandIcon = true).also { this@HyperAccessibilityService.gridIconSec = it }.apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
                 val contentSec = LinearLayout(context).also { this@HyperAccessibilityService.gridContentSec = it }.apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0)
                     val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -5100,7 +5164,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
             // Compact pill badge preview: stable pill, spread content.
             // Icon stays left, count badge stays right — no cramped center cluster.
-            this@HyperAccessibilityService.pillPreviewRoot = FrameLayout(this@HyperAccessibilityService).apply {
+            this@HyperAccessibilityService.pillPreviewRoot = GlowHostIconFrame(this@HyperAccessibilityService, isBandIcon = false).apply {
                 visibility = View.GONE
                 alpha = 0f
                 setPadding(dp(14), 0, dp(14), 0)
@@ -5594,6 +5658,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
+        TraceLog.morph("v2 build marker: owner-transfer glow + TOP-pin era (post b1467)")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -5667,7 +5732,11 @@ class HyperAccessibilityService : AccessibilityService() {
             trail.addView(timeStampText, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
             bandText.addView(trail, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(14) })
             band.addView(bandText, LinearLayout.LayoutParams(0, -2, 1f))
+            // b1455 owner-transfer: the icon hosts its own halo (Sol's aura pools 78dp wide = far outside
+            // the band's 38dp box); a clipping parent would box the halo back into the icon rect.
+            band.clipChildren = false; band.clipToPadding = false
             contentGrid.addView(band, LinearLayout.LayoutParams(-1, dp(AppSettings.getIslandHeightDp(this))))
+            contentGrid.clipChildren = false; contentGrid.clipToPadding = false
             val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
             body.addView(titleText, LinearLayout.LayoutParams(-1, dp(20)))
             body.addView(messageText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
