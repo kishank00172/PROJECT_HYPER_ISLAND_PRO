@@ -772,6 +772,50 @@
             android:text="TEST NOTIFICATION ISLAND"
             android:textColor="@color/text_primary" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Experience Variant (b1455 A/B/C: glow + gulp + pager rules)"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:textSize="18sp" />
+
+        <RadioGroup
+            android:id="@+id/radioExperienceVariant"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <RadioButton
+                android:id="@+id/radioVariantMix"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="MIX (default, agreed best) - glow: Sol's 2-layer pool + Claude's blur; gulp: Sol's 145ms absorb-rebound + Claude's haptic tick; TalkBack on"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioVariantSol"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="SOL (gpt-6-sol's numbers) - glow: pure 2-layer stops, no blur; gulp: 145ms, no haptic; TalkBack on"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioVariantClaude"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="CLAUDE (claude-sonnet-5's numbers) - glow: single-layer + 18px bloom; gulp: 110ms ~6% + haptic; TalkBack off"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+        </RadioGroup>
+
         <Button
             android:id="@+id/btnBack"
             android:layout_width="match_parent"

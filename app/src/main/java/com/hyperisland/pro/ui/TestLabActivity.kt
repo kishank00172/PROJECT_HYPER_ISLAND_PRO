@@ -24,6 +24,7 @@ class TestLabActivity : Activity() {
         bindLiquidCalibration()
         bindShadePolicyLab()
         bindMorphLab()
+        bindExperienceVariantLab()
         bindPillIconLab()
         bindShadePullLab()
 
@@ -165,6 +166,26 @@ class TestLabActivity : Activity() {
                 else AppSettings.SHADE_POLICY_COUNT_QUIETLY
             )
             Toast.makeText(this, "Shade: " + AppSettings.getShadeOpenPolicyName(this), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** b1455: live A/B/C of the two audits' tunables (glow shape, gulp curve, pager TalkBack);
+      *  writes the same pref the adb debug receiver writes - one source of truth. */
+    private fun bindExperienceVariantLab() {
+        val group = findViewById<RadioGroup>(R.id.radioExperienceVariant)
+        group.check(when (AppSettings.getExperienceVariant(this)) {
+            "claude" -> R.id.radioVariantClaude
+            "sol" -> R.id.radioVariantSol
+            else -> R.id.radioVariantMix
+        })
+        group.setOnCheckedChangeListener { _, checkedId ->
+            val name = when (checkedId) {
+                R.id.radioVariantClaude -> "claude"
+                R.id.radioVariantSol -> "sol"
+                else -> "mix"
+            }
+            AppSettings.setExperienceVariant(this, name)
+            Toast.makeText(this, "Variant: " + name, Toast.LENGTH_SHORT).show()
         }
     }
 
