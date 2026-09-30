@@ -4858,7 +4858,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 val coreKey = glowColor.toString() + ":" + System.identityHashCode(gp) + ":" + cx.toInt() + ":" + cy.toInt()
                 if (coreKey != glowShaderKey) {
                     glowPaint.shader = RadialGradient(cx, cy, coreRad, stopsFor(gp.coreAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
-                    glowPaint.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(dp(gp.blurPx).toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null
+                    glowPaint.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(gp.blurPx.toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null   // Px means px - his spec is "18px", not 18dp
                     glowShaderKey = coreKey
                     TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
                         " variant=" + AppSettings.getExperienceVariant(this@HyperAccessibilityService) +

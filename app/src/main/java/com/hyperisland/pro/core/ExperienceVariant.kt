@@ -29,13 +29,13 @@ data class GlowSpec(
     val auraAlpha: Float,
     val stopFractions: FloatArray,  // monotonic 0..1
     val stopAlphaMul: FloatArray,   // SOL: [1, .65, .16, 0]; CLAUDE: [1, .55, .22, 0] at [0,.45,1] (+blur)
-    val blurPx: Int,                // CLAUDE: 18px RenderEffect bloom; SOL: 0 (hands-off RenderEffect)
+    val blurPx: Int,                // CLAUDE: 18 PX (not dp - his literal "blur 18px"); SOL: 0
 )
 
 /** Post-collapse absorb pulse. One pulse, one settle: no glow/text changes accompany it. */
 data class GulpSpec(
     val durationMs: Int,
-    val times: FloatArray,          // seconds, ascending, first 0 last = duration
+    val times: FloatArray,          // milliseconds, ascending, first 0 last = durationMs
     val scaleX: FloatArray,
     val scaleY: FloatArray,         // contract first (absorb), then one rebound, then 1.0
     val hapticAtMs: Int,            // CLAUDE/MIX: tick during the absorb; SOL: no haptic
@@ -67,17 +67,20 @@ object ExperienceProfiles {
 
     val CLAUDE = ExperienceProfile(
         glow = GlowSpec(
-            twoLayer = false, coreRadiusDp = 62, auraRadiusDp = 0, auraOffsetYDp = 0,
-            coreAlpha = 0.18f, auraAlpha = 0f,
+            twoLayer = false, coreRadiusDp = 38, auraRadiusDp = 0, auraOffsetYDp = 0,   // his literal: radius = 1.6 x max(iconW, iconH) = 1.6 x 24dp
+            coreAlpha = 1.00f, auraAlpha = 0f,   // his stops [.55,.22,0] are the FINAL alphas, not multipliers of a base
             stopFractions = floatArrayOf(0f, 0.45f, 1f),
             stopAlphaMul = floatArrayOf(0.55f, 0.22f, 0f),   // claude's own numbers: 0f->55%a, .45f->22%a, 1f->0 (must reach zero at the edge; a hard disc rim is exactly the "cheap" look)
             blurPx = 18,
         ),
         gulp = GulpSpec(
             durationMs = 110,
-            times = floatArrayOf(0f, 48f, 110f),
-            scaleX = floatArrayOf(1.00f, 0.955f, 1.00f),   // ~6% amplitude, one rebound implied by easing
-            scaleY = floatArrayOf(1.00f, 0.890f, 1.00f),
+            // his literal MotionVariant.spring(t, 110ms, response=0.09, damping=0.55) sampled every few ms,
+            // mapped as 0.94 + 0.06*spring: 6% absorb, spring's 12.6% overshoot -> +0.76% rebound, one settle.
+            // Peak of the spring is at t=0.49 (54ms) = 1.1263 -> scale 1.0076.
+            times = floatArrayOf(0f, 13f, 28f, 42f, 54f, 73f, 88f, 110f),
+            scaleX = floatArrayOf(0.940f, 0.958f, 0.987f, 1.004f, 1.0074f, 1.0039f, 1.0004f, 1.00f),
+            scaleY = floatArrayOf(0.940f, 0.958f, 0.987f, 1.004f, 1.0074f, 1.0039f, 1.0004f, 1.00f),
             hapticAtMs = 35,
         ),
         pager = PagerSpec(rebindAllSlots = false, dragProgressLive = false, talkBackLabel = false),
