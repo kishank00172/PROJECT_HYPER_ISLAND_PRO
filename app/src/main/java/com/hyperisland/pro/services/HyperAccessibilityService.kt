@@ -4674,8 +4674,14 @@ class HyperAccessibilityService : AccessibilityService() {
                     MotionEvent.ACTION_DOWN -> {
                         outsideGestureActive = !insideIsland
                         if (outsideGestureActive) {
+                            // b1455 phantom-touch fix (his report: "swipe kar rha hota hu ye touch register
+                            // kar leta hai"): dismiss-on-outside-tap stays, but CONSUMING the stream here was
+                            // eating every outside swipe whole (return true at DOWN claims the pointer). The
+                            // outsideWatcherView does the same dismissal with `false` - stream passes through
+                            // to the app below; we must not be greedier than it.
                             if (isReplyMode) exitReplyMode() else postSwipeUpIsland()
-                            return true
+                            TraceLog.gesture("outside-tap dismiss at (" + event.rawX.toInt() + "," + event.rawY.toInt() + ") - stream passed below (not consumed)")
+                            return false
                         }
                     }
                     MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -4683,7 +4689,7 @@ class HyperAccessibilityService : AccessibilityService() {
                             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                                 outsideGestureActive = false
                             }
-                            return true
+                            return false
                         }
                     }
                 }
