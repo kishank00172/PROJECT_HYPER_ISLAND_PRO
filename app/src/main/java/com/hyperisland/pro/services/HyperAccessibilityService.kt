@@ -3878,9 +3878,11 @@ class HyperAccessibilityService : AccessibilityService() {
         // the number names the jump size. applyEndFrame profiles skip the restore ONLY when it is a logged
         // true no-op - silently skipping a non-trivial restore is how stale-attribute bugs are born.
         val hsTy1 = bandTextSec?.translationY ?: 0f; val hsTy2 = bodySec?.translationY ?: 0f
-        val hsDeltaPx = maxOf(kotlin.math.abs(hsTy1), kotlin.math.abs(hsTy2))
+        val hsTyIcon = gridIconSec?.translationY ?: 0f; val hsTyRoot = gridRoot?.translationY ?: 0f
+        val hsDeltaPx = maxOf(kotlin.math.abs(hsTy1), kotlin.math.abs(hsTy2), kotlin.math.abs(hsTyIcon), kotlin.math.abs(hsTyRoot))
         val hs = experienceProfile().handshake
         TraceLog.morph("v2 handshake invariant: dTy=" + "%.2f".format(hsTy1) + "/" + "%.2f".format(hsTy2) +
+            " iconY=" + "%.1f".format(hsTyIcon) + " rootY=" + "%.1f".format(hsTyRoot) +
             " preAlpha=" + "%.2f".format(bandTextSec?.alpha ?: -1f) +
             " preScaleY=" + "%.3f".format(bandTextSec?.scaleY ?: -1f) +
             " |lastAnim-rest|=" + "%.2f".format(hsDeltaPx) + "px (target<1.0) variant=" + AppSettings.getExperienceVariant(this))
@@ -4394,7 +4396,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // The v2 container's own 2-3 px overshoot is already inside this budget (same formula, its damping).
         if (morphOvershootPx > 0) morphPinH = morphPinH!! + morphOvershootPx
         updateIslandLayout(morphPinW!!, morphPinH!!, startR)
-        val startFrame = IslandMorphFrame.compute(morphPinW!!, morphNaturalH, fromW, fromH, morphOvershootPx)
+        val startFrame = IslandMorphFrame.compute(morphPinW!!, morphNaturalH, fromW, fromH, morphOvershootPx, 0f, AppSettings.getUiV2LayoutAEnabled(this))
         lastMorphBoxLeft = startFrame.left
         islandMorph?.applyMorphFrame(startFrame, startR)
         morphTowardCard = towardCard
@@ -4821,6 +4823,12 @@ class HyperAccessibilityService : AccessibilityService() {
 
             override fun clearMorphFrame() {
                 if (morphFrame == null) return
+                val f = morphFrame!!
+                var lastTy = 0f
+                for (i in 0 until childCount) { if (i == 0) lastTy = getChildAt(i).translationY }
+                TraceLog.morph("v2 morph-end geometry: lastFrame=(l" + f.left + ",t" + f.top + ",b" + f.bottom + ") contentOffY=" + f.contentOffsetY +
+                    " view=(l" + left + ",t" + top + ",b" + bottom + ") childTY0=" + "%.1f".format(lastTy) +
+                    " nextGlowBase=(0,0) -> jumpX=" + f.left + " jumpY=" + f.top)
                 morphFrame = null
                 background = this@HyperAccessibilityService.islandBackground
                 clipToOutline = true
@@ -4849,8 +4857,8 @@ class HyperAccessibilityService : AccessibilityService() {
                 // ALWAYS (30dp, islandH/2) inside the morph silhouette, at every stage, because the band pins
                 // the shell's top edge. So the glow center IS the icon center now - if the band's icon moved,
                 // this moves with it by construction, not by coincidence.
-                val cx = l + dp(14).toFloat() + dp(32).toFloat() / 2f
-                val cy = t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f
+                val cx = l + dp(30).toFloat()   // icon-centre x = 14dp margin + half of the 32dp band icon
+                val cy = t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f   // band centre, setting-aware
 
                 fun stopsFor(alphaScale: Float): IntArray {
                     val arr = IntArray(gp.stopFractions.size)
@@ -4870,7 +4878,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
                         " variant=" + AppSettings.getExperienceVariant(this@HyperAccessibilityService) +
                         " coreR=" + gp.coreRadiusDp + " twoLayer=" + gp.twoLayer + " blur=" + gp.blurPx +
-                        " anchorPx=(" + cx.toInt() + "," + cy.toInt() + ") iconPx=(" + (l + dp(30)).toInt() + "," + (t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)) / 2).toInt() + ")")
+                        " anchorPx=(" + cx.toInt() + "," + cy.toInt() + ") iconPx=(" + (l + dp(30).toFloat()).toInt() + "," + (t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f).toInt() + ")")
                 }
                 xferNow(glowPaint)
                 glowPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
