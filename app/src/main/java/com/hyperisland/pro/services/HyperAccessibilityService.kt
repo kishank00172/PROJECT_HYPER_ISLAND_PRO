@@ -4843,7 +4843,14 @@ class HyperAccessibilityService : AccessibilityService() {
                 // untouched - same updateAmbientGlow source). Two-layer pool for SOL/MIX: core at the
                 // icon, aura pooled below; Claude's single-layer + 18px MaskFilter bloom in his profile.
                 val gp = experienceProfile().glow
-                val cx = l + dp(38).toFloat(); val cy = t + dp(38).toFloat()
+                // b1455 verify-pass (his issue: "glow icon ke center pe hai? attached hai?"): NO it was not -
+                // (38dp, 38dp) was the legacy 76dp-pill anchor, stale since the band refactor. The band is
+                // shell-top, height = islandH, icon is a 32dp box at marginStart 14dp -> the icon's center is
+                // ALWAYS (30dp, islandH/2) inside the morph silhouette, at every stage, because the band pins
+                // the shell's top edge. So the glow center IS the icon center now - if the band's icon moved,
+                // this moves with it by construction, not by coincidence.
+                val cx = l + dp(14).toFloat() + dp(32).toFloat() / 2f
+                val cy = t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f
 
                 fun stopsFor(alphaScale: Float): IntArray {
                     val arr = IntArray(gp.stopFractions.size)
@@ -4862,7 +4869,8 @@ class HyperAccessibilityService : AccessibilityService() {
                     glowShaderKey = coreKey
                     TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
                         " variant=" + AppSettings.getExperienceVariant(this@HyperAccessibilityService) +
-                        " coreR=" + gp.coreRadiusDp + " twoLayer=" + gp.twoLayer + " blur=" + gp.blurPx)
+                        " coreR=" + gp.coreRadiusDp + " twoLayer=" + gp.twoLayer + " blur=" + gp.blurPx +
+                        " anchorPx=(" + cx.toInt() + "," + cy.toInt() + ") iconPx=(" + (l + dp(30)).toInt() + "," + (t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)) / 2).toInt() + ")")
                 }
                 xferNow(glowPaint)
                 glowPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
