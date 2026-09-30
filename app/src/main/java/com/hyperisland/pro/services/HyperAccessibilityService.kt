@@ -4746,10 +4746,16 @@ class HyperAccessibilityService : AccessibilityService() {
                 when (action) {
                     MotionEvent.ACTION_DOWN -> {
                         outsideGestureActive = !insideIsland
-                        if (outsideGestureActive) { outsideDownX = event.rawX; outsideDownY = event.rawY; outsideDownAt = event.eventTime }
-                        // NEVER consume: the stream below owns the whole gesture (his swipe complaint).
-                        // The dismiss decision waits for UP - tap-only, swipe-safe.
-                        return false
+                        if (outsideGestureActive) {
+                            outsideDownX = event.rawX; outsideDownY = event.rawY; outsideDownAt = event.eventTime
+                            // b1459 hotfix: my b1469 down-branch returned false even for taps INSIDE the
+                            // island, so no child (pill / card content) ever saw a down - "island pe touch
+                            // work he nahi kar rha". Only OUTSIDE touches bypass; inside goes to super.
+                            TraceLog.gesture("outside-down at (" + event.rawX.toInt() + "," + event.rawY.toInt() + ") rect=(" + rect.left + "," + rect.top + "," + rect.right + "," + rect.bottom + ") inside=" + insideIsland)
+                            return false   // never consume: the stream below owns the whole gesture
+                        }
+                        // inside the island: children MUST get the event
+                        return super.dispatchTouchEvent(event)
                     }
                     MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         if (outsideGestureActive) {
@@ -4769,6 +4775,8 @@ class HyperAccessibilityService : AccessibilityService() {
                             }
                             return false
                         }
+                        // a down that started inside the island: children own the whole stream
+                        return super.dispatchTouchEvent(event)
                     }
                 }
 
