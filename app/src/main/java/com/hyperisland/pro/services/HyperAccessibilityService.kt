@@ -4851,14 +4851,26 @@ class HyperAccessibilityService : AccessibilityService() {
                 // untouched - same updateAmbientGlow source). Two-layer pool for SOL/MIX: core at the
                 // icon, aura pooled below; Claude's single-layer + 18px MaskFilter bloom in his profile.
                 val gp = experienceProfile().glow
-                // b1455 verify-pass (his issue: "glow icon ke center pe hai? attached hai?"): NO it was not -
-                // (38dp, 38dp) was the legacy 76dp-pill anchor, stale since the band refactor. The band is
-                // shell-top, height = islandH, icon is a 32dp box at marginStart 14dp -> the icon's center is
-                // ALWAYS (30dp, islandH/2) inside the morph silhouette, at every stage, because the band pins
-                // the shell's top edge. So the glow center IS the icon center now - if the band's icon moved,
-                // this moves with it by construction, not by coincidence.
-                val cx = l + dp(30).toFloat()   // icon-centre x = 14dp margin + half of the 32dp band icon
-                val cy = t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f   // band centre, setting-aware
+                // b1455 TRUE LOCK (his words: "glow sabhi icon ka personal material hoga, icon ke saath
+                // lock karo"): the glow centre is the band icon's ACTUAL centre in this canvas, resolved by
+                // walking the view tree and summing layout offsets + translations every frame. During the
+                // morph pendulum the icon bounces (delayed half ride) - the glow now bounces WITH it, not
+                // around a static formula. If the icon is ever gone/invisible the computed band anchor
+                // (30dp, islandH/2 relative to the morph box) stands in, so nothing ever draws at (0,0).
+                var cx = l + dp(30).toFloat()
+                var cy = t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f
+                val icv = gridIconSec
+                var live = false
+                if (icv != null && icv.visibility == View.VISIBLE && icv.width > 0) {
+                    var ax = icv.left + icv.translationX; var ay = icv.top + icv.translationY
+                    var par: android.view.ViewParent? = icv.parent
+                    while (par is View && par !== this) {
+                        ax += (par as View).left + (par as View).translationX
+                        ay += (par as View).top + (par as View).translationY
+                        par = (par as View).parent
+                    }
+                    if (par === this) { cx = ax + icv.width / 2f; cy = ay + icv.height / 2f; live = true }
+                }
 
                 fun stopsFor(alphaScale: Float): IntArray {
                     val arr = IntArray(gp.stopFractions.size)
@@ -4878,7 +4890,8 @@ class HyperAccessibilityService : AccessibilityService() {
                     TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
                         " variant=" + AppSettings.getExperienceVariant(this@HyperAccessibilityService) +
                         " coreR=" + gp.coreRadiusDp + " twoLayer=" + gp.twoLayer + " blur=" + gp.blurPx +
-                        " anchorPx=(" + cx.toInt() + "," + cy.toInt() + ") iconPx=(" + (l + dp(30).toFloat()).toInt() + "," + (t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f).toInt() + ")")
+                        " anchorPx=(" + cx.toInt() + "," + cy.toInt() + ") liveIcon=" + live +
+                        " band-FallbackPx=(" + (l + dp(30).toFloat()).toInt() + "," + (t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f).toInt() + ")")
                 }
                 xferNow(glowPaint)
                 glowPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
@@ -5656,6 +5669,20 @@ class HyperAccessibilityService : AccessibilityService() {
             replyBar?.let { body.addView(it, LinearLayout.LayoutParams(-1, -2)) }
             contentGrid.addView(body, LinearLayout.LayoutParams(-1, dp(100)).apply { topMargin = dp(4); leftMargin = dp(16); rightMargin = dp(16) })
             bandView = band; bandTextSec = bandText; bodySec = body
+            // b1455 teleport fix (his diagnosis, proven by the trace): the morph wrapper is
+            // naturalH + headroom tall DURING the morph and shrinks back at the end. With the
+            // content view centred in it, that shrink moved the card (and everything in it)
+            // half the headroom in the last frame - the "bounce ends, then the settle drops a
+            // bit" teleport, invisible to translation invariants because it is a LAYOUT move.
+            // The v2 card's top edge IS the pill's pixels: pin it to the wrapper's top and the
+            // end-shrink only removes empty surface below. Classic styles keep their centring.
+            (gridRoot as? View)?.layoutParams?.let { lp ->
+                if (lp is FrameLayout.LayoutParams && lp.gravity != Gravity.START or Gravity.TOP) {
+                    lp.gravity = Gravity.START or Gravity.TOP
+                    (gridRoot as? View)?.layoutParams = lp
+                    TraceLog.morph("v2 layout pin: card content anchored to wrapper TOP (headroom is empty space below now)")
+                }
+            }
             // keep-out: the cutout rect in card-local coords; fallback = pill centre +/- 23dp (his rule)
             visualRoot?.post {
                 val cut = visualRoot?.rootWindowInsets?.displayCutout?.boundingRectTop
