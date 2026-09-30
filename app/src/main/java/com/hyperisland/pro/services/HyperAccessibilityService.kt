@@ -130,77 +130,6 @@ class HyperAccessibilityService : AccessibilityService() {
         val displayTimeMs: Long = 0L
     )
 
-    /** b1455 owner-transfer (his verdict: "glow sabhi icon ka personal material hoga, icon ke saath
-      *  lock karo - coordinates se nahi"): the halo is DRAWN BY THE ICON'S OWN FRAME, under the icon,
-      *  every frame. It rides wherever the icon rides - pendulum, drag, pager, anything - because it IS
-      *  the icon's own painting, not coordinates copied from elsewhere. Profile still supplies shape /
-      *  alpha / blur; colour source stays updateAmbientGlow. */
-    private inner class GlowHostIconFrame(context: Context, private val isBandIcon: Boolean) : FrameLayout(context) {
-        private var glowKey = ""
-        private val coreP = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        private val auraP = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        init {
-            val scr = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
-            coreP.xfermode = scr; auraP.xfermode = scr
-            setWillNotDraw(false)
-        }
-
-        /** band icon: the card's ambience (b1454's pill-leak rule kept); preview icon: it IS the pill. */
-        private fun glowAllowed(): Boolean {
-            if (!AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService) || glowColor == 0) return false
-            return if (isBandIcon) {
-                currentStage == IslandStage.STAGE3_FULL && (gridRoot?.visibility == View.VISIBLE) && (gridRoot?.alpha ?: 0f) > 0.01f
-            } else {
-                currentStage != IslandStage.STAGE3_FULL && visibility == View.VISIBLE
-            }
-        }
-
-        override fun dispatchDraw(canvas: Canvas) {
-            val baseA = if (isBandIcon) (gridRoot?.alpha ?: 1f) else alpha
-            runCatching {
-                if (glowAllowed() && baseA > 0.01f && width > 0) {
-                    val gp = experienceProfile().glow
-                    val iconEdge = (if (isBandIcon) dp(32) else dp(26)).toFloat()
-                    val sizeK = iconEdge / dp(32).toFloat()
-                    // b1455b (his: "pill me glow camera cutout ke around kyu hai?"): centre the halo on the
-                    // ICON CHILD itself - the preview host is a wide strip (icon at the left, count at the
-                    // right, camera hole in-between); centring on width/2 put the halo over the cutout.
-                    val ic = if (isBandIcon) appIconView else pillPreviewIcon
-                    var cx = width / 2f; var cy = height / 2f
-                    if (ic != null && ic.width > 0) {
-                        cx = ic.left + ic.translationX + ic.width / 2f
-                        cy = ic.top + ic.translationY + ic.height / 2f
-                    }
-                    val coreR = dp(gp.coreRadiusDp).toFloat() * sizeK
-                    val key = glowColor.toString() + ":" + width + "x" + height + ":" + System.identityHashCode(gp) + ":" + isBandIcon
-                    if (key != glowKey) {
-                        fun stops(alphaScale: Float): IntArray {
-                            val a = IntArray(gp.stopFractions.size)
-                            for (i in a.indices) a[i] = ((gp.stopAlphaMul[i] * alphaScale * 255).toInt().coerceIn(0, 255) shl 24) or (glowColor and 0x00FFFFFF)
-                            return a
-                        }
-                        coreP.shader = android.graphics.RadialGradient(cx, cy, coreR, stops(gp.coreAlpha), gp.stopFractions, android.graphics.Shader.TileMode.CLAMP)
-                        coreP.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(gp.blurPx.toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null
-                        auraP.maskFilter = null
-                        if (gp.twoLayer) {
-                            val aR = dp(gp.auraRadiusDp).toFloat() * sizeK
-                            auraP.shader = android.graphics.RadialGradient(cx, cy + dp(gp.auraOffsetYDp).toFloat() * sizeK, aR, stops(gp.auraAlpha), gp.stopFractions, android.graphics.Shader.TileMode.CLAMP)
-                        }
-                        glowKey = key
-                    }
-                    coreP.alpha = (255 * baseA).toInt().coerceIn(0, 255)
-                    canvas.drawCircle(cx, cy, coreR, coreP)
-                    if (gp.twoLayer) {
-                        val aR = dp(gp.auraRadiusDp).toFloat() * sizeK
-                        auraP.alpha = (255 * baseA).toInt().coerceIn(0, 255)
-                        canvas.drawCircle(cx, cy + dp(gp.auraOffsetYDp).toFloat() * sizeK, aR, auraP)
-                    }
-                }
-            }
-            super.dispatchDraw(canvas)   // b1452 rule: cosmetic halo must never swallow a draw
-        }
-    }
-
     private class InstagramGradientCameraDrawable : Drawable() {
         private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -4592,7 +4521,15 @@ class HyperAccessibilityService : AccessibilityService() {
         v2GulpAnim?.cancel()
         val shell = islandView ?: return
         val pill = pillPreviewRoot
-        val targets = if (pill != null) listOf(shell, pill) else listOf(shell)
+        // b1459b: the pill preview lives INSIDE the wrapper - scaling both compounded the amplitude (~0.94^2),
+        // which is what made the gulp read jaggered/cheap on his eyes. Scale the wrapper; the pill rides with
+        // it. Only if the preview ever sits OUTSIDE the wrapper do we scale it separately.
+        fun insideShell(v: View?): Boolean {
+            var pth: android.view.ViewParent? = v?.parent
+            while (pth != null) { if (pth === shell) return true; pth = (pth as? View)?.parent }
+            return false
+        }
+        val targets = if (pill != null && !insideShell(pill)) listOf(shell, pill) else listOf(shell)
         for (v in targets) { v.pivotX = v.width / 2f; v.pivotY = v.height / 2f }
         // Round 46: the keyframe TABLE is gone - one continuous curve drives every frame (his diagnosis:
         // corners between linear segments read mechanical no matter how correct the numbers are), and
@@ -4651,8 +4588,38 @@ class HyperAccessibilityService : AccessibilityService() {
         // Size first, then release the drawn box - same message, one traversal after both. On a collapse the
         // pinned view is still card-sized at this instant, so clearing the frame before the resize would
         // paint a full-size black card for exactly one frame: a new ghost bought by fixing the old one.
-        updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
-        islandMorph?.clearMorphFrame()
+        // b1459b (his "teleport abhi bhi hai", trace-backed): clearing the morph IMMEDIATELY after asking
+        // the WM for the final size means the first bg frame can draw at the OLD size while the layout is
+        // still in flight - a one-frame snap right where the eye lands. Clear only once the wrapper has
+        // actually settled at the final height; forced fallback so a morph never sticks.
+        run {
+        val hostV = islandView
+        if (hostV != null) {
+            var cleared = false
+            val once = object : View.OnLayoutChangeListener {
+                override fun onLayoutChange(v: View?, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, orr: Int, ob: Int) {
+                    if ((b - t) == morphFinalH && !cleared) {
+                        cleared = true
+                        v?.removeOnLayoutChangeListener(this)
+                        islandMorph?.clearMorphFrame()
+                        TraceLog.morph("v2 end-sequence: wrapper settled at finalH=" + morphFinalH + " -> morph frame cleared (no snap window)")
+                    }
+                }
+            }
+            hostV.addOnLayoutChangeListener(once)
+            updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
+            mainHandler.postDelayed({
+                if (!cleared) {
+                    hostV.removeOnLayoutChangeListener(once)
+                    islandMorph?.clearMorphFrame()
+                    TraceLog.morph("v2 end-sequence: fallback clear after 300ms (wrapper never hit finalH=" + morphFinalH + ")")
+                }
+            }, 300)
+        } else {
+            updateIslandLayout(morphFinalW, morphFinalH, morphFinalR)
+            islandMorph?.clearMorphFrame()
+        }
+        }
         morphPinW = null; morphPinH = null
         morphNaturalH = 0
         morphTravelV = 0
@@ -4933,7 +4900,6 @@ class HyperAccessibilityService : AccessibilityService() {
              * invisible (a 30% blue over black IS ~4% luminance). SCREEN vs black renders the gradient as
              * written, still no new dependency, still one Paint, shader keyed by (colour, centre). */
             private fun drawAmbientGlow(canvas: Canvas, l: Float, t: Float) = runCatching {
-                if (true) return@runCatching   // b1455 owner-transfer: GlowHostIconFrame owns every halo now (this site superseded; kept dormant for rollback reference)
                 if (glowColor == 0 || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return@runCatching
                 // b1454 issue #6: the glow is the expanded card's ambience only - the pill never wears the
                 // last notification's colour (the leak was gridRoot.alpha staying 1.0 while gone).
@@ -5143,7 +5109,7 @@ class HyperAccessibilityService : AccessibilityService() {
             this@HyperAccessibilityService.islandMorph = this
             this@HyperAccessibilityService.gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(1), dp(1), dp(1), dp(1)); visibility = View.GONE; alpha = 0f; weightSum = 1f
-                val iconSec = GlowHostIconFrame(context, isBandIcon = true).also { this@HyperAccessibilityService.gridIconSec = it }.apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
+                val iconSec = FrameLayout(context).also { this@HyperAccessibilityService.gridIconSec = it }.apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
                 val contentSec = LinearLayout(context).also { this@HyperAccessibilityService.gridContentSec = it }.apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0)
                     val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -5189,7 +5155,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
             // Compact pill badge preview: stable pill, spread content.
             // Icon stays left, count badge stays right — no cramped center cluster.
-            this@HyperAccessibilityService.pillPreviewRoot = GlowHostIconFrame(this@HyperAccessibilityService, isBandIcon = false).apply {
+            this@HyperAccessibilityService.pillPreviewRoot = FrameLayout(this@HyperAccessibilityService).apply {
                 visibility = View.GONE
                 alpha = 0f
                 setPadding(dp(14), 0, dp(14), 0)
