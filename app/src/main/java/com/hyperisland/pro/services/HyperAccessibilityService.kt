@@ -1376,8 +1376,21 @@ class HyperAccessibilityService : AccessibilityService() {
         return Notification.Action.Builder(icon, title, pi).build()
     }
 
+    /** The instant the card prints under the title: the message's own time when the app said one, else postTime. */
+    private fun ringTimeMs(m: NotificationModel): Long =
+        if (m.displayTimeMs > 0L) m.displayTimeMs else m.postTime
+
     /**
-     * Insert at the front, merged with any existing page for the same conversation.
+     * Insert by TIME, newest first, merged with any existing page for the same conversation.
+     *
+     * The order rule is the timestamps the user reads on the cards (ringTimeMs = the same source
+     * timeLabelFor prints), strictly newest to oldest. It used to be arrival order - a blind
+     * add(0, merged) - and Android re-posts every still-active notification whenever the listener
+     * reconnects, in whatever order it likes. One such burst left the user staring at
+     * "2 min first, Now 4th, yesterday 3rd" (b1479 feedback). Arrival order can never scramble
+     * again: a repost burst re-sorts to the labels' times, and an update carries its newest time
+     * so a fresh message rides its conversation back to the front exactly where its label says.
+     * Equal times keep the earlier entrant in front, which is what makes repost batches stable.
      *
      * Two things this had wrong and now fixes:
      *  - the list was described as "bounded" but nothing capped it, so a chatty group grew it
@@ -1398,8 +1411,11 @@ class HyperAccessibilityService : AccessibilityService() {
             model
         }
         if (index >= 0) notificationRing.removeAt(index)
-        notificationRing.add(0, merged)
-        ringEvent("${if (index >= 0) "merge" else "new page"} ${model.packageName} '${model.title}' unread=${merged.unreadCount} ring=${notificationRing.size}")
+        val t = ringTimeMs(merged)
+        var slot = 0
+        while (slot < notificationRing.size && ringTimeMs(notificationRing[slot]) >= t) slot++
+        notificationRing.add(slot, merged)
+        ringEvent("${if (index >= 0) "merge" else "new page"} ${model.packageName} '${model.title}' unread=${merged.unreadCount} ring=${notificationRing.size} slot=$slot age=${(System.currentTimeMillis() - t) / 1000}s")
         while (notificationRing.size > MAX_RING_ITEMS) {
             // Eviction order matters more than the cap. On this device Snapchat posts eight promo
             // notifications that carry CATEGORY_MESSAGE but no conversation extras; with a plain
@@ -6074,7 +6090,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1479 (glow commit-dominant fade, gulp settle-wait, proof metric screen-space) era")
+        TraceLog.morph("v2 build marker: b1480 (ring order = time-sorted like the labels) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
