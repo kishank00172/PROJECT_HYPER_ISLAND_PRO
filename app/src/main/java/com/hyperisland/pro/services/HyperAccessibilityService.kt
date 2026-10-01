@@ -82,6 +82,9 @@ import com.hyperisland.pro.core.ExperienceProfiles
 import com.hyperisland.pro.core.ExperienceVariant
 import com.hyperisland.pro.core.FrameWatch
 import com.hyperisland.pro.core.GpuLayerPrewarm
+import com.hyperisland.pro.core.PagerDots
+import com.hyperisland.pro.core.PagerMode
+import com.hyperisland.pro.core.PagerSpecResult
 import com.hyperisland.pro.core.GcSnapshot
 import com.hyperisland.pro.core.IslandGesture
 import com.hyperisland.pro.core.IslandMorphFrame
@@ -731,6 +734,8 @@ class HyperAccessibilityService : AccessibilityService() {
                     "expand" -> postExpandIsland()      // identical path to expandIslandFromApp()
                     "collapse" -> postCollapseIsland()  // identical path to the drag-down / outside-tap collapse
                     "variant" -> AppSettings.setExperienceVariant(this@HyperAccessibilityService, intent.getStringExtra("name"))
+                    "pager_set" -> debugPagerSet(intent.getIntExtra("idx", currentRingIndex), intent.getIntExtra("total", notificationRing.size))
+                    "pager_clear" -> debugPagerClear()
                     "layout_dump" -> debugLayoutDump()
                     else -> TraceLog.line("DEBUG", "unknown debug cmd ignored: " + cmd)
                 }
@@ -1398,6 +1403,7 @@ class HyperAccessibilityService : AccessibilityService() {
             else -> notificationRing.indexOfFirst { it.conversationKey == readingKey }.coerceAtLeast(0)
         }
         pillChatCount = notificationRing.size
+        onDisplayedPageChanged("ring-write")   // round-G single driver (insert/remove/merge/trim paths)
         notificationQueue.clear()
         notificationQueue.add(merged)
     }
@@ -5638,6 +5644,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun lerpEven(s: Int, e: Int, p: Float): Int { val v = (s + ((e - s) * p)).roundToInt(); return if (v % 2 != 0) v + 1 else v }
     private fun lerp(s: Float, e: Float, p: Float) = s + ((e - s) * p)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun dpf(v: Float) = (v * resources.displayMetrics.density).toInt()   // round-G float dims
     /**
      * Round 47-A (his approved spec, verbatim numbers, own flag KEY_UI_V2_LAYOUT_A for bisecting):
      * one post-pass over the already-built views. 4dp grid: pad 16 | header 14 | gap 6 | title 20 |
@@ -5649,7 +5656,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: owner-transfer glow + TOP-pin era (post b1467)")
+        TraceLog.morph("v2 build marker: ROUND-G ITEM 1/4 stateless pager (pure-spec render, single driver) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -5810,68 +5817,155 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     /** Pager ("slide bar"): slots of 12dp advance 16dp; dots 4dp, active capsule 12x4dp, all centred. */
-    private var pagerWindowFirst = 0
-    private var pagerBuiltIdx = -1   // which slot index the active capsule's HOST currently stands for
-    private fun rebuildPagerDots(animate: Boolean) { pagerSeekTo(currentRingIndex, animate, forceRebuild = true) }
-    private fun pagerSeekTo(idx: Int, animate: Boolean, forceRebuild: Boolean = false) {
+    private var pagerWindowFirst = 0   // round-G: kept for source history only (unused by the new render)
+    private var pagerBuiltIdx = -1
+    /** back-compat shims: legacy pagerSeekTo / rebuildPagerDots callers funnel into the single driver (round-G). */
+    private fun pagerSeekTo(idx: Int, animate: Boolean, forceRebuild: Boolean = false) { onDisplayedPageChanged(if (forceRebuild) "rebuild" else if (animate) "swipe" else "content") }
+    private fun rebuildPagerDots(animate: Boolean) { onDisplayedPageChanged("rebuild") }
+
+    // —————————————————————————————————————————————————————————————————————————————
+    // round-G ITEM 1 (sonnet 5.5's stateless redesign): renders PagerDots.specFor(idx, total).
+    // No capsule, no pagerBuiltIdx/window state => a stuck state is structurally impossible.
+    // Slot morphing is done with ONE ValueAnimator over the CURRENT drawn values -> exact targets,
+    // hard-set at end/cancel (owner invariant: last drawn frame == rest, 0 tolerance beyond 0.5px).
+    // —————————————————————————————————————————————————————————————————————————————
+    private var pagerModeNow: PagerMode? = null
+    private var pagerTotalNow = -1
+    private var pagerChips = ArrayList<FrameLayout>()
+    private var pagerTrack: View? = null
+    private var pagerThumb: View? = null
+    private var pagerAnim: ValueAnimator? = null
+    private var pagerDebugOverride: Pair<Int, Int>? = null   // (idx, total) debug-only
+
+    /** Debug broadcast override: `--es cmd pager_set --ei idx --ei total`, cleared by `pager_clear`. */
+    fun debugPagerSet(idx: Int, total: Int) {
+        pagerDebugOverride = if (total >= 0) Pair(idx, total) else null
+        onDisplayedPageChanged("debug")
+    }
+    fun debugPagerClear() { pagerDebugOverride = null; onDisplayedPageChanged("debugClear") }
+
+    /** THE single driver (round-G): every path that changes the displayed page must come through here. */
+    private fun onDisplayedPageChanged(reason: String) {
+        val overridden = pagerDebugOverride
+        val idx = overridden?.first ?: currentRingIndex
+        val total = overridden?.second ?: notificationRing.size
+        renderPager(idx.coerceAtLeast(0), total.coerceAtLeast(0), animate = reason != "content", reason = reason)
+    }
+
+    private fun renderPager(idx: Int, total: Int, animate: Boolean, reason: String) {
         val row = pagerRow ?: return
-        val pages = notificationRing.size
-        if (!AppSettings.getUiV2LayoutAEnabled(this) || pages <= 1) { row.visibility = View.GONE; return }
+        if (!AppSettings.getUiV2LayoutAEnabled(this)) { row.visibility = View.GONE; return }
+        val spec = PagerDots.specFor(idx, total)
+        if (spec.mode == PagerMode.HIDDEN) { row.visibility = View.GONE; pagerAnim?.cancel(); pagerAnim = null; return }
         row.visibility = View.VISIBLE
-        val idxC = idx.coerceIn(0, pages - 1)
-        // b1455 2d-lite (Sol's pager spec, the zero-risk half): absolute announcement per profile.
-        // The rebind-vs-translate-capsule rewrite + mid-drag progress stay in their own later commit -
-        // they live in the gesture-sync region and deserve a device-confirmed "dots still dead?" first.
-        if (experienceProfile().pager.talkBackLabel) {
-            row.contentDescription = "Page " + (idxC + 1) + " of " + pages
-            row.importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        row.contentDescription = "Page " + (idx.coerceAtLeast(0) + 1) + " of " + total
+        row.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        if (reason != "content") row.announceForAccessibility("Page " + (idx.coerceAtLeast(0) + 1) + " of " + total)
+
+        fun chip(colour: Int, cornerDp: Float): View = View(this).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(colour); cornerRadius = dpf(cornerDp).toFloat() }
         }
-        val winFirst = when {
-            pages <= 5 -> 0
-            idxC >= pages - 3 -> pages - 5
-            idxC - 2 >= 0 -> idxC - 2
-            else -> 0
-        }
-        val slotW = dp(12); val gap = dp(4)
-        val leftMore = winFirst > 0
-        fun slotBuilder(): FrameLayout = FrameLayout(this).apply {
-            minimumWidth = slotW; minimumHeight = dp(12); setClipChildren(false); setClipToPadding(false)
-        }
-        if (forceRebuild || winFirst != pagerWindowFirst || pagerActive == null) {
-            pagerWindowFirst = winFirst
-            row.removeAllViews()
-            if (leftMore) row.addView(View(this).apply {
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x2EFFFFFF) }
-            }, FrameLayout.LayoutParams(dp(3), dp(3)).apply { setMargins(0, dp(4) + dp(1), gap, 0) })
-            val last = (winFirst + 4).coerceAtMost(pages - 1)
-            for (i in winFirst..last) {
-                val host = slotBuilder()
-                if (i == idxC) {
-                    pagerActive = View(this).apply {
-                        background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(0xD9FFFFFF.toInt()); cornerRadius = dp(2).toFloat() }
+        
+        val trackColour = 0x2EFFFFFF; val activeColour = 0xD9FFFFFF.toInt(); val dotColour = 0x4DFFFFFF
+        // rebuild ONLY when mode/total changed (mode switch = 150ms crossfade happens in the row itself)
+        if (pagerModeNow != spec.mode || pagerTotalNow != total || pagerChips.isEmpty() && spec.mode == PagerMode.DOTS) {
+            pagerAnim?.cancel(); pagerAnim = null
+            row.removeAllViews(); pagerChips.clear(); pagerTrack = null; pagerThumb = null
+            pagerModeNow = spec.mode; pagerTotalNow = total
+            when (spec.mode) {
+                PagerMode.DOTS -> {
+                    row.animate()?.cancel(); row.alpha = 0f; row.animate()?.alpha(1f)?.setDuration(150)?.start()
+                    for (w in spec.slots) {
+                        val host = FrameLayout(this).apply { minimumHeight = dp(12); setClipChildren(false); setClipToPadding(false) }
+                        val isDash = w == PagerDots.DASH_W_DP
+                        host.addView(chip(if (isDash) activeColour else dotColour, if (isDash) 2f else PagerDots.CHIP_H_DP / 2f), FrameLayout.LayoutParams(dp(w), dp(PagerDots.CHIP_H_DP), Gravity.CENTER))
+                        pagerChips.add(host); row.addView(host, LinearLayout.LayoutParams(-2, dp(12)).apply { if (pagerChips.size < spec.slots.size) marginEnd = dp(PagerDots.GAP_DP) })
                     }
-                    host.addView(pagerActive, FrameLayout.LayoutParams(slotW, dp(4), Gravity.CENTER))
-                } else {
-                    host.addView(View(this).apply {
-                        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x4DFFFFFF) }
-                    }, FrameLayout.LayoutParams(dp(4), dp(4), Gravity.CENTER))
                 }
-                row.addView(host, LinearLayout.LayoutParams(slotW, dp(12)).apply { marginStart = gap })
+                PagerMode.TRACK -> {
+                    row.animate()?.cancel(); row.alpha = 0f; row.animate()?.alpha(1f)?.setDuration(150)?.start()
+                    val trackV = chip(trackColour, 2f)
+                    row.addView(trackV, LinearLayout.LayoutParams(dp(spec.trackWidthDp), dp(spec.trackHeightDp)).apply { marginStart = dp(PagerDots.GAP_DP); topMargin = dp(4) })
+                    pagerTrack = trackV
+                    val thumbV = chip(activeColour, 2f)
+                    // thumb sits OVER the track: negative marginStart pulls it back onto the track's origin, translationX walks it
+                    row.addView(thumbV, LinearLayout.LayoutParams(dp(spec.thumbWidthDp), dp(spec.trackHeightDp)).apply { marginStart = -dp(spec.trackWidthDp); topMargin = dp(4) })
+                    pagerThumb = thumbV
+                }
+                else -> {}
             }
-            if (last < pages - 1) row.addView(View(this).apply {
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x2EFFFFFF) }
-            }, FrameLayout.LayoutParams(dp(3), dp(3)).apply { setMargins(gap, dp(4) + dp(1), 0, 0) })
-            pagerActive?.translationX = 0f
-            pagerBuiltIdx = idxC
+            // place instantly at the target (no slide-through history on rebuild)
+            when (spec.mode) {
+                PagerMode.DOTS -> { for (i in pagerChips.indices) { val w = spec.slots.getOrElse(i) { PagerDots.DOT_W_DP }; setChipState(pagerChips[i], w, w == PagerDots.DASH_W_DP, activeColour, dotColour) } }
+                PagerMode.TRACK -> pagerThumb?.translationX = dpf(spec.thumbLeftDp).toFloat()
+                else -> {}
+            }
+            TraceLog.morph("v2 pager: idx=" + idx + " total=" + total + " mode=" + spec.mode.lowercase() + " reason=" + reason +
+                (if (spec.mode == PagerMode.TRACK) " thumbLeftPx=" + dpf(spec.thumbLeftDp) + " trackPx=" + dp(spec.trackWidthDp)
+                else " slots=" + spec.slots.joinToString(",")))
+            val settled = if (spec.mode == PagerMode.TRACK) "thumbLeftPx=" + dpf(spec.thumbLeftDp) else "slotWidthsPx=" + pagerChips.map { it.getChildAt(0)?.layoutParams?.width ?: 0 }.joinToString(",")
+            TraceLog.morph("v2 pager settled: mode=" + spec.mode.lowercase() + " " + settled)
+            return
         }
-        // The active capsule slides RELATIVE to the slot its host was built at: delta slots * slot advance.
-        // (Absolute offsets counted from the window edge were round-47-A draft's own trigonometry bug.)
-        val targetX = if (pagerBuiltIdx >= 0) (idxC - pagerBuiltIdx) * (slotW + gap) else 0
-        pagerActive?.let { a ->
-            if (animate) a.animate().translationX(targetX.toFloat()).setDuration(200)
-                .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-            else { a.translationX = targetX.toFloat(); a.animate().cancel() }
+
+        // same-mode retarget: ONE animator over CURRENT drawn values -> exact targets, hard-set at end/cancel
+        pagerAnim?.cancel()
+        val targets = when (spec.mode) {
+            PagerMode.DOTS -> spec.slots
+            else -> emptyList() }
+        pagerAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 200
+            interpolator = android.view.animation.DecelerateInterpolator()
+            if (!animate) duration = 0
+            addUpdateListener { an ->
+                val t = an.animatedFraction
+                when (spec.mode) {
+                    PagerMode.DOTS -> for (i in pagerChips.indices) {
+                        val chipv = pagerChips[i]
+                        val from = chipv.tag as? Int ?: (if (i == idx) PagerDots.DASH_W_DP else PagerDots.DOT_W_DP)
+                        val to = targets.getOrElse(i) { PagerDots.DOT_W_DP }
+                        val curW = (from + (to - from) * t).toInt()
+                        (chipv.getChildAt(0)?.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                            lp.width = dp(curW); chipv.getChildAt(0)?.layoutParams = lp
+                        }
+                    }
+                    PagerMode.TRACK -> pagerThumb?.let { th ->
+                        val from = th.translationX
+                        th.translationX = from + (dpf(spec.thumbLeftDp).toFloat() - from) * t
+                    }
+                    else -> {}
+                }
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator?) = finishPagerTargets(spec, idx, activeColour, dotColour)
+                override fun onAnimationCancel(a: android.animation.Animator?) = finishPagerTargets(spec, idx, activeColour, dotColour)
+            })
+            if (animate) start() else { start(); end() }
         }
+        TraceLog.morph("v2 pager: idx=" + idx + " total=" + total + " mode=" + spec.mode.lowercase() + " reason=" + reason +
+            (if (spec.mode == PagerMode.TRACK) " thumbLeftPx=" + dpf(spec.thumbLeftDp) + " trackPx=" + dp(spec.trackWidthDp)
+            else " slots=" + spec.slots.joinToString(",")))
+    }
+
+    private fun finishPagerTargets(spec: PagerSpecResult, idx: Int, activeColour: Int, dotColour: Int) {
+        // invariant 1: at end/cancel HARD-SET the exact target values; the log confirms them
+        when (spec.mode) {
+            PagerMode.DOTS -> for (i in pagerChips.indices) {
+                val to = spec.slots.getOrElse(i) { PagerDots.DOT_W_DP }
+                setChipState(pagerChips[i], to, to == PagerDots.DASH_W_DP, activeColour, dotColour)
+            }
+            PagerMode.TRACK -> pagerThumb?.translationX = dpf(spec.thumbLeftDp).toFloat()
+            else -> {}
+        }
+        val settled = if (spec.mode == PagerMode.TRACK) "thumbLeftPx=" + dpf(spec.thumbLeftDp) else "slotWidthsPx=" + pagerChips.map { it.getChildAt(0)?.layoutParams?.width ?: 0 }.joinToString(",")
+        TraceLog.morph("v2 pager settled: mode=" + spec.mode.lowercase() + " " + settled)
+    }
+
+    private fun setChipState(host: FrameLayout, wDp: Int, isDash: Boolean, activeColour: Int, dotColour: Int) {
+        host.tag = wDp
+        val cw = host.getChildAt(0) ?: return
+        (cw.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.width = dp(wDp); cw.layoutParams = lp }
+        (cw.background as? GradientDrawable)?.apply { cornerRadius = dpf(if (isDash) 2f else PagerDots.CHIP_H_DP / 2f).toFloat(); setColor(if (isDash) activeColour else dotColour) }
     }
 
     private fun createIslandBackground(r: Float): GradientDrawable = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.BLACK); cornerRadius = r
