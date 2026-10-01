@@ -4761,7 +4761,9 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     // ---- round-G ITEM 3 (his rule): halo fades WITH swipe displacement - out ∝ |offset|, symmetric back ----
-    private var swipeCommitDistPx = dp(20).toFloat()
+    // b1476 HOTFIX: never touch resources/Context in a FIELD INITIALIZER - a Service's base context is
+    // attached AFTER the constructor runs, and dp() right here was the launch crash the system dialog showed.
+    private var swipeCommitDistPx = 0f
     private var glowFadeStateWord = "rest"
     private var glowFadeLastLogAt = 0L
     private var glowDragFadeDisp = 0f
@@ -4773,7 +4775,10 @@ class HyperAccessibilityService : AccessibilityService() {
         val disp = if (dragMode == DRAG_PAGES && layer != null) kotlin.math.abs(layer.translationX)
             else kotlin.math.abs((draggableView() ?: gridRoot)?.translationX ?: 0f)
         glowDragFadeDisp = disp
-        return (1f - disp / swipeCommitDistPx).coerceIn(0f, 1f)
+        // ensureGesture() stamps the real value before any gesture can displace something; until then the
+        // painter only ever asks this at rest (disp=0), and the fallback keeps the division legal anyway.
+        val cd = if (swipeCommitDistPx > 1f) swipeCommitDistPx else dp(100).toFloat()
+        return (1f - disp / cd).coerceIn(0f, 1f)
     }
 
     /** throttled 50 ms sampler (his proof line) - edges always print (state flips / fade leaves rest). */
