@@ -1666,6 +1666,9 @@ class HyperAccessibilityService : AccessibilityService() {
         if (model.packageName != lastIconPkg) {
             lastIconPkg = model.packageName
             appIconView?.setImageDrawable(loadAppIcon(model.packageName))
+            // issue-C: a mid-morph content switch OWNS the icon now - never let the carry/restore re-stamp the
+            // previous page's drawable (morphIconLauncher snapshot was taken at morph begin, i.e. page-1's icon).
+            if (morphV2On) { morphIconLauncher = null; morphIconPill = null }
         }
         if (UpdateGate.textChanged(lastAppNameShown, model.appName)) {
             lastAppNameShown = model.appName
@@ -3064,6 +3067,7 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun showDragOffset(g: IslandGesture) {
         if (ringSwapInFlight) return // a settle owns the transform until it ends
+        if (AppSettings.getUiV2LayoutAEnabled(this)) islandView?.invalidate()   // issue-B: halo fades LIVE per drag frame (it only redrew at settle)
         if (dragMode == DRAG_NONE && g.axisIsHorizontal && g.offsetX != 0f &&
             currentStage == IslandStage.STAGE3_FULL
         ) {
@@ -3124,6 +3128,10 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun startRingPush(older: Boolean): Boolean {
         if (dragMode != DRAG_NONE || ringSwapInFlight) return false
+        // issue-C (his "bounce ke dauraan swipe -> first icon sabhi pe"): the snapshot, the content update and the
+        // bounce's own icon carry used to write the same views concurrently. A swipe CAN beat the bounce - but the
+        // bounce finishes FIRST (settle lands cleanly), then the carousel runs on a stable tree.
+        if (morphV2On) runCatching { morphAnimator?.end() }
         if (isReplyMode || currentStage != IslandStage.STAGE3_FULL || notificationRing.size <= 1) return false
         val nextIndex = if (older) {
             (currentRingIndex + 1).coerceAtMost(notificationRing.lastIndex)
@@ -3178,6 +3186,7 @@ class HyperAccessibilityService : AccessibilityService() {
             return false
         }
 
+        captureGlowRestAnchor()   // issue-B: halo's FINAL coordinate, saved before the live view becomes the neighbour
         currentRingIndex = nextIndex
         getCurrentRingModel()?.let { updateNotificationContent(it) }
         host.alpha = 1f
@@ -3581,6 +3590,9 @@ class HyperAccessibilityService : AccessibilityService() {
         // styles whose fade is written by the stage animator, so both owners read the same number.
         val open = MorphCarry.openProgress(morphShapeProgress(), morphTowardCard)
         morphOpenFrame = open
+        // issue-A (his "teleport abhi bhi hai", trace-proven +23): ride the rest layout's real content inset
+        // through the flight. frame->clear->relayout coalesce in one main turn, so the eye never sees it.
+        if (morphV2On) gridRoot?.translationY = v2RestInsetForMorph() * open
         // v2 enters here even with every classic flag off: it owns the sections, the flags are only opt-outs
         // for THEIR writers (and "nothing visible on its own style" is exactly how the rounds-34/35 pull died).
         if (!morphCarryOn && !morphScaleOn && !morphIconRide && !morphGlassOn && !morphV2On) return
@@ -4564,7 +4576,9 @@ class HyperAccessibilityService : AccessibilityService() {
     private var absorbDurMs = AbsorbV10.DEFAULT_DUR_MS
     private var absorbWAmp = AbsorbV10.DEFAULT_W_AMP
     private var absorbHAmp = AbsorbV10.DEFAULT_H_AMP
-    private var absorbBadgeAmp = AbsorbV10.DEFAULT_BADGE_AMP
+    // issue-D (his faisla OVER sonnet's spec): icon / pill / badge LOCK together. The solo badge pop is OFF by
+    // default now (debug cmd 'absorb --ef badgeAmp ...' can still arm it); the breath breathes the content root.
+    private var absorbBadgeAmp = 0f
     private var absorbFreezeA = -1f
     private var absorbLoggedAt = HashSet<String>()
 
@@ -4584,12 +4598,18 @@ class HyperAccessibilityService : AccessibilityService() {
             h = guarded
             val frame = IslandMorphFrame.compute(boundW, boundH, w, h, headH = 0, neckPx = 0f, topAnchored = true)
             islandMorph?.applyMorphFrame(frame, h / 2f)   // capsule rule on the breathed height - never view scale here
+            // issue-D: the WHOLE pill breathes as one locked body - icon + text + badge ride the content root's
+            // own scale (top-center pivot, matching the silhouette's top-fixed / centre-fixed anchors).
+            pillPreviewRoot?.let { r ->
+                r.pivotX = r.width / 2f; r.pivotY = 0f
+                r.scaleX = wF / restW
+                r.scaleY = h / restH.toFloat()
+            }
             val pop = AbsorbV10.badgePop(a, absorbBadgeAmp)
             pillPreviewCount?.let { b ->
                 b.pivotX = b.width / 2f; b.pivotY = b.height / 2f
-                b.scaleX = pop; b.scaleY = pop   // the ONLY scaled element: badge pop, uniform, pivot centre (his spec)
+                b.scaleX = pop; b.scaleY = pop   // rides the root as well; >1 only if a badgeAmp was set via debug cmd
             }
-            // icon: NOTHING - rigid by default (its left margin is fixed and the pill row centres it vertically)
             for (target in floatArrayOf(0.15f, 0.30f, 0.45f, 0.60f, 0.80f, 1.0f)) {
                 val key = "%.2f".format(target)
                 if (kotlin.math.abs(a - target) < 0.03f && absorbLoggedAt.add(key)) {
@@ -4651,6 +4671,7 @@ class HyperAccessibilityService : AccessibilityService() {
         runCatching {
             applyAbsorbFrame(1.0f, restW, restH, boundW, boundH, cutMinH)   // a=1 ⇒ exact rest rect, badge 1.000 (his invariant)
             pillPreviewCount?.let { it.scaleX = 1f; it.scaleY = 1f }
+            pillPreviewRoot?.let { it.scaleX = 1f; it.scaleY = 1f }
             updateIslandLayout(restW, restH, restR)   // wrapper home in the same turn
             islandMorph?.clearMorphFrame()            // bg matches the drawn rect exactly - no one-frame size snap (b1459b lesson)
             absorbAnim = null; absorbLoggedAt.clear()
@@ -4674,6 +4695,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val w = AbsorbV10.widthF(canonicalW.toFloat(), a, absorbWAmp).toInt()
             val h = kotlin.math.max(AbsorbV10.heightF(canonicalH.toFloat(), a, absorbHAmp).toInt(), 1)
             pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
+            pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f
             updateIslandLayout(w, h, h / 2f)
             islandMorph?.clearMorphFrame()
             absorbLoggedAt.clear()
@@ -4686,6 +4708,7 @@ class HyperAccessibilityService : AccessibilityService() {
             absorbAnim?.cancel(); absorbAnim = null; absorbFreezeA = -1f
             val w = dp(AppSettings.getIslandWidthDp(this)); val h = dp(AppSettings.getIslandHeightDp(this))
             pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
+            pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f
             updateIslandLayout(w, h, h / 2f)
             islandMorph?.clearMorphFrame()
         }
@@ -4767,6 +4790,25 @@ class HyperAccessibilityService : AccessibilityService() {
     private var glowFadeStateWord = "rest"
     private var glowFadeLastLogAt = 0L
     private var glowDragFadeDisp = 0f
+    /** icon's rest coordinate in islandView-draw space, captured by captureGlowRestAnchor() before a push begins. */
+    private var glowRestAnchorX = -1f
+    private var glowRestAnchorY = -1f
+
+    private fun captureGlowRestAnchor() {
+        runCatching {
+            val icv = gridIconSec ?: return@runCatching
+            val card = islandView ?: return@runCatching
+            if (icv.visibility != View.VISIBLE || icv.width <= 0) return@runCatching
+            var ax = icv.left + icv.translationX; var ay = icv.top + icv.translationY
+            var par: android.view.ViewParent? = icv.parent
+            while (par is View && par !== card) {
+                ax += (par as View).left + (par as View).translationX
+                ay += (par as View).top + (par as View).translationY
+                par = (par as View).parent
+            }
+            if (par === card) { glowRestAnchorX = ax + icv.width / 2f; glowRestAnchorY = ay + icv.height / 2f }
+        }
+    }
 
     /** LIVE view state, never gesture internals: in DRAG_PAGES the displaced page is the pushed layer's travel;
       * in a nudge it is the dragged host's own translation. One source for the fade + the proof log. */
@@ -4794,6 +4836,17 @@ class HyperAccessibilityService : AccessibilityService() {
 
     // ---- round-G ITEM 2 (sonnet 5.5): teleport instrument field set ----
     private val v2TeleportBuf = java.util.ArrayDeque<String>()   // last-8 frame samples of the running morph
+    /** rest layout's REAL content inset (band tops inside gridRoot, minus the 1dp pad) - captured live at
+      * after-clear; until then the spec-sum estimate handles the very first morph after boot. */
+    private var v2RestInsetPx = -1f
+
+    /** the +23 class: (finalH - natural content 391)/2. The top-pinned morph frame ends content at +2,
+      * rest centers the 391-tall stack in the 438 card at +25 - the OLD last-frame snap. */
+    private fun v2RestInsetForMorph(): Float {
+        if (v2RestInsetPx >= 0f) return v2RestInsetPx
+        val natural = dp(AppSettings.getIslandHeightDp(this)) + dp(4) + dp(100) + 2 * dp(1)
+        return ((morphNaturalH - natural).toFloat() / 2f).coerceIn(0f, 80f)
+    }
     private var v2LastGlyphDecision: Boolean? = null
     private var v2TeleportFrame = 0
     private var v2TeleportEndGeom: FloatArray? = null            // last drawn frame, captured PRE-restore (endMorphPerf entry)
@@ -4840,6 +4893,8 @@ class HyperAccessibilityService : AccessibilityService() {
             fun snap(k: Int) {
                 ch.postFrameCallback {
                     runCatching {
+                        if (currentStage == IslandStage.STAGE3_FULL)
+                            v2RestInsetPx = (((bandView?.top ?: 0) - ((gridRoot as? android.view.View)?.top ?: 0)).toFloat() - dp(1)).coerceIn(0f, 80f)
                         TraceLog.morph("v2 teleport trace after-clear #" + k + ": " + v2TeleportSample("settled"))
                         if (k < 3 && islandView != null) snap(k + 1) else v2TeleportProof()
                     }
@@ -5236,6 +5291,13 @@ class HyperAccessibilityService : AccessibilityService() {
                         par = (par as View).parent
                     }
                     if (par === this) { cx = ax + icv.width / 2f; cy = ay + icv.height / 2f; live = true }
+                }
+                // issue-B (his rule: final coordinate se naapo, symmetric): during a page drag the halo belongs to
+                // the OUTGOING page - before this it followed the incoming live icon, parked offscreen: 'turant gayab'.
+                if (dragMode == DRAG_PAGES && glowRestAnchorX >= 0f) {
+                    cx = l + glowRestAnchorX + (ringPushLayer?.translationX ?: 0f)
+                    cy = t + glowRestAnchorY
+                    live = true
                 }
 
                 fun stopsFor(alphaScale: Float): IntArray {
@@ -5965,7 +6027,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: ROUND-G ITEM 4/4 absorb v10 (silhouette-breath, default; wrap gulp selectable) era")
+        TraceLog.morph("v2 build marker: ROUND-G follow-up (teleport +23 ridden, halo rest-anchor drag-fade, icon race, gulp LOCK) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
