@@ -3000,6 +3000,7 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun endRingSwap(reason: String) {
         glowFadeStateWord = "rest"
+        glowFadeOnIncoming = false
         ringSwapGuard?.let { mainHandler.removeCallbacks(it) }
         ringSwapGuard = null
         val busy = ringSwapInFlight || dragMode != DRAG_NONE || ringPushLayer != null
@@ -4672,10 +4673,43 @@ class HyperAccessibilityService : AccessibilityService() {
             applyAbsorbFrame(1.0f, restW, restH, boundW, boundH, cutMinH)   // a=1 ⇒ exact rest rect, badge 1.000 (his invariant)
             pillPreviewCount?.let { it.scaleX = 1f; it.scaleY = 1f }
             pillPreviewRoot?.let { it.scaleX = 1f; it.scaleY = 1f }
-            updateIslandLayout(restW, restH, restR)   // wrapper home in the same turn
-            islandMorph?.clearMorphFrame()            // bg matches the drawn rect exactly - no one-frame size snap (b1459b lesson)
             absorbAnim = null; absorbLoggedAt.clear()
-            TraceLog.morph("v2 absorb v10 settled: rest=" + restW + "x" + restH + " badgePop=1.000 - last frame == rest by construction (0.5px rule)")
+            // his 12:13 report ("gulp end pe icon/badge jhatka"): the WM applies 399->366 ASYNCHRONOUSLY, so a
+            // same-turn frame-clear can draw the rest bg one frame at the OLD wrapper size - felt as the last-frame
+            // jhatka. b1459b owns the answer: shrink first, clear only once the view has truly settled (300ms fallback).
+            val hostV = islandView
+            if (hostV != null && (hostV.width != restW || hostV.height != restH)) {
+                var cleared = false
+                val once = object : View.OnLayoutChangeListener {
+                    override fun onLayoutChange(v: View?, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, orr: Int, ob: Int) {
+                        if (morphV2On && !cleared) {
+                            // a real morph began meanwhile - it owns the frame now; this stale absorb resigns
+                            cleared = true
+                            v?.removeOnLayoutChangeListener(this)
+                        } else if ((r - l) == restW && (b - t) == restH && !cleared) {
+                            cleared = true
+                            v?.removeOnLayoutChangeListener(this)
+                            islandMorph?.clearMorphFrame()
+                            TraceLog.morph("v2 absorb v10 settled: rest=" + restW + "x" + restH + " badgePop=1.000 - wrapper settle-waited, no end jhatka")
+                        }
+                    }
+                }
+                hostV.addOnLayoutChangeListener(once)
+                updateIslandLayout(restW, restH, restR)
+                mainHandler.postDelayed({
+                    if (!cleared) {
+                        hostV.removeOnLayoutChangeListener(once)
+                        if (!morphV2On) {   // a fresh morph owns the frame - do not clear its work, resign silently
+                            islandMorph?.clearMorphFrame()
+                            TraceLog.morph("v2 absorb v10 settled: fallback clear after 300ms (wrapper never hit rest)")
+                        }
+                    }
+                }, 300)
+            } else {
+                updateIslandLayout(restW, restH, restR)
+                islandMorph?.clearMorphFrame()
+                TraceLog.morph("v2 absorb v10 settled: rest=" + restW + "x" + restH + " badgePop=1.000 (already rest-sized)")
+            }
         }
     }
 
@@ -4793,6 +4827,8 @@ class HyperAccessibilityService : AccessibilityService() {
     /** icon's rest coordinate in islandView-draw space, captured by captureGlowRestAnchor() before a push begins. */
     private var glowRestAnchorX = -1f
     private var glowRestAnchorY = -1f
+    /** false = outgoing page owns the halo; true = incoming (once it is closer to final than the outgoing one). */
+    private var glowFadeOnIncoming = false
 
     private fun captureGlowRestAnchor() {
         runCatching {
@@ -4813,9 +4849,19 @@ class HyperAccessibilityService : AccessibilityService() {
     /** LIVE view state, never gesture internals: in DRAG_PAGES the displaced page is the pushed layer's travel;
       * in a nudge it is the dragged host's own translation. One source for the fade + the proof log. */
     private fun glowDragFade(): Float {
-        val layer = ringPushLayer
-        val disp = if (dragMode == DRAG_PAGES && layer != null) kotlin.math.abs(layer.translationX)
-            else kotlin.math.abs((draggableView() ?: gridRoot)?.translationX ?: 0f)
+        val layer = ringPushLayer; val host = gridRoot
+        val disp: Float
+        if (dragMode == DRAG_PAGES && layer != null && host != null) {
+            // dominant = whichever page is CLOSER to final. The hand-over point sits deep in fade==0 territory
+            // (travel >> commitDist), so no jump is ever visible: his commit-side "glow ek jhatke se aaya" fix.
+            val outD = kotlin.math.abs(layer.translationX)
+            val inD = kotlin.math.abs(host.translationX)
+            glowFadeOnIncoming = inD < outD
+            disp = if (glowFadeOnIncoming) inD else outD
+        } else {
+            glowFadeOnIncoming = false
+            disp = kotlin.math.abs((draggableView() ?: gridRoot)?.translationX ?: 0f)
+        }
         glowDragFadeDisp = disp
         // ensureGesture() stamps the real value before any gesture can displace something; until then the
         // painter only ever asks this at rest (disp=0), and the fallback keeps the division legal anyway.
@@ -4868,10 +4914,11 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun v2TeleportGeomNumbers(): FloatArray {
         val scr = IntArray(2); islandView?.getLocationOnScreen(scr)
         val iscr = IntArray(2); gridIconSec?.getLocationOnScreen(iscr)
+        val bscr = IntArray(2); (bandView ?: bodySec)?.getLocationOnScreen(bscr)
         return floatArrayOf(
             scr[0].toFloat(), scr[1].toFloat(),
             (scr[0] + (islandView?.width ?: 0)).toFloat(), (scr[1] + (islandView?.height ?: 0)).toFloat(),
-            iscr[0].toFloat(), iscr[1].toFloat(), gridIconSec?.translationY ?: 0f, (bodySec?.top ?: -1).toFloat())
+            iscr[0].toFloat(), iscr[1].toFloat(), gridIconSec?.translationY ?: 0f, bscr[1].toFloat())
     }
 
     private fun v2TeleportSample(tLabel: String): String {
@@ -5294,7 +5341,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
                 // issue-B (his rule: final coordinate se naapo, symmetric): during a page drag the halo belongs to
                 // the OUTGOING page - before this it followed the incoming live icon, parked offscreen: 'turant gayab'.
-                if (dragMode == DRAG_PAGES && glowRestAnchorX >= 0f) {
+                if (dragMode == DRAG_PAGES && glowRestAnchorX >= 0f && !glowFadeOnIncoming) {
                     cx = l + glowRestAnchorX + (ringPushLayer?.translationX ?: 0f)
                     cy = t + glowRestAnchorY
                     live = true
@@ -6027,7 +6074,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: ROUND-G follow-up (teleport +23 ridden, halo rest-anchor drag-fade, icon race, gulp LOCK) era")
+        TraceLog.morph("v2 build marker: b1479 (glow commit-dominant fade, gulp settle-wait, proof metric screen-space) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
