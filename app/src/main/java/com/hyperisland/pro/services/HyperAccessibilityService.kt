@@ -4624,6 +4624,17 @@ class HyperAccessibilityService : AccessibilityService() {
             // wrapper lands at rest size. Scale stays dead (his 15:10/15:12 screenshots stayed the reason).
             islandMorph?.applyMorphFrame(frame, h / 2f)
             pillPreviewRoot?.translationY = (h - boundH) / 2f
+            // v13 (his 19:32 report - pure geometry, no screenshot needed): the gulp widens the WINDOW by
+            // 33px (366->399) about the screen centre, and the row is MATCH_PARENT inside it with the icon
+            // pinned to its left edge and the badge to its right - so at bound size the icon sits ~16.5px
+            // LEFT and the badge ~16.5px RIGHT of their rest spots, and the wrapper shrink at the end snaps
+            // both back inward ("bahut kharab lagta hai"). Two CONSTANT counter-translations freeze the
+            // content at its REST screen coordinates for the entire breath; only the silhouette moves.
+            // Zeroed by the settle paths exactly when the wrapper lands back at rest width (the window's
+            // left edge returns to rest in the same layout, so the hand-off lands on the same pixel).
+            val restDX = (boundW - restW) / 2f
+            pillPreviewIcon?.translationX = restDX
+            pillPreviewCount?.translationX = -restDX
             val pop = AbsorbV10.badgePop(a, absorbBadgeAmp)
             pillPreviewCount?.let { b ->
                 b.pivotX = b.width / 2f; b.pivotY = b.height / 2f
@@ -4705,12 +4716,14 @@ class HyperAccessibilityService : AccessibilityService() {
                         if (morphV2On && !cleared) {
                             // a real morph began meanwhile - it owns the frame now; this stale absorb resigns
                             pillPreviewRoot?.translationY = 0f
+                            pillPreviewIcon?.translationX = 0f; pillPreviewCount?.translationX = 0f
                             cleared = true
                             v?.removeOnLayoutChangeListener(this)
                         } else if ((r - l) == restW && (b - t) == restH && !cleared) {
                             cleared = true
                             v?.removeOnLayoutChangeListener(this)
                             pillPreviewRoot?.translationY = 0f   // wrapper is restH now - MATCH_PARENT centres at 52 again
+                            pillPreviewIcon?.translationX = 0f; pillPreviewCount?.translationX = 0f   // and restW - rest edges again
                             islandMorph?.clearMorphFrame()
                             TraceLog.morph("v2 absorb v10 settled: rest=" + restW + "x" + restH + " badgePop=1.000 - wrapper settle-waited, no end jhatka")
                         }
@@ -4722,6 +4735,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     if (!cleared) {
                         hostV.removeOnLayoutChangeListener(once)
                         pillPreviewRoot?.translationY = 0f
+                        pillPreviewIcon?.translationX = 0f; pillPreviewCount?.translationX = 0f
                         if (!morphV2On) {   // a fresh morph owns the frame - do not clear its work, resign silently
                             islandMorph?.clearMorphFrame()
                             TraceLog.morph("v2 absorb v10 settled: fallback clear after 300ms (wrapper never hit rest)")
@@ -4730,6 +4744,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 }, 300)
             } else {
                 pillPreviewRoot?.translationY = 0f
+                pillPreviewIcon?.translationX = 0f; pillPreviewCount?.translationX = 0f
                 updateIslandLayout(restW, restH, restR)
                 islandMorph?.clearMorphFrame()
                 TraceLog.morph("v2 absorb v10 settled: rest=" + restW + "x" + restH + " badgePop=1.000 (already rest-sized)")
@@ -4752,8 +4767,9 @@ class HyperAccessibilityService : AccessibilityService() {
             val canonicalW = dp(AppSettings.getIslandWidthDp(this)); val canonicalH = dp(AppSettings.getIslandHeightDp(this))
             val w = AbsorbV10.widthF(canonicalW.toFloat(), a, absorbWAmp).toInt()
             val h = kotlin.math.max(AbsorbV10.heightF(canonicalH.toFloat(), a, absorbHAmp).toInt(), 1)
-            pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
+            pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f; pillPreviewCount?.translationX = 0f
             pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f; pillPreviewRoot?.translationY = 0f
+            pillPreviewIcon?.translationX = 0f
             updateIslandLayout(w, h, h / 2f)
             islandMorph?.clearMorphFrame()
             absorbLoggedAt.clear()
@@ -4765,8 +4781,9 @@ class HyperAccessibilityService : AccessibilityService() {
         runCatching {
             absorbAnim?.cancel(); absorbAnim = null; absorbFreezeA = -1f
             val w = dp(AppSettings.getIslandWidthDp(this)); val h = dp(AppSettings.getIslandHeightDp(this))
-            pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
+            pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f; pillPreviewCount?.translationX = 0f
             pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f; pillPreviewRoot?.translationY = 0f
+            pillPreviewIcon?.translationX = 0f
             updateIslandLayout(w, h, h / 2f)
             islandMorph?.clearMorphFrame()
         }
@@ -6107,7 +6124,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1482 (gulp ride vs bound window - the +9.5px MATCH_PARENT sag measured and killed) era")
+        TraceLog.morph("v2 build marker: b1483 (gulp: icon/badge frozen at rest screen coords - no edge drift, no end snap) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
