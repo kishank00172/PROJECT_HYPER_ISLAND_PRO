@@ -83,6 +83,7 @@ import com.hyperisland.pro.core.ExperienceVariant
 import com.hyperisland.pro.core.FrameWatch
 import com.hyperisland.pro.core.GpuLayerPrewarm
 import com.hyperisland.pro.core.PagerDots
+import com.hyperisland.pro.core.AbsorbV10
 import com.hyperisland.pro.core.PagerMode
 import com.hyperisland.pro.core.PagerSpecResult
 import com.hyperisland.pro.core.GcSnapshot
@@ -736,6 +737,17 @@ class HyperAccessibilityService : AccessibilityService() {
                     "variant" -> AppSettings.setExperienceVariant(this@HyperAccessibilityService, intent.getStringExtra("name"))
                     "pager_set" -> debugPagerSet(intent.getIntExtra("idx", currentRingIndex), intent.getIntExtra("total", notificationRing.size))
                     "pager_clear" -> debugPagerClear()
+                    "absorb_freeze" -> absorbFreezeAt(intent.getFloatExtra("a", -1f))
+                    "absorb_freeze_off" -> { resetAbsorbToRest(); TraceLog.morph("v2 absorb v10 freeze OFF - exact rest restored") }
+                    "absorb" -> {
+                        val d = intent.getFloatExtra("dur", -1f); if (d >= 0f) absorbDurMs = d.toLong()
+                        val wa = intent.getFloatExtra("wAmp", -1f); if (wa >= 0f) absorbWAmp = wa
+                        val ha = intent.getFloatExtra("hAmp", -1f); if (ha >= 0f) absorbHAmp = ha
+                        val ba = intent.getFloatExtra("badgeAmp", -1f); if (ba >= 0f) absorbBadgeAmp = ba
+                        runAbsorbV10("debug-cmd")
+                    }
+                    "absorb_style" -> { absorbStyleV10 = intent.getStringExtra("name") != "wrap"; TraceLog.morph("v2 absorb style -> " + (if (absorbStyleV10) "v10 (default)" else "wrap (gulp)")) }
+                    "absorb_test" -> runAbsorbV10("debug-cmd")
                     "layout_dump" -> debugLayoutDump()
                     else -> TraceLog.line("DEBUG", "unknown debug cmd ignored: " + cmd)
                 }
@@ -1566,6 +1578,7 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewRoot?.scaleX = 0.92f
         pillPreviewRoot?.scaleY = 0.92f
 
+        cancelAbsorbHoldDrawn("notify")
         val curW = islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this))
         val curH = islandLayoutParams?.height ?: dp(AppSettings.getIslandHeightDp(this))
         val curR = islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
@@ -3322,6 +3335,7 @@ class HyperAccessibilityService : AccessibilityService() {
         clearDragVisuals()
         if (target == IslandStage.STAGE3_FULL && reason == ExpandReason.AUTO_NOTIFICATION) { triggerFluidExpansion(); return }
         morphAnimator?.cancel()
+        cancelAbsorbHoldDrawn("stage-request")
         val curW = this@HyperAccessibilityService.islandLayoutParams?.width ?: dp(AppSettings.getIslandWidthDp(this))
         val curH = this@HyperAccessibilityService.islandLayoutParams?.height ?: dp(AppSettings.getIslandHeightDp(this))
         val curR = this@HyperAccessibilityService.islandBackground?.cornerRadius ?: dp(AppSettings.getIslandCornerRadiusDp(this)).toFloat()
@@ -3456,7 +3470,9 @@ class HyperAccessibilityService : AccessibilityService() {
                     // round-43 gate only covered STAGE2_PING, so the pulse never fired on the manual path):
                     val v2CollapseLocked = morphV2On && target != IslandStage.STAGE3_FULL
                     endMorphPerf("stage->$target")
-                    if (v2CollapseLocked) runV2GulpPulse()
+                    if (v2CollapseLocked) {   // round-G ITEM 4: v10 silhouette-breath is the default; wrap gulp selectable
+                        if (absorbStyleV10) runAbsorbV10("collapse-lock") else runV2GulpPulse()
+                    }
                     gridRoot?.translationY = 0f
                     syncContentWidth()
                     flushDeferredRegionUpdate()
@@ -4538,6 +4554,160 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private var v2GulpAnim: ValueAnimator? = null
+    // —————————————————————————————————————————————————————————————————————————————
+    // round-G ITEM 4 (sonnet 5.5's absorb v10): the DEFAULT absorb - silhouette-breath through the
+    // morph-frame path (top edge fixed, centre fixed, capsule radius; NEVER view scale on the silhouette).
+    // The wrapper-scaling gulp (runV2GulpPulse, below) is KEPT - `absorb_style --es name wrap|v10` selects.
+    // —————————————————————————————————————————————————————————————————————————————
+    private var absorbAnim: ValueAnimator? = null
+    private var absorbStyleV10 = true
+    private var absorbDurMs = AbsorbV10.DEFAULT_DUR_MS
+    private var absorbWAmp = AbsorbV10.DEFAULT_W_AMP
+    private var absorbHAmp = AbsorbV10.DEFAULT_H_AMP
+    private var absorbBadgeAmp = AbsorbV10.DEFAULT_BADGE_AMP
+    private var absorbFreezeA = -1f
+    private var absorbLoggedAt = HashSet<String>()
+
+    private fun absorbCutoutGuardMinH(): Int {
+        val cut = runCatching { visualRoot?.rootWindowInsets?.displayCutout?.boundingRectTop }.getOrNull()
+        return if (cut != null && !cut.isEmpty) cut.height() + 4 else 0   // breath-h never below cutout+4px (his guard)
+    }
+
+    /** ONE frame of the breath, through the morph-frame path: top edge fixed, centre fixed, capsule radius. */
+    private fun applyAbsorbFrame(a: Float, restW: Int, restH: Int, boundW: Int, boundH: Int, cutMinH: Int) {
+        runCatching {
+            val wF = AbsorbV10.widthF(restW.toFloat(), a, absorbWAmp)
+            val hF = AbsorbV10.heightF(restH.toFloat(), a, absorbHAmp)
+            var w = wF.toInt(); var h = hF.toInt()
+            val guarded = if (cutMinH > 0) kotlin.math.max(h, kotlin.math.min(cutMinH, boundH)) else h
+            val guardHeld = guarded != h
+            h = guarded
+            val frame = IslandMorphFrame.compute(boundW, boundH, w, h, headH = 0, neckPx = 0f, topAnchored = true)
+            islandMorph?.applyMorphFrame(frame, h / 2f)   // capsule rule on the breathed height - never view scale here
+            val pop = AbsorbV10.badgePop(a, absorbBadgeAmp)
+            pillPreviewCount?.let { b ->
+                b.pivotX = b.width / 2f; b.pivotY = b.height / 2f
+                b.scaleX = pop; b.scaleY = pop   // the ONLY scaled element: badge pop, uniform, pivot centre (his spec)
+            }
+            // icon: NOTHING - rigid by default (its left margin is fixed and the pill row centres it vertically)
+            for (target in floatArrayOf(0.15f, 0.30f, 0.45f, 0.60f, 0.80f, 1.0f)) {
+                val key = "%.2f".format(target)
+                if (kotlin.math.abs(a - target) < 0.03f && absorbLoggedAt.add(key)) {
+                    TraceLog.morph("v2 absorb measured: a=" + "%.2f".format(a) +
+                        " expected=(" + "%.1f".format(wF) + "x" + "%.1f".format(hF) + ")" +
+                        " drawn=(" + w + "x" + h + ")" +
+                        " dW=" + "%.2f".format(w - wF) + " dH=" + "%.2f".format(h - hF) +
+                        (if (guardHeld) " [cutout+4px guard held]" else ""))
+                }
+            }
+        }
+    }
+
+    private fun absorbCurveProofLine(): String {
+        val sb = StringBuilder("v2 absorb curve (v10): ")
+        var probe = 0.0f
+        while (probe <= 1.001f) {
+            sb.append("|@").append("%.2f".format(probe)).append(":")
+                .append("%.3f".format(1f + absorbWAmp * AbsorbV10.breath(probe))).append("/")
+                .append("%.3f".format(1f + absorbHAmp * AbsorbV10.breath(probe))).append(" b")
+                .append("%.3f".format(AbsorbV10.badgePop(probe, absorbBadgeAmp)))
+            probe += 0.1f
+        }
+        return sb.toString()
+    }
+
+    private fun runAbsorbV10(source: String) {
+        runCatching {
+            if (currentStage == IslandStage.STAGE3_FULL || morphV2On) return@runCatching
+            resetAbsorbToRest()   // a fresh absorb always owns a clean base
+            val lp = islandLayoutParams ?: return@runCatching
+            val restW = lp.width; val restH = lp.height
+            if (restW <= 0 || restH <= 0) return@runCatching
+            val restR = outlineRadius
+            val peak = AbsorbV10.peakBreath()
+            val boundW = kotlin.math.ceil(restW * (1f + absorbWAmp * peak)).toInt()
+            val boundH = kotlin.math.ceil(restH * (1f + absorbHAmp * peak)).toInt()
+            val cutMinH = absorbCutoutGuardMinH()
+            absorbLoggedAt.clear()
+            updateIslandLayout(boundW, boundH, restR)   // headroom surface - a peak frame never clamps (b1373 rule)
+            applyAbsorbFrame(0f, restW, restH, boundW, boundH, cutMinH)   // a=0 == exact rest: the first frame is owned, no flicker
+            TraceLog.morph(absorbCurveProofLine())
+            TraceLog.morph("v2 absorb v10 start (" + source + "): rest=" + restW + "x" + restH + " bound=" + boundW + "x" + boundH +
+                " dur=" + absorbDurMs + "ms wAmp=" + absorbWAmp + " hAmp=" + absorbHAmp + " badgeAmp=" + absorbBadgeAmp + " cutMinH=" + cutMinH)
+            absorbAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = absorbDurMs
+                interpolator = android.view.animation.LinearInterpolator()   // 300 ms LINEAR drives `a` - the curve is the shape
+                addUpdateListener { applyAbsorbFrame(it.animatedValue as Float, restW, restH, boundW, boundH, cutMinH) }
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(a: Animator) = settleAbsorb(restW, restH, restR, boundW, boundH, cutMinH)
+                    override fun onAnimationCancel(a: Animator) {}   // cancels are owned by the paths that restore explicitly
+                })
+                start()
+            }
+        }.onFailure { TraceLog.morph("v2 absorb v10 failed safely: " + it.javaClass.simpleName) }
+    }
+
+    private fun settleAbsorb(restW: Int, restH: Int, restR: Float, boundW: Int, boundH: Int, cutMinH: Int) {
+        runCatching {
+            applyAbsorbFrame(1.0f, restW, restH, boundW, boundH, cutMinH)   // a=1 ⇒ exact rest rect, badge 1.000 (his invariant)
+            pillPreviewCount?.let { it.scaleX = 1f; it.scaleY = 1f }
+            updateIslandLayout(restW, restH, restR)   // wrapper home in the same turn
+            islandMorph?.clearMorphFrame()            // bg matches the drawn rect exactly - no one-frame size snap (b1459b lesson)
+            absorbAnim = null; absorbLoggedAt.clear()
+            TraceLog.morph("v2 absorb v10 settled: rest=" + restW + "x" + restH + " badgePop=1.000 - last frame == rest by construction (0.5px rule)")
+        }
+    }
+
+    /** interrupted mid-breath (an expand/stage-change beat the absorb): start rect = the CURRENTLY DRAWN rect. */
+    private fun cancelAbsorbHoldDrawn(why: String) {
+        if (!absorbStyleV10) return
+        val anim = absorbAnim
+        if (anim == null && absorbFreezeA < 0f) return
+        runCatching {
+            val a = when {
+                absorbFreezeA >= 0f -> absorbFreezeA
+                anim != null -> anim.animatedFraction
+                else -> 1f
+            }
+            absorbAnim = null; anim?.cancel(); absorbFreezeA = -1f
+            val canonicalW = dp(AppSettings.getIslandWidthDp(this)); val canonicalH = dp(AppSettings.getIslandHeightDp(this))
+            val w = AbsorbV10.widthF(canonicalW.toFloat(), a, absorbWAmp).toInt()
+            val h = kotlin.math.max(AbsorbV10.heightF(canonicalH.toFloat(), a, absorbHAmp).toInt(), 1)
+            pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
+            updateIslandLayout(w, h, h / 2f)
+            islandMorph?.clearMorphFrame()
+            absorbLoggedAt.clear()
+            TraceLog.morph("v2 absorb v10 interrupted (" + why + "): start rect = currently drawn rect " + w + "x" + h)
+        }
+    }
+
+    private fun resetAbsorbToRest() {
+        runCatching {
+            absorbAnim?.cancel(); absorbAnim = null; absorbFreezeA = -1f
+            val w = dp(AppSettings.getIslandWidthDp(this)); val h = dp(AppSettings.getIslandHeightDp(this))
+            pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
+            updateIslandLayout(w, h, h / 2f)
+            islandMorph?.clearMorphFrame()
+        }
+    }
+
+    private fun absorbFreezeAt(a: Float) {
+        runCatching {
+            if (a < 0f || a > 1f) { resetAbsorbToRest(); return@runCatching }
+            absorbAnim?.cancel(); absorbAnim = null
+            val w = dp(AppSettings.getIslandWidthDp(this)); val h = dp(AppSettings.getIslandHeightDp(this))
+            val peak = AbsorbV10.peakBreath()
+            val boundW = kotlin.math.ceil(w * (1f + absorbWAmp * peak)).toInt()
+            val boundH = kotlin.math.ceil(h * (1f + absorbHAmp * peak)).toInt()
+            val cutMinH = absorbCutoutGuardMinH()
+            absorbLoggedAt.clear()
+            updateIslandLayout(boundW, boundH, h / 2f)
+            applyAbsorbFrame(a, w, h, boundW, boundH, cutMinH)
+            absorbFreezeA = a
+            TraceLog.morph("v2 absorb v10 FREEZE a=" + "%.2f".format(a) + " held for screenshot - 'absorb_freeze_off' releases to exact rest")
+        }
+    }
+
     private fun runV2GulpPulse() {
         v2GulpAnim?.cancel()
         val shell = islandView ?: return
@@ -5790,7 +5960,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: ROUND-G ITEM 3/4 glow drag-fade (halo fades with swipe displacement, symmetric) era")
+        TraceLog.morph("v2 build marker: ROUND-G ITEM 4/4 absorb v10 (silhouette-breath, default; wrap gulp selectable) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
