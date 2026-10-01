@@ -5900,11 +5900,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 PagerMode.TRACK -> pagerThumb?.translationX = dpf(spec.thumbLeftDp).toFloat()
                 else -> {}
             }
-            TraceLog.morph("v2 pager: idx=" + idx + " total=" + total + " mode=" + spec.mode.lowercase() + " reason=" + reason +
+            TraceLog.morph("v2 pager: idx=" + idx + " total=" + total + " mode=" + spec.mode.name.lowercase() + " reason=" + reason +
                 (if (spec.mode == PagerMode.TRACK) " thumbLeftPx=" + dpf(spec.thumbLeftDp) + " trackPx=" + dp(spec.trackWidthDp)
                 else " slots=" + spec.slots.joinToString(",")))
             val settled = if (spec.mode == PagerMode.TRACK) "thumbLeftPx=" + dpf(spec.thumbLeftDp) else "slotWidthsPx=" + pagerChips.map { it.getChildAt(0)?.layoutParams?.width ?: 0 }.joinToString(",")
-            TraceLog.morph("v2 pager settled: mode=" + spec.mode.lowercase() + " " + settled)
+            TraceLog.morph("v2 pager settled: mode=" + spec.mode.name.lowercase() + " " + settled)
             return
         }
 
@@ -5937,12 +5937,12 @@ class HyperAccessibilityService : AccessibilityService() {
                 }
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(a: android.animation.Animator?) = finishPagerTargets(spec, idx, activeColour, dotColour)
-                override fun onAnimationCancel(a: android.animation.Animator?) = finishPagerTargets(spec, idx, activeColour, dotColour)
+                override fun onAnimationEnd(animation: android.animation.Animator) = finishPagerTargets(spec, idx, activeColour, dotColour)
+                override fun onAnimationCancel(animation: android.animation.Animator) = finishPagerTargets(spec, idx, activeColour, dotColour)
             })
             if (animate) start() else { start(); end() }
         }
-        TraceLog.morph("v2 pager: idx=" + idx + " total=" + total + " mode=" + spec.mode.lowercase() + " reason=" + reason +
+        TraceLog.morph("v2 pager: idx=" + idx + " total=" + total + " mode=" + spec.mode.name.lowercase() + " reason=" + reason +
             (if (spec.mode == PagerMode.TRACK) " thumbLeftPx=" + dpf(spec.thumbLeftDp) + " trackPx=" + dp(spec.trackWidthDp)
             else " slots=" + spec.slots.joinToString(",")))
     }
@@ -5958,7 +5958,7 @@ class HyperAccessibilityService : AccessibilityService() {
             else -> {}
         }
         val settled = if (spec.mode == PagerMode.TRACK) "thumbLeftPx=" + dpf(spec.thumbLeftDp) else "slotWidthsPx=" + pagerChips.map { it.getChildAt(0)?.layoutParams?.width ?: 0 }.joinToString(",")
-        TraceLog.morph("v2 pager settled: mode=" + spec.mode.lowercase() + " " + settled)
+        TraceLog.morph("v2 pager settled: mode=" + spec.mode.name.lowercase() + " " + settled)
     }
 
     private fun setChipState(host: FrameLayout, wDp: Int, isDash: Boolean, activeColour: Int, dotColour: Int) {
