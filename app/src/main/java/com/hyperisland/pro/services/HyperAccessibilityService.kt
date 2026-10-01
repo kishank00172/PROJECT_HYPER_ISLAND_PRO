@@ -3526,6 +3526,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // once in beginMorphPerf), so the end of a morph takes this branch and does no layout at all.
             return
         }
+        traceWriter("updateIslandLayout APPLIES", "w=" + w + " h=" + h + " r=" + "%.1f".format(r))
         islandLayoutParams?.width = w; islandLayoutParams?.height = h; islandBackground?.cornerRadius = r
         outlineRadius = r; islandView?.layoutParams = islandLayoutParams; islandView?.invalidateOutline(); forceRegionUpdate()
     }
@@ -3687,7 +3688,12 @@ class HyperAccessibilityService : AccessibilityService() {
         val launcher = morphIconLauncher
         val glyph = morphIconPill
         if (launcher != null && glyph != null) {
-            val want = if (MorphCarry.showsPillGlyph(t, morphCarryGrowing, morphSwapAt)) glyph else launcher
+            val glyphNow = MorphCarry.showsPillGlyph(t, morphCarryGrowing, morphSwapAt)
+            if (glyphNow != v2LastGlyphDecision) {   // decision EDGE only: this runs per frame, so the writer log cannot
+                v2LastGlyphDecision = glyphNow
+                traceWriter("MorphCarry.showsPillGlyph flips", "t=" + "%.2f".format(t) + " growing=" + morphCarryGrowing + " swapAt=" + morphSwapAt + " -> " + (if (glyphNow) "glyph" else "launcher"))
+            }
+            val want = if (glyphNow) glyph else launcher
             if (icon.drawable !== want) icon.setImageDrawable(want)
         }
     }
@@ -3929,6 +3935,12 @@ class HyperAccessibilityService : AccessibilityService() {
      * window keyed to it is sampled once, past its peak.
      */
     private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float, t: Float, rawT: Float = t) {
+        // round-G ITEM 2: keep the last 8 frame-samples of THIS morph (dumped by endMorphPerf)
+        if (morphV2On) {
+            v2TeleportFrame++
+            while (v2TeleportBuf.size >= 8) v2TeleportBuf.pollFirst()
+            v2TeleportBuf.offerLast(v2TeleportSample("f=" + v2TeleportFrame + " t=" + "%.3f".format(t) + " rawT=" + "%.3f".format(rawT)))
+        }
         // TWO clocks, on purpose and at last named as two parameters: `t` is the shape (the interpolator's
         // output - what the DRAWN size follows, including the spring's own pace), `rawT` is the TIME (the
         // animator's uncurved fraction). Window-authored effects (the pendulum, the stretch, the haptic;
@@ -4575,11 +4587,93 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
+    // ---- round-G ITEM 2 (sonnet 5.5): teleport instrument field set ----
+    private val v2TeleportBuf = java.util.ArrayDeque<String>()   // last-8 frame samples of the running morph
+    private var v2LastGlyphDecision: Boolean? = null
+    private var v2TeleportFrame = 0
+    private var v2TeleportEndGeom: FloatArray? = null            // last drawn frame, captured PRE-restore (endMorphPerf entry)
+    private var teleportDirWord = "expand"
+
+    /** Writer-call log with the 3 caller frames above it (his step-A: name every stealth mover, don't chase it). */
+    private fun traceWriter(tag: String, detail: String = "") {
+        runCatching {
+            if (!AppSettings.getUiV2LayoutAEnabled(this)) return@runCatching
+            val callers = Throwable().stackTrace.asSequence()
+                .filter { it.className.contains("HyperAccessibilityService") }
+                .drop(1).take(3)
+                .joinToString(" <- ") { it.methodName + ":" + it.lineNumber }
+            TraceLog.morph("v2 writer: " + tag + (if (detail.isEmpty()) "" else " - " + detail) + " | stack=" + callers)
+        }
+    }
+
+    /** [wrapper l,t,r,b, iconScreenX, iconScreenY, iconTy, bodyTop] - the numbers the proof line diffs. */
+    private fun v2TeleportGeomNumbers(): FloatArray {
+        val scr = IntArray(2); islandView?.getLocationOnScreen(scr)
+        val iscr = IntArray(2); gridIconSec?.getLocationOnScreen(iscr)
+        return floatArrayOf(
+            scr[0].toFloat(), scr[1].toFloat(),
+            (scr[0] + (islandView?.width ?: 0)).toFloat(), (scr[1] + (islandView?.height ?: 0)).toFloat(),
+            iscr[0].toFloat(), iscr[1].toFloat(), gridIconSec?.translationY ?: 0f, (bodySec?.top ?: -1).toFloat())
+    }
+
+    private fun v2TeleportSample(tLabel: String): String {
+        val g = gridRoot as? android.view.View
+        val n = v2TeleportGeomNumbers()
+        return tLabel + " wrapper=(" + n[0].toInt() + "," + n[1].toInt() + "," + n[2].toInt() + "," + n[3].toInt() + ")" +
+            " gridRoot=(" + (g?.left ?: -1) + "," + (g?.top ?: -1) + "," + ((g?.left ?: 0) + (g?.width ?: 0)) + "," + ((g?.top ?: 0) + (g?.height ?: 0)) + ")" +
+            " band=(" + (bandView?.left ?: -1) + "," + (bandView?.top ?: -1) + ")" +
+            " gridIconSec window=(" + n[4].toInt() + "," + n[5].toInt() + ")" +
+            " iconTx/Ty=" + "%.1f".format(gridIconSec?.translationX ?: 0f) + "/" + "%.1f".format(gridIconSec?.translationY ?: 0f) +
+            " bodyTop=" + n[7].toInt() +
+            " morphPinW/H=" + (morphPinW?.toInt() ?: -1) + "/" + (morphPinH?.toInt() ?: -1)
+    }
+
+    /** First-3-frames-after-clear, one per vsync, then the step-B proof line against the captured last frame. */
+    private fun v2TeleportAfterClear() {
+        runCatching {
+            val ch = android.view.Choreographer.getInstance()
+            fun snap(k: Int) {
+                ch.postFrameCallback {
+                    runCatching {
+                        TraceLog.morph("v2 teleport trace after-clear #" + k + ": " + v2TeleportSample("settled"))
+                        if (k < 3 && islandView != null) snap(k + 1) else v2TeleportProof()
+                    }
+                }
+            }
+            snap(1)
+        }
+    }
+
+    /** step-B proof: |last drawn frame - settled rest| per edge + icon + content. target 0.5px (his tolerance). */
+    private fun v2TeleportProof() {
+        val a = v2TeleportEndGeom ?: return
+        runCatching {
+            val g = v2TeleportGeomNumbers()
+            TraceLog.morph(
+                "v2 last-frame==rest: " + teleportDirWord +
+                    " dL=" + "%.2f".format(kotlin.math.abs(g[0] - a[0])) +
+                    " dT=" + "%.2f".format(kotlin.math.abs(g[1] - a[1])) +
+                    " dR=" + "%.2f".format(kotlin.math.abs(g[2] - a[2])) +
+                    " dB=" + "%.2f".format(kotlin.math.abs(g[3] - a[3])) +
+                    " iconDy=" + "%.2f".format(kotlin.math.abs(g[5] - a[5])) +
+                    " contentDy=" + "%.2f".format(kotlin.math.abs(g[7] - a[7])) +
+                    " (target<=0.5px; a 23px-class icon jump prints here if it still lives)")
+        }
+    }
+
     private fun endMorphPerf(label: String) {
         if (morphV2On && AppSettings.getDebugMorphFreezeP(this) in 0f..1f) {
             TraceLog.morph("v2 freeze: holding frame - restore skipped; set debug_morph_freeze_p to -1 to resume"); return
         }
         if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
+        teleportDirWord = if (morphTowardCard) "expand" else "collapse"
+        if (morphV2On) {
+            TraceLog.morph("v2 teleport trace (last " + v2TeleportBuf.size + " frames of this " + teleportDirWord + "):")
+            for (ln in v2TeleportBuf) TraceLog.morph("  " + ln)
+            v2TeleportBuf.clear()
+            v2TeleportEndGeom = v2TeleportGeomNumbers()   // step-B reference: the last drawn frame, read BEFORE restore
+            v2TeleportFrame = 0
+        }
         // Read the flight-end values BEFORE clearMorphCarry/pin-restore rewrite the tree to the next-morph
         // baseline - the b1440 "alpha 0.00 at 40% vs 1.00 at end" contradiction lived exactly in this order.
         val endPreA = (bandTextSec ?: gridContentSec)?.alpha ?: -1f
@@ -4608,6 +4702,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         cleared = true
                         v?.removeOnLayoutChangeListener(this)
                         islandMorph?.clearMorphFrame()
+                        v2TeleportAfterClear()
                         TraceLog.morph("v2 end-sequence: wrapper settled at finalH=" + morphFinalH + " -> morph frame cleared (no snap window)")
                     }
                 }
@@ -4618,6 +4713,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (!cleared) {
                     hostV.removeOnLayoutChangeListener(once)
                     islandMorph?.clearMorphFrame()
+                    v2TeleportAfterClear()
                     TraceLog.morph("v2 end-sequence: fallback clear after 300ms (wrapper never hit finalH=" + morphFinalH + ")")
                 }
             }, 300)
@@ -5653,10 +5749,11 @@ class HyperAccessibilityService : AccessibilityService() {
      */
     private fun applyUiV2LayoutA() {
         if (!AppSettings.getUiV2LayoutAEnabled(this) || layoutAApplied) return
+        traceWriter("applyUiV2LayoutA APPLIES")
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: ROUND-G ITEM 1/4 stateless pager (pure-spec render, single driver) era")
+        TraceLog.morph("v2 build marker: ROUND-G ITEM 2/4 teleport instrument (writer logs + last-8 trace + last-frame==rest proof) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -5717,6 +5814,7 @@ class HyperAccessibilityService : AccessibilityService() {
             contentGrid.orientation = LinearLayout.VERTICAL
             gridIconSec?.let { ic ->
                 band.addView(ic, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginStart = dp(14) })
+                traceWriter("band/gridIconSec margins", "iconSec 32x32 in band, marginStart=14dp; appIcon 32x32 CENTER")
                 ic.background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; setColor(Color.TRANSPARENT); cornerRadius = sqIcon; setStroke(dp(1), 0x2EFFFFFF) }
                 appIconView?.layoutParams = FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER)
                 appIconView?.outlineProvider = object : ViewOutlineProvider() {
@@ -5741,6 +5839,7 @@ class HyperAccessibilityService : AccessibilityService() {
             body.addView(actionScroll, LinearLayout.LayoutParams(-1, dp(32)).apply { topMargin = dp(8) })
             replyBar?.let { body.addView(it, LinearLayout.LayoutParams(-1, -2)) }
             contentGrid.addView(body, LinearLayout.LayoutParams(-1, dp(100)).apply { topMargin = dp(4); leftMargin = dp(16); rightMargin = dp(16) })
+            traceWriter("band/body margins", "body l=16dp t=4dp r=16dp h=100dp; band h=" + AppSettings.getIslandHeightDp(this) + "dp")
             bandView = band; bandTextSec = bandText; bodySec = body
             // b1455 teleport fix (his diagnosis, proven by the trace): the morph wrapper is
             // naturalH + headroom tall DURING the morph and shrinks back at the end. With the
@@ -5753,11 +5852,13 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (lp is FrameLayout.LayoutParams && lp.gravity != Gravity.START or Gravity.TOP) {
                     lp.gravity = Gravity.START or Gravity.TOP
                     (gridRoot as? View)?.layoutParams = lp
+                    traceWriter("gridRoot.gravity <- TOP|START", "headroom pin")
                     TraceLog.morph("v2 layout pin: card content anchored to wrapper TOP (headroom is empty space below now)")
                 }
             }
             // keep-out: the cutout rect in card-local coords; fallback = pill centre +/- 23dp (his rule)
             visualRoot?.post {
+                traceWriter("keep-out visualRoot.post re-measure")
                 val cut = visualRoot?.rootWindowInsets?.displayCutout?.boundingRectTop
                 val screenW = resources.displayMetrics.widthPixels
                 val cardW = islandLayoutParams?.width ?: dp(AppSettings.getIslandExpandedWidthDp(this))
@@ -5770,6 +5871,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }
         (gridRoot?.layoutParams as? FrameLayout.LayoutParams)?.gravity = Gravity.START
+        traceWriter("gridRoot.gravity <- START", "layoutA tail write")
 
         // Pill icon: 32dp squircle, same 30% rule
         val sq2 = dp(32) * 0.30f
