@@ -2983,6 +2983,7 @@ class HyperAccessibilityService : AccessibilityService() {
      * that is a posted Runnable rather than an animation callback, is what stops that recurring.
      */
     private fun endRingSwap(reason: String) {
+        glowFadeStateWord = "rest"
         ringSwapGuard?.let { mainHandler.removeCallbacks(it) }
         ringSwapGuard = null
         val busy = ringSwapInFlight || dragMode != DRAG_NONE || ringPushLayer != null
@@ -3026,7 +3027,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // 18% of the card, not 24%: with the neighbour now visible during the drag the page change is
             // obvious, so a small deliberate flick should be enough. Committing also needs either this
             // travel or a real fling velocity - see IslandGesture.end.
-            pageCommitPx = maxOf(dp(20).toFloat(), cardW * 0.18f),
+            pageCommitPx = maxOf(dp(20).toFloat(), cardW * 0.18f).also { swipeCommitDistPx = it },
             maxDragPx = cardW * 0.45f,
             maxLiftPx = dp(44).toFloat()
         )
@@ -3078,6 +3079,7 @@ class HyperAccessibilityService : AccessibilityService() {
 
     /** Release without a commit: the pushed page goes back the way it came, on the settle's own curve. */
     private fun springBackDrag() {
+        glowFadeStateWord = "cancel"
         if (dragMode == DRAG_PAGES) {
             finishRingPush(ringPushLayer?.translationX ?: 0f, commit = false)
             return
@@ -3183,6 +3185,7 @@ class HyperAccessibilityService : AccessibilityService() {
      * takes its time.
      */
     private fun finishRingPush(fromOffsetPx: Float, commit: Boolean) {
+        glowFadeStateWord = if (commit) "commit" else "cancel"
         val host = gridRoot
         if (host == null || host.width <= 0) { endRingSwap("no host"); return }
         val width = host.width.toFloat()
@@ -4587,6 +4590,33 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
+    // ---- round-G ITEM 3 (his rule): halo fades WITH swipe displacement - out ∝ |offset|, symmetric back ----
+    private var swipeCommitDistPx = dp(20).toFloat()
+    private var glowFadeStateWord = "rest"
+    private var glowFadeLastLogAt = 0L
+    private var glowDragFadeDisp = 0f
+
+    /** LIVE view state, never gesture internals: in DRAG_PAGES the displaced page is the pushed layer's travel;
+      * in a nudge it is the dragged host's own translation. One source for the fade + the proof log. */
+    private fun glowDragFade(): Float {
+        val layer = ringPushLayer
+        val disp = if (dragMode == DRAG_PAGES && layer != null) kotlin.math.abs(layer.translationX)
+            else kotlin.math.abs((draggableView() ?: gridRoot)?.translationX ?: 0f)
+        glowDragFadeDisp = disp
+        return (1f - disp / swipeCommitDistPx).coerceIn(0f, 1f)
+    }
+
+    /** throttled 50 ms sampler (his proof line) - edges always print (state flips / fade leaves rest). */
+    private fun logGlowFade(dragFade: Float, baseA: Float, finalA: Float) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val edge = (glowFadeStateWord != "rest" && glowFadeStateWord != "") || dragFade < 0.999f
+        if (edge && now - glowFadeLastLogAt >= 50L) {
+            glowFadeLastLogAt = now
+            TraceLog.morph("v2 glow fade: disp=" + "%.1f".format(glowDragFadeDisp) + "px commitDist=" + "%.1f".format(swipeCommitDistPx) +
+                "px dragFade=" + "%.3f".format(dragFade) + " baseA=" + "%.3f".format(baseA) + " final=" + "%.3f".format(finalA) + " state=" + glowFadeStateWord)
+        }
+    }
+
     // ---- round-G ITEM 2 (sonnet 5.5): teleport instrument field set ----
     private val v2TeleportBuf = java.util.ArrayDeque<String>()   // last-8 frame samples of the running morph
     private var v2LastGlyphDecision: Boolean? = null
@@ -5054,8 +5084,15 @@ class HyperAccessibilityService : AccessibilityService() {
                         " anchorPx=(" + cx.toInt() + "," + cy.toInt() + ") liveIcon=" + live +
                         " band-FallbackPx=(" + (l + dp(30).toFloat()).toInt() + "," + (t + dp(AppSettings.getIslandHeightDp(this@HyperAccessibilityService)).toFloat() / 2f).toInt() + ")")
                 }
+                // ITEM 3: the ONLY alpha attenuation on this painter (no second card-alpha multiplication -
+                // the gradient stops carry profile alphas only). Writer-audit: between startRingPush and
+                // endRingSwap nothing writes gridRoot.alpha/visibility (V2 push is alpha-free by design),
+                // so dragFade is the sole transient factor here.
+                val dragFade = runCatching { glowDragFade() }.getOrDefault(1f)
+                val finalA = baseA * dragFade
+                logGlowFade(dragFade, baseA, finalA)
                 xferNow(glowPaint)
-                glowPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
+                glowPaint.alpha = (255 * finalA).toInt().coerceIn(0, 255)
                 canvas.drawCircle(cx, cy, coreRad, glowPaint)
 
                 if (gp.twoLayer) {
@@ -5067,7 +5104,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         glowAuraKey = auraKey
                     }
                     xferNow(glowAuraPaint)
-                    glowAuraPaint.alpha = (255 * baseA).toInt().coerceIn(0, 255)
+                    glowAuraPaint.alpha = (255 * finalA).toInt().coerceIn(0, 255)
                     canvas.drawCircle(cx, ay, aRad, glowAuraPaint)
                 }
             }   // b1452 standing rule: a cosmetic painter must never crash the service
@@ -5753,7 +5790,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: ROUND-G ITEM 2/4 teleport instrument (writer logs + last-8 trace + last-frame==rest proof) era")
+        TraceLog.morph("v2 build marker: ROUND-G ITEM 3/4 glow drag-fade (halo fades with swipe displacement, symmetric) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
