@@ -4614,18 +4614,20 @@ class HyperAccessibilityService : AccessibilityService() {
             val guardHeld = guarded != h
             h = guarded
             val frame = IslandMorphFrame.compute(boundW, boundH, w, h, headH = 0, neckPx = 0f, topAnchored = true)
-            islandMorph?.applyMorphFrame(frame, h / 2f)   // capsule rule on the breathed height - never view scale here
-            // issue-D: the WHOLE pill breathes as one locked body - icon + text + badge ride the content root's
-            // own scale (top-center pivot, matching the silhouette's top-fixed / centre-fixed anchors).
-            pillPreviewRoot?.let { r ->
-                r.pivotX = r.width / 2f; r.pivotY = 0f
-                r.scaleX = wF / restW
-                r.scaleY = h / restH.toFloat()
-            }
+            // v11 (his 15:10/15:12 screenshots): the row used to SCALE about its own top edge to ride the
+            // breath - overshoot frames then read as badge+icon sitting a few px below the capsule's centre
+            // (his 3:10 shot) or camped high with ~30px of black under the badge (his 3:12 shot). "Locked as
+            // one unit" taken literally: the row keeps its exact pixels (no scale, no stretch) and its CENTRE
+            // is pinned to the capsule's centre on every single frame - icon + text + badge can never drift
+            // inside the pill. The capsule's top is fixed by the window, the breath moves its bottom edge,
+            // and the row rides half that delta in TRANSLATION, not scale, so nothing ever distorts. At a=1
+            // the ride is exactly 0 - the settle still hands off without a snap.
+            islandMorph?.applyMorphFrame(frame, h / 2f)
+            pillPreviewRoot?.translationY = (h - restH) / 2f
             val pop = AbsorbV10.badgePop(a, absorbBadgeAmp)
             pillPreviewCount?.let { b ->
                 b.pivotX = b.width / 2f; b.pivotY = b.height / 2f
-                b.scaleX = pop; b.scaleY = pop   // rides the root as well; >1 only if a badgeAmp was set via debug cmd
+                b.scaleX = pop; b.scaleY = pop   // debug-only solo pop (absorbBadgeAmp, 0 by default); the row now rides translation only
             }
             for (target in floatArrayOf(0.15f, 0.30f, 0.45f, 0.60f, 0.80f, 1.0f)) {
                 val key = "%.2f".format(target)
@@ -4688,7 +4690,7 @@ class HyperAccessibilityService : AccessibilityService() {
         runCatching {
             applyAbsorbFrame(1.0f, restW, restH, boundW, boundH, cutMinH)   // a=1 ⇒ exact rest rect, badge 1.000 (his invariant)
             pillPreviewCount?.let { it.scaleX = 1f; it.scaleY = 1f }
-            pillPreviewRoot?.let { it.scaleX = 1f; it.scaleY = 1f }
+            pillPreviewRoot?.let { it.scaleX = 1f; it.scaleY = 1f; it.translationY = 0f }
             absorbAnim = null; absorbLoggedAt.clear()
             // his 12:13 report ("gulp end pe icon/badge jhatka"): the WM applies 399->366 ASYNCHRONOUSLY, so a
             // same-turn frame-clear can draw the rest bg one frame at the OLD wrapper size - felt as the last-frame
@@ -4745,7 +4747,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val w = AbsorbV10.widthF(canonicalW.toFloat(), a, absorbWAmp).toInt()
             val h = kotlin.math.max(AbsorbV10.heightF(canonicalH.toFloat(), a, absorbHAmp).toInt(), 1)
             pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
-            pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f
+            pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f; pillPreviewRoot?.translationY = 0f
             updateIslandLayout(w, h, h / 2f)
             islandMorph?.clearMorphFrame()
             absorbLoggedAt.clear()
@@ -4758,7 +4760,7 @@ class HyperAccessibilityService : AccessibilityService() {
             absorbAnim?.cancel(); absorbAnim = null; absorbFreezeA = -1f
             val w = dp(AppSettings.getIslandWidthDp(this)); val h = dp(AppSettings.getIslandHeightDp(this))
             pillPreviewCount?.scaleX = 1f; pillPreviewCount?.scaleY = 1f
-            pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f
+            pillPreviewRoot?.scaleX = 1f; pillPreviewRoot?.scaleY = 1f; pillPreviewRoot?.translationY = 0f
             updateIslandLayout(w, h, h / 2f)
             islandMorph?.clearMorphFrame()
         }
@@ -5021,7 +5023,14 @@ class HyperAccessibilityService : AccessibilityService() {
             var cleared = false
             val once = object : View.OnLayoutChangeListener {
                 override fun onLayoutChange(v: View?, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, orr: Int, ob: Int) {
-                    if ((b - t) == morphFinalH && !cleared) {
+                    if (absorbAnim != null && !cleared) {
+                        // a collapse-lock absorb began meanwhile and owns the frame now - this stage-morph wait
+                        // resigns; firing here would clear the gulp's own silhouette mid-breath (his 15:10:22.878
+                        // flash - the wrapper sits at the absorb's bound height for 300ms, never at finalH)
+                        cleared = true
+                        v?.removeOnLayoutChangeListener(this)
+                        TraceLog.morph("v2 end-sequence: absorb owns the frame - stage wait resigns, no mid-gulp clear")
+                    } else if ((b - t) == morphFinalH && !cleared) {
                         cleared = true
                         v?.removeOnLayoutChangeListener(this)
                         islandMorph?.clearMorphFrame()
@@ -5035,9 +5044,11 @@ class HyperAccessibilityService : AccessibilityService() {
             mainHandler.postDelayed({
                 if (!cleared) {
                     hostV.removeOnLayoutChangeListener(once)
-                    islandMorph?.clearMorphFrame()
-                    v2TeleportAfterClear()
-                    TraceLog.morph("v2 end-sequence: fallback clear after 300ms (wrapper never hit finalH=" + morphFinalH + ")")
+                    if (absorbAnim == null) {
+                        islandMorph?.clearMorphFrame()
+                        v2TeleportAfterClear()
+                        TraceLog.morph("v2 end-sequence: fallback clear after 300ms (wrapper never hit finalH=" + morphFinalH + ")")
+                    } else TraceLog.morph("v2 end-sequence: fallback resigns - absorb owns the frame")
                 }
             }, 300)
         } else {
@@ -6090,7 +6101,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1480 (ring order = time-sorted like the labels) era")
+        TraceLog.morph("v2 build marker: b1481 (gulp lock = row centre pinned to capsule centre, no scale; stage-wait resigns during gulp) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
