@@ -5389,10 +5389,23 @@ class HyperAccessibilityService : AccessibilityService() {
                     }
                     if (par === this) { cx = ax + icv.width / 2f; cy = ay + icv.height / 2f; live = true }
                 }
+                // b1484 nudge case (his "edge swipe pe bhi glow thoda shift hota hai"): the resistance nudge
+                // translates the whole content row INCLUDING the band icon (up to 18dp) - pin the halo to the
+                // capsule by cancelling exactly that transient translation. DRAG_NONE ke morph rides isme nahi
+                // aate (tab dragMode != NUDGE), so the b1455 pendulum true-lock stays untouched.
+                if (live && dragMode == DRAG_NUDGE) {
+                    val dv = draggableView()
+                    cx -= (dv?.translationX ?: 0f); cy -= (dv?.translationY ?: 0f)
+                }
                 // issue-B (his rule: final coordinate se naapo, symmetric): during a page drag the halo belongs to
                 // the OUTGOING page - before this it followed the incoming live icon, parked offscreen: 'turant gayab'.
-                if (dragMode == DRAG_PAGES && glowRestAnchorX >= 0f && !glowFadeOnIncoming) {
-                    cx = l + glowRestAnchorX + (ringPushLayer?.translationX ?: 0f)
+                // b1484 (his verdict: "glow LOCKED rahega icon ke saath" - first-page-left-swipe commit pe glow
+                // RIGHT se slide-in hota tha, last-page edge-nudge pe ~54px shift): position is PINNED now.
+                // Har DRAG_PAGES phase (drag / commit / spring-back) me anchor = push-begin rest coordinate;
+                // NO layer tX ride, NO glowFadeOnIncoming position split - dominant-flip ab fade==0 window me
+                // koi position change nahi karta (dono sides same anchor). Transition poora glowDragFade() alpha se.
+                if (dragMode == DRAG_PAGES && glowRestAnchorX >= 0f) {
+                    cx = l + glowRestAnchorX
                     cy = t + glowRestAnchorY
                     live = true
                 }
@@ -6124,7 +6137,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1483 (gulp: icon/badge frozen at rest screen coords - no edge drift, no end snap) era")
+        TraceLog.morph("v2 build marker: b1484 (glow position PINNED - no swipe travel, fade-only transitions) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
