@@ -5427,7 +5427,9 @@ class HyperAccessibilityService : AccessibilityService() {
                     val arr = IntArray(gp.stopFractions.size)
                     for (i in arr.indices) arr[i] = ((gp.stopAlphaMul[i] * alphaScale * 255).toInt().coerceIn(0, 255) shl 24) or (glowColor and 0x00FFFFFF)
                     return arr
-                }                fun whiteStopsFor(alphaScale: Float): IntArray {
+                }
+
+                fun whiteStopsFor(alphaScale: Float): IntArray {
                     // white core with the SAME alpha falloff - MULTIPLY-composed over the colour sweep (b1485),
                     // so the radial fade we tuned stays verbatim while the sweep owns the hue.
                     val arr = IntArray(gp.stopFractions.size)
