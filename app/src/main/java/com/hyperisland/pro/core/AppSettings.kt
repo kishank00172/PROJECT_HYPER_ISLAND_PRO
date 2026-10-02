@@ -43,6 +43,7 @@ object AppSettings {
     private const val KEY_DEBUG_MORPH_FREEZE_P = "debug_morph_freeze_p"      // float-as-string, -1 = off
     private const val KEY_DEBUG_MORPH_MEASURED = "debug_morph_measured"      // measured-frame logging switch
     private const val KEY_EXPERIENCE_VARIANT = "experience_variant"          // b1455: "claude"|"sol"|"mix" (default mix)
+    private const val KEY_GLOW_INTENSITY_MODE = "glow_intensity_mode"       // b1485: "uniform"(default)|"area"|"hybrid" - TestLab A/B/C switch
 
     const val ENGINE_NONE = "none"
     const val ENGINE_ACCESSIBILITY = "accessibility"
@@ -313,6 +314,8 @@ object AppSettings {
 
     fun getExperienceVariant(context: Context): String = prefs(context).getString(KEY_EXPERIENCE_VARIANT, "mix") ?: "mix"
     fun setExperienceVariant(context: Context, name: String?) { prefs(context).edit().putString(KEY_EXPERIENCE_VARIANT, name ?: "mix").apply() }
+    fun getGlowIntensityMode(context: Context): String = prefs(context).getString(KEY_GLOW_INTENSITY_MODE, "uniform") ?: "uniform"
+    fun setGlowIntensityMode(context: Context, name: String?) { prefs(context).edit().putString(KEY_GLOW_INTENSITY_MODE, name ?: "uniform").apply() }
     fun setIslandExpandedCornerRadiusDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP, v).apply()
 
     fun getReplyAnimationMode(context: Context): Int {

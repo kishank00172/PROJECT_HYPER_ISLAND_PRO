@@ -816,6 +816,50 @@
 
         </RadioGroup>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Glow Colour Engine (b1485 side-wise icon colours - intensity A/B/C)"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:textSize="18sp" />
+
+        <RadioGroup
+            android:id="@+id/radioGlowIntensity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <RadioButton
+                android:id="@+id/radioGlowUniform"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="UNIFORM (default) - sabhi colours equal brightness; dominance sirf arc-size se"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioGlowArea"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="AREA-WEIGHTED - jo colour icon me zyada area leta hai, us arc ka glow thoda zyada intense"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radioGlowHybrid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="HYBRID - icon ke total colour coverage se poore glow ki strength (pale icons pe subtle)"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+        </RadioGroup>
+
         <Button
             android:id="@+id/btnBack"
             android:layout_width="match_parent"

@@ -479,6 +479,18 @@ class HyperAccessibilityService : AccessibilityService() {
     private val glowColorCache = HashMap<String, Int>()
     private var glowColor = 0
     private var glowShaderKey = ""
+
+    /** b1485 (his design, quoted in updateAmbientGlow): the icon's own SIDE colours paint the halo.
+      * arcColors in sweep order, arcPositions 0..1 (0 = 3 o'clock, clockwise), arcScales = AREA-mode
+      * intensity multipliers (mean-normalised to 1), coverage = voted rim coverage (HYBRID strength). */
+    private class GlowPalette(
+        val arcColors: IntArray,
+        val arcPositions: FloatArray,
+        val arcScales: FloatArray,
+        val coverage: Float
+    )
+    private val glowPaletteCache = HashMap<String, GlowPalette>()
+    private var glowPalette: GlowPalette? = null
     private var layoutAApplied = false
 
     // Pill badge notification preview — compact, non-intrusive default surface
@@ -735,6 +747,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     "expand" -> postExpandIsland()      // identical path to expandIslandFromApp()
                     "collapse" -> postCollapseIsland()  // identical path to the drag-down / outside-tap collapse
                     "variant" -> AppSettings.setExperienceVariant(this@HyperAccessibilityService, intent.getStringExtra("name"))
+                    "glow_intensity" -> AppSettings.setGlowIntensityMode(this@HyperAccessibilityService, intent.getStringExtra("name"))
                     "pager_set" -> debugPagerSet(intent.getIntExtra("idx", currentRingIndex), intent.getIntExtra("total", notificationRing.size))
                     "pager_clear" -> debugPagerClear()
                     "absorb_freeze" -> absorbFreezeAt(intent.getFloatExtra("a", -1f))
@@ -5414,18 +5427,44 @@ class HyperAccessibilityService : AccessibilityService() {
                     val arr = IntArray(gp.stopFractions.size)
                     for (i in arr.indices) arr[i] = ((gp.stopAlphaMul[i] * alphaScale * 255).toInt().coerceIn(0, 255) shl 24) or (glowColor and 0x00FFFFFF)
                     return arr
+                }                fun whiteStopsFor(alphaScale: Float): IntArray {
+                    // white core with the SAME alpha falloff - MULTIPLY-composed over the colour sweep (b1485),
+                    // so the radial fade we tuned stays verbatim while the sweep owns the hue.
+                    val arr = IntArray(gp.stopFractions.size)
+                    for (i in arr.indices) arr[i] = ((gp.stopAlphaMul[i] * alphaScale * 255).toInt().coerceIn(0, 255) shl 24) or 0x00FFFFFF
+                    return arr
                 }
                 fun xferNow(p: android.graphics.Paint) {
                     if (p.xfermode == null) p.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SCREEN)
                 }
 
                 val coreRad = dp(gp.coreRadiusDp).toFloat()
-                val coreKey = glowColor.toString() + ":" + System.identityHashCode(gp) + ":" + cx.toInt() + ":" + cy.toInt()
+                val glowModeNow = AppSettings.getGlowIntensityMode(this@HyperAccessibilityService)
+                val palNow = glowPalette
+                val coreKey = glowColor.toString() + ":" + System.identityHashCode(gp) + ":" + cx.toInt() + ":" + cy.toInt() + ":" + System.identityHashCode(palNow) + ":" + glowModeNow
                 if (coreKey != glowShaderKey) {
-                    glowPaint.shader = RadialGradient(cx, cy, coreRad, stopsFor(gp.coreAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                    if (palNow != null && palNow.arcColors.size > 1) {
+                        // b1485 sweep: the icon's own side colours around the rim (wrap = appended first stop
+                        // at 1.0 so the seam blends), composed MULTIPLY over the white radial falloff (the
+                        // tuned shape stays verbatim); AREA mode bends each arc's intensity by its icon share.
+                        val cols = IntArray(palNow.arcColors.size + 1) { i ->
+                            val idx = if (i < palNow.arcColors.size) i else 0
+                            val a = if (glowModeNow == "area") (palNow.arcScales[idx] * 255f).toInt().coerceIn(0, 255) else 255
+                            (a shl 24) or (palNow.arcColors[idx] and 0x00FFFFFF)
+                        }
+                        val poss = FloatArray(palNow.arcPositions.size + 1) { i -> if (i < palNow.arcPositions.size) palNow.arcPositions[i] else 1f }
+                        val sweep = android.graphics.SweepGradient(cx, cy, cols, poss)
+                        val white = RadialGradient(cx, cy, coreRad, whiteStopsFor(gp.coreAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                        glowPaint.shader = android.graphics.ComposeShader(sweep, white, android.graphics.PorterDuff.Mode.MULTIPLY)
+                    } else {
+                        glowPaint.shader = RadialGradient(cx, cy, coreRad, stopsFor(gp.coreAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                    }
                     glowPaint.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(gp.blurPx.toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null   // Px means px - his spec is "18px", not 18dp
                     glowShaderKey = coreKey
                     TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
+                        " glowMode=" + glowModeNow + " arcs=" + (palNow?.arcColors?.size ?: 1) +
+                        " arcColours=" + (palNow?.arcColors?.joinToString(",") { "#" + Integer.toHexString(it) } ?: "single") +
+                        " coverage=" + "%.2f".format(palNow?.coverage ?: 1f) +
                         " variant=" + AppSettings.getExperienceVariant(this@HyperAccessibilityService) +
                         " coreR=" + gp.coreRadiusDp + " twoLayer=" + gp.twoLayer + " blur=" + gp.blurPx +
                         " anchorPx=(" + cx.toInt() + "," + cy.toInt() + ") liveIcon=" + live +
@@ -5436,7 +5475,8 @@ class HyperAccessibilityService : AccessibilityService() {
                 // endRingSwap nothing writes gridRoot.alpha/visibility (V2 push is alpha-free by design),
                 // so dragFade is the sole transient factor here.
                 val dragFade = runCatching { glowDragFade() }.getOrDefault(1f)
-                val finalA = baseA * dragFade
+                // HYBRID mode: the icon's total colour coverage sets the WHOLE halo's strength (never dying fully)
+                val finalA = baseA * dragFade * (if (glowModeNow == "hybrid" && palNow != null) (0.55f + 0.45f * palNow.coverage) else 1f)
                 logGlowFade(dragFade, baseA, finalA)
                 xferNow(glowPaint)
                 glowPaint.alpha = (255 * finalA).toInt().coerceIn(0, 255)
@@ -5446,7 +5486,19 @@ class HyperAccessibilityService : AccessibilityService() {
                     val aRad = dp(gp.auraRadiusDp).toFloat(); val ay = cy + dp(gp.auraOffsetYDp).toFloat()
                     val auraKey = coreKey + ":aura"
                     if (auraKey != glowAuraKey) {
-                        glowAuraPaint.shader = RadialGradient(cx, ay, aRad, stopsFor(gp.auraAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                        if (palNow != null && palNow.arcColors.size > 1) {
+                            val colsA = IntArray(palNow.arcColors.size + 1) { i ->
+                                val idx = if (i < palNow.arcColors.size) i else 0
+                                val a = if (glowModeNow == "area") (palNow.arcScales[idx] * 255f).toInt().coerceIn(0, 255) else 255
+                                (a shl 24) or (palNow.arcColors[idx] and 0x00FFFFFF)
+                            }
+                            val possA = FloatArray(palNow.arcPositions.size + 1) { i -> if (i < palNow.arcPositions.size) palNow.arcPositions[i] else 1f }
+                            val sweepA = android.graphics.SweepGradient(cx, ay, colsA, possA)
+                            val whiteA = RadialGradient(cx, ay, aRad, whiteStopsFor(gp.auraAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                            glowAuraPaint.shader = android.graphics.ComposeShader(sweepA, whiteA, android.graphics.PorterDuff.Mode.MULTIPLY)
+                        } else {
+                            glowAuraPaint.shader = RadialGradient(cx, ay, aRad, stopsFor(gp.auraAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                        }
                         glowAuraPaint.maskFilter = glowPaint.maskFilter
                         glowAuraKey = auraKey
                     }
@@ -6137,7 +6189,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1484 (glow position PINNED - no swipe travel, fade-only transitions) era")
+        TraceLog.morph("v2 build marker: b1485 (glow side-colours: perimeter sweep, arc-weighted, intensity TestLab A/B/C) + b1484 (position PINNED) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -6275,31 +6327,139 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * The ambient glow. Dominant colour: 16x16 downsample of the app icon, averaged over non-transparent
-     * pixels, cached per package (NO new dependency); #0096FF fallback. Only real samples are cached, so a
-     * first draw with an un-loaded icon does not poison the package's colour forever.
+     * b1485 (his design, verbatim: "jo jitna bada side area me hai uske glow ka bhi source utna bada" +
+     * "overall area ko glow ka intensity decider"): the halo is painted by the icon's own SIDE colours.
+     *  1. 32x32 render; ring = r in [0.68, 1.0] of the half-size - the PERIMETER only, so interior whites
+     *     (Telegram's plane, Snap's ghost) never enter the colour vote: rims stay BLUE / YELLOW.
+     *  2. a pixel votes only if alpha>40, saturation>=18%, max-channel>24: grey/white/near-black never
+     *     pick colours. The old wash (white-heavy average) is structurally dead.
+     *  3. 24 sectors of 15deg clockwise from the top; adjacent sectors whose averages sit within ~48 RGB
+     *     distance merge into ARCS. An arc's sweep span IS its side size (his weighting rule) and its
+     *     angular position is the icon's real geography (Google's blue bar stays at its own angle).
+     *  4. uniform icons collapse to ONE arc = single-colour behaviour, but the colour is the RIM average
+     *     (Telegram = pure rim blue, not the pale interior wash). If NOTHING votes, v1 fallback (#0096FF
+     *     until sampled, then the plain dominant average) paints exactly like b1484.
+     * arcScales (TestLab AREA mode) = full-icon vote share / rim share, clamped [0.55..1.5], mean 1.0.
+     * coverage (TestLab HYBRID mode) = voted rim coverage (global strength, floored in the painter).
+     * Only real samples are cached, so a first draw with an un-loaded icon poisons nothing.
      */
     private fun updateAmbientGlow(pkg: String?) {
-        if (!AppSettings.getUiV2LayoutAEnabled(this) || pkg == null) return
+        if (!AppSettings.getUiV2LayoutAEnabled(this) || pkg == null) { glowPalette = null; return }
         val cached = glowColorCache[pkg]
-        if (cached != null) { glowColor = cached; return }
+        if (cached != null) { glowColor = cached; glowPalette = glowPaletteCache[pkg]; return }
         var c = 0xFF0096FF.toInt(); var sampled = false
+        var palette: GlowPalette? = null
         try {
             val dw = appIconView?.drawable
             if (dw != null) {
-                val bmp = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
-                val cv = Canvas(bmp); dw.setBounds(0, 0, 16, 16); dw.draw(cv)
-                val px = IntArray(256); bmp.getPixels(px, 0, 16, 0, 0, 16, 16)
+                val bmp = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+                val cv = Canvas(bmp); dw.setBounds(0, 0, 32, 32); dw.draw(cv)
+                val px = IntArray(1024); bmp.getPixels(px, 0, 32, 0, 0, 32, 32)
                 var r = 0L; var g = 0L; var b = 0L; var n = 0
-                for (i in px) if ((i ushr 24) > 40) { r += (i shr 16) and 255; g += (i shr 8) and 255; b += i and 255; n++ }
+                val NS = 24
+                val sR = LongArray(NS); val sG = LongArray(NS); val sB = LongArray(NS)
+                val sN = IntArray(NS); val tN = IntArray(NS)
+                var ringTotal = 0; var iconTotal = 0; var ringPixels = 0
+                for (i in px.indices) {
+                    val v = px[i]
+                    val aa = v ushr 24; val rr = (v shr 16) and 255; val gg = (v shr 8) and 255; val bb = v and 255
+                    if (aa > 40) { r += rr; g += gg; b += bb; n++ }
+                    val x = (i and 31) - 15.5; val y = (i shr 5) - 15.5
+                    val dist = kotlin.math.sqrt(x * x + y * y)
+                    val inRing = dist >= 16.0 * 0.68 && dist <= 16.0
+                    if (inRing) ringPixels++
+                    val mx = maxOf(rr, gg, bb); val mn = minOf(rr, gg, bb)
+                    val satur = if (mx > 0) (mx - mn).toDouble() / mx else 0.0
+                    if (aa <= 40 || satur < 0.18 || mx <= 24) continue
+                    var ang = Math.toDegrees(kotlin.math.atan2(y, x)); if (ang < 0) ang += 360.0
+                    val sIdx = (((ang - 270.0) + 360.0) % 360.0 / 15.0).toInt().coerceIn(0, NS - 1)
+                    tN[sIdx]++; iconTotal++
+                    if (inRing) { sR[sIdx] += rr; sG[sIdx] += gg; sB[sIdx] += bb; sN[sIdx]++; ringTotal++ }
+                }
                 if (n > 0) {
                     c = (255 shl 24) or (((r / n).toInt() and 255) shl 16) or (((g / n).toInt() and 255) shl 8) or ((b / n).toInt() and 255)
                     sampled = true
                 }
+                if (ringTotal > 0) {
+                    // greedy clockwise merge of adjacent sectors (circular); raise threshold until <= 12 arcs
+                    val sIdx0 = (0 until NS).firstOrNull { sN[it] > 0 } ?: 0
+                    var thresh = 48.0
+                    var arcCols: IntArray? = null; var arcPoss: FloatArray? = null; var arcScal: FloatArray? = null
+                    var attempt = 0
+                    while (arcCols == null) {   // exits on materialise; thresh decays only on >12 arcs
+                        val aR = LongArray(NS + 1); val aG = LongArray(NS + 1); val aB = LongArray(NS + 1)
+                        val aN = IntArray(NS + 1); val aT = IntArray(NS + 1)
+                        val aS = IntArray(NS + 1); val aE = IntArray(NS + 1)
+                        var aCnt = 0; var open = false
+                        for (k in 0 until NS) {
+                            val i = (sIdx0 + k) % NS
+                            if (sN[i] == 0) continue
+                            if (!open) {
+                                open = true; aS[aCnt] = k; aE[aCnt] = k
+                                aR[aCnt] = sR[i]; aG[aCnt] = sG[i]; aB[aCnt] = sB[i]; aN[aCnt] = sN[i]; aT[aCnt] = tN[i]
+                            } else {
+                                val cr = aR[aCnt] / aN[aCnt]; val cg = aG[aCnt] / aN[aCnt]; val cb = aB[aCnt] / aN[aCnt]
+                                val mr = sR[i] / sN[i]; val mg = sG[i] / sN[i]; val mb = sB[i] / sN[i]
+                                val dr = (cr - mr).toDouble(); val dgx = (cg - mg).toDouble(); val dbx = (cb - mb).toDouble()
+                                if (kotlin.math.sqrt(dr * dr + dgx * dgx + dbx * dbx) <= thresh) {
+                                    aE[aCnt] = k
+                                    aR[aCnt] += sR[i]; aG[aCnt] += sG[i]; aB[aCnt] += sB[i]; aN[aCnt] += sN[i]; aT[aCnt] += tN[i]
+                                } else {
+                                    aCnt++; aS[aCnt] = k; aE[aCnt] = k
+                                    aR[aCnt] = sR[i]; aG[aCnt] = sG[i]; aB[aCnt] = sB[i]; aN[aCnt] = sN[i]; aT[aCnt] = tN[i]
+                                }
+                            }
+                        }
+                        aCnt++
+                        // seam: if the first and last arcs are really the same colour (Telegram), fold them
+                        if (aCnt > 1) {
+                            val fr = aR[0] / aN[0]; val fg = aG[0] / aN[0]; val fb = aB[0] / aN[0]
+                            val lr = aR[aCnt - 1] / aN[aCnt - 1]; val lg = aG[aCnt - 1] / aN[aCnt - 1]; val lb = aB[aCnt - 1] / aN[aCnt - 1]
+                            val dr = (fr - lr).toDouble(); val dgx = (fg - lg).toDouble(); val dbx = (fb - lb).toDouble()
+                            if (kotlin.math.sqrt(dr * dr + dgx * dgx + dbx * dbx) <= thresh) {
+                                aR[0] += aR[aCnt - 1]; aG[0] += aG[aCnt - 1]; aB[0] += aB[aCnt - 1]
+                                aN[0] += aN[aCnt - 1]; aT[0] += aT[aCnt - 1]
+                                aS[0] = aS[aCnt - 1]; aE[0] += NS   // wrapped arc: centre handled via normalised k
+                                aCnt--
+                            }
+                        }
+                        if (aCnt <= 12 || thresh > 300.0) {
+                            // materialise: positions ascending, scales area-share/rim-share normalised to mean 1
+                            val tmpC = IntArray(aCnt); val tmpP = FloatArray(aCnt); val tmpS = FloatArray(aCnt)
+                            var meanScale = 0f
+                            for (t in 0 until aCnt) {
+                                val ac = if (aN[t] > 0) {
+                                    (255 shl 24) or (((aR[t] / aN[t]).toInt() and 255) shl 16) or (((aG[t] / aN[t]).toInt() and 255) shl 8) or ((aB[t] / aN[t]).toInt() and 255)
+                                } else c
+                                val kcRaw = (aS[t] + aE[t]) / 2.0   // aE may exceed NS on a seam-folded arc; normalised below
+                                val sIdxC = (sIdx0 + kcRaw) % NS
+                                val angC = (270.0 + sIdxC * 15.0 + 7.5) % 360.0
+                                tmpC[t] = ac; tmpP[t] = (angC / 360.0).toFloat()
+                                val rimShare = aN[t].toDouble() / ringTotal
+                                val iconShare = aT[t].toDouble() / maxOf(1, iconTotal)
+                                tmpS[t] = (iconShare / rimShare).toFloat().coerceIn(0.55f, 1.5f)
+                                meanScale += tmpS[t] * rimShare.toFloat()
+                            }
+                            if (meanScale > 0f) for (t in 0 until aCnt) tmpS[t] = tmpS[t] / meanScale
+                            // sort by position so the sweep stops are strictly ascending
+                            val order = (0 until aCnt).sortedBy { tmpP[it] }
+                            arcCols = IntArray(aCnt) { tmpC[order[it]] }
+                            arcPoss = FloatArray(aCnt) { tmpP[order[it]] }
+                            arcScal = FloatArray(aCnt) { tmpS[order[it]] }
+                        } else { thresh *= 1.5; attempt++ }
+                    }
+                    val fCols = arcCols; val fPoss = arcPoss; val fScal = arcScal
+                    if (fCols != null && fPoss != null && fScal != null && fCols.size >= 2) {
+                        palette = GlowPalette(fCols, fPoss, fScal, if (ringPixels > 0) ringTotal.toFloat() / ringPixels.toFloat() else 1f)
+                    } else if (fCols != null && fCols.size == 1) {
+                        // uniform icon: paint the RIM vote through the v1 single-colour path (mud kills itself)
+                        c = fCols[0]
+                    }
+                }
             }
         } catch (_: Exception) {}
-        if (sampled) glowColorCache[pkg] = c
-        glowColor = c
+        if (sampled) { glowColorCache[pkg] = c; palette?.let { glowPaletteCache[pkg] = it } }
+        glowColor = c; glowPalette = palette
     }
 
     /** Pager ("slide bar"): slots of 12dp advance 16dp; dots 4dp, active capsule 12x4dp, all centred. */

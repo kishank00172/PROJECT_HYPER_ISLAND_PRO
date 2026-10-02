@@ -26,6 +26,7 @@ class TestLabActivity : Activity() {
         bindShadePolicyLab()
         bindMorphLab()
         bindExperienceVariantLab()
+        bindGlowIntensityLab()
         bindPillIconLab()
         bindShadePullLab()
 
@@ -167,6 +168,29 @@ class TestLabActivity : Activity() {
                 else AppSettings.SHADE_POLICY_COUNT_QUIETLY
             )
             Toast.makeText(this, "Shade: " + AppSettings.getShadeOpenPolicyName(this), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** b1485 (his ask, verbatim: "option chahiye inside mein switch karne ka, tab practically choose
+      *  kar paunga"): the glow colour engine's intensity rule, switchable on-device against real icons -
+      *  same pref the adb debug receiver writes ("glow_intensity" branch), one source of truth. */
+    private fun bindGlowIntensityLab() {
+        val group = findViewById<RadioGroup>(R.id.radioGlowIntensity)
+        TraceLog.gesture("glow-intensity-lab opened: current pref = " + AppSettings.getGlowIntensityMode(this))
+        group.check(when (AppSettings.getGlowIntensityMode(this)) {
+            "area" -> R.id.radioGlowArea
+            "hybrid" -> R.id.radioGlowHybrid
+            else -> R.id.radioGlowUniform
+        })
+        group.setOnCheckedChangeListener { _, checkedId ->
+            val name = when (checkedId) {
+                R.id.radioGlowArea -> "area"
+                R.id.radioGlowHybrid -> "hybrid"
+                else -> "uniform"
+            }
+            AppSettings.setGlowIntensityMode(this, name)
+            TraceLog.gesture("glow-intensity-lab wrote pref = " + name + " (readback = " + AppSettings.getGlowIntensityMode(this) + ")")
+            Toast.makeText(this, "Glow intensity: " + name, Toast.LENGTH_SHORT).show()
         }
     }
 
