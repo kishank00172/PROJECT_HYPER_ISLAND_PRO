@@ -6191,7 +6191,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1487 (adaptive-icon foreground resample - Google rim votes restored) + b1485 sweep + b1484 pin era")
+        TraceLog.morph("v2 build marker: b1488 (silhouette-relative rim - glyph-scale independent votes; red-single-arc fixed) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -6374,13 +6374,37 @@ class HyperAccessibilityService : AccessibilityService() {
                     val sR = LongArray(NS); val sG = LongArray(NS); val sB = LongArray(NS)
                     val sN = IntArray(NS); val tN = IntArray(NS)
                     var ringTotal = 0; var iconTotal = 0; var ringPixels = 0
+                    // b1488 (his 07:46 report, pixel-verified: single-tone RED halo, hue 0 dominating
+                    // the rim): the adaptive FOREGROUND keeps its glyph inside the adaptive safe zone
+                    // (~66%), so the fixed 0.68..1.0 canvas ring caught only the G's RED arc tip -> one
+                    // voted zone -> one arc -> a red halo ("blue gya, red aa gya"). The rim band is now
+                    // silhouett-RELATIVE: R = the radius holding 90% of opaque pixels, ring = [0.55R, R].
+                    // Full-bleed tiles (Telegram blue bg) keep R=16 by construction; glyph layers
+                    // (Google's G) now put ALL their arcs inside the band no matter the asset's inset.
+                    var alphaPix = 0
+                    for (v in px) if ((v ushr 24) > 40) alphaPix++
+                    var glyphR = 16.0
+                    if (alphaPix > 0) {
+                        var acc = 0; var rr2 = 0.5
+                        while (rr2 <= 16.0 && acc < alphaPix * 9 / 10) {
+                            val rIn = rr2 - 0.5
+                            for (i in px.indices) {
+                                val x2 = (i and 31) - 15.5; val y2 = (i shr 5) - 15.5
+                                val d2 = kotlin.math.sqrt(x2 * x2 + y2 * y2)
+                                if (d2 >= rIn && d2 < rr2 && (px[i] ushr 24) > 40) acc++
+                            }
+                            rr2 += 0.5
+                        }
+                        if (rr2 > 1.0) glyphR = rr2 - 0.5
+                    }
+                    TraceLog.morph("v2 glow sampling: glyphR=" + "%.1f".format(glyphR) + " alphaPix=" + alphaPix)
                     for (i in px.indices) {
                         val v = px[i]
                         val aa = v ushr 24; val rr = (v shr 16) and 255; val gg = (v shr 8) and 255; val bb = v and 255
                         if (aa > 40) { r += rr; g += gg; b += bb; n++ }
                         val x = (i and 31) - 15.5; val y = (i shr 5) - 15.5
                         val dist = kotlin.math.sqrt(x * x + y * y)
-                        val inRing = dist >= 16.0 * 0.68 && dist <= 16.0
+                        val inRing = dist >= glyphR * 0.55 && dist <= glyphR
                         if (inRing) ringPixels++
                         val mx = maxOf(rr, gg, bb); val mn = minOf(rr, gg, bb)
                         val satur = if (mx > 0) (mx - mn).toDouble() / mx else 0.0
