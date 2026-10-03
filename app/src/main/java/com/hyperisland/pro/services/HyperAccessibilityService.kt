@@ -6191,7 +6191,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1488 (silhouette-relative rim - glyph-scale independent votes; red-single-arc fixed) era")
+        TraceLog.morph("v2 build marker: b1489 (chroma fallback: saturated-hue bucket beats white tiles; sat>=0.35 votes; pkg/class in sampling log) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -6363,6 +6363,13 @@ class HyperAccessibilityService : AccessibilityService() {
                 // and only when that yields no palette and the icon is adaptive, resample the FOREGROUND
                 // alone - the colour-carrying layer - so glyph arcs (Google's G) reach the rim band.
                 // Fallback colour and sweep stay source-consistent; the per-package cache stores the winner.
+                // b1489 (his 08:49 evidence: 456x #fffefefe white + 116x #fffaf7f7 washed sweep; the
+                // adaptive fallback NEVER fired because MIUI hands these tiles as STATIC bitmaps, not
+                // AdaptiveIconDrawable - so Google averaged to white and Insta's thin outline averaged to
+                // pink-wash): the vote gate climbs to sat>=0.35 & mx>90 (diluted antialias pixels die),
+                // and when NO rim palette forms at all we fall back to a CHROMA BUCKET over the whole
+                // icon: the most populated saturated-hue bucket paints the halo - white backgrounds,
+                // grey ghosts and washes can never win that vote, whatever the drawable class is.
                 fun grab(src: Drawable): Triple<Int, Boolean, GlowPalette?> {
                     val bmp = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
                     val cv = Canvas(bmp); src.setBounds(0, 0, 32, 32); src.draw(cv)
@@ -6397,7 +6404,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         }
                         if (rr2 > 1.0) glyphR = rr2 - 0.5
                     }
-                    TraceLog.morph("v2 glow sampling: glyphR=" + "%.1f".format(glyphR) + " alphaPix=" + alphaPix)
+                    TraceLog.morph("v2 glow sampling: glyphR=" + "%.1f".format(glyphR) + " alphaPix=" + alphaPix + " class=" + src.javaClass.simpleName)
                     for (i in px.indices) {
                         val v = px[i]
                         val aa = v ushr 24; val rr = (v shr 16) and 255; val gg = (v shr 8) and 255; val bb = v and 255
@@ -6408,7 +6415,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         if (inRing) ringPixels++
                         val mx = maxOf(rr, gg, bb); val mn = minOf(rr, gg, bb)
                         val satur = if (mx > 0) (mx - mn).toDouble() / mx else 0.0
-                        if (aa <= 40 || satur < 0.18 || mx <= 24) continue
+                        if (aa <= 40 || satur < 0.35 || mx <= 90) continue
                         var ang = Math.toDegrees(kotlin.math.atan2(y, x)); if (ang < 0) ang += 360.0
                         val sIdx = (((ang - 270.0) + 360.0) % 360.0 / 15.0).toInt().coerceIn(0, NS - 1)
                         tN[sIdx]++; iconTotal++
@@ -6490,9 +6497,36 @@ class HyperAccessibilityService : AccessibilityService() {
                             c2 = fCols[0]
                         }
                     }
+                    if (pal2 == null) {
+                        // b1489 chroma ladder: no rim palette (white-bg static tiles, sparse outlines) -
+                        // the halo then belongs to the icon's most-populated SATURATED hue bucket, never
+                        // to an alpha-weighted average that white backgrounds dominate (his #fffefefe).
+                        val H = 36
+                        val hN = IntArray(H); val hR = LongArray(H); val hG = LongArray(H); val hB = LongArray(H)
+                        for (v in px) {
+                            val aa = v ushr 24; val rr2 = (v shr 16) and 255; val gg2 = (v shr 8) and 255; val bb2 = v and 255
+                            if (aa <= 40) continue
+                            val mx2 = maxOf(rr2, gg2, bb2); val mn2 = minOf(rr2, gg2, bb2)
+                            val sat2 = if (mx2 > 0) (mx2 - mn2).toDouble() / mx2 else 0.0
+                            if (sat2 < 0.25 || mx2 <= 60) continue   // bucket-wide but white/gray-proof:
+                            // Telegram's 0.28 blue still votes here; white bg/ghost reaches NEITHER gate.
+                            val hsvOut = FloatArray(3)
+                            android.graphics.Color.RGBToHSV(rr2, gg2, bb2, hsvOut)
+                            val hueIdx = ((hsvOut[0] / 360f) * H).toInt().coerceIn(0, H - 1)
+                            hN[hueIdx]++; hR[hueIdx] += rr2; hG[hueIdx] += gg2; hB[hueIdx] += bb2
+                        }
+                        var best = -1
+                        for (t in 0 until H) if (hN[t] > 0 && (best < 0 || hN[t] > hN[best])) best = t
+                        if (best >= 0 && hN[best] > 0) {
+                            c2 = (255 shl 24) or (((hR[best] / hN[best]).toInt() and 255) shl 16) or (((hG[best] / hN[best]).toInt() and 255) shl 8) or ((hB[best] / hN[best]).toInt() and 255)
+                            sm2 = true
+                            TraceLog.morph("v2 glow sampling: chroma fallback bucket=" + best + "/36 votes=" + hN[best] + " -> #" + java.lang.Integer.toHexString(c2))
+                        }
+                    }
                     return Triple(c2, sm2, pal2)
                 }
                 var res = grab(dw)
+                TraceLog.morph("v2 glow sampling pkg=" + pkg + " -> arcs=" + (res.third?.arcColors?.size ?: 1) + " colour=#" + java.lang.Integer.toHexString(res.first))
                 if (res.third == null && dw is AdaptiveIconDrawable) {
                     val fg = dw.foreground
                     if (fg != null) {
