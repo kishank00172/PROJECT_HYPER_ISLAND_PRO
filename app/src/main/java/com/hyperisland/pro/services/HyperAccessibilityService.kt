@@ -6191,7 +6191,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1485 (glow side-colours: perimeter sweep, arc-weighted, intensity TestLab A/B/C) + b1484 (position PINNED) era")
+        TraceLog.morph("v2 build marker: b1487 (adaptive-icon foreground resample - Google rim votes restored) + b1485 sweep + b1484 pin era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -6354,110 +6354,129 @@ class HyperAccessibilityService : AccessibilityService() {
         try {
             val dw = appIconView?.drawable
             if (dw != null) {
-                val bmp = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
-                val cv = Canvas(bmp); dw.setBounds(0, 0, 32, 32); dw.draw(cv)
-                val px = IntArray(1024); bmp.getPixels(px, 0, 32, 0, 0, 32, 32)
-                var r = 0L; var g = 0L; var b = 0L; var n = 0
-                val NS = 24
-                val sR = LongArray(NS); val sG = LongArray(NS); val sB = LongArray(NS)
-                val sN = IntArray(NS); val tN = IntArray(NS)
-                var ringTotal = 0; var iconTotal = 0; var ringPixels = 0
-                for (i in px.indices) {
-                    val v = px[i]
-                    val aa = v ushr 24; val rr = (v shr 16) and 255; val gg = (v shr 8) and 255; val bb = v and 255
-                    if (aa > 40) { r += rr; g += gg; b += bb; n++ }
-                    val x = (i and 31) - 15.5; val y = (i shr 5) - 15.5
-                    val dist = kotlin.math.sqrt(x * x + y * y)
-                    val inRing = dist >= 16.0 * 0.68 && dist <= 16.0
-                    if (inRing) ringPixels++
-                    val mx = maxOf(rr, gg, bb); val mn = minOf(rr, gg, bb)
-                    val satur = if (mx > 0) (mx - mn).toDouble() / mx else 0.0
-                    if (aa <= 40 || satur < 0.18 || mx <= 24) continue
-                    var ang = Math.toDegrees(kotlin.math.atan2(y, x)); if (ang < 0) ang += 360.0
-                    val sIdx = (((ang - 270.0) + 360.0) % 360.0 / 15.0).toInt().coerceIn(0, NS - 1)
-                    tN[sIdx]++; iconTotal++
-                    if (inRing) { sR[sIdx] += rr; sG[sIdx] += gg; sB[sIdx] += bb; sN[sIdx]++; ringTotal++ }
-                }
-                if (n > 0) {
-                    c = (255 shl 24) or (((r / n).toInt() and 255) shl 16) or (((g / n).toInt() and 255) shl 8) or ((b / n).toInt() and 255)
-                    sampled = true
-                }
-                if (ringTotal > 0) {
-                    // greedy clockwise merge of adjacent sectors (circular); raise threshold until <= 12 arcs
-                    val sIdx0 = (0 until NS).firstOrNull { sN[it] > 0 } ?: 0
-                    var thresh = 48.0
-                    var arcCols: IntArray? = null; var arcPoss: FloatArray? = null; var arcScal: FloatArray? = null
-                    var attempt = 0
-                    while (arcCols == null) {   // exits on materialise; thresh decays only on >12 arcs
-                        val aR = LongArray(NS + 1); val aG = LongArray(NS + 1); val aB = LongArray(NS + 1)
-                        val aN = IntArray(NS + 1); val aT = IntArray(NS + 1)
-                        val aS = IntArray(NS + 1); val aE = IntArray(NS + 1)
-                        var aCnt = 0; var open = false
-                        for (k in 0 until NS) {
-                            val i = (sIdx0 + k) % NS
-                            if (sN[i] == 0) continue
-                            if (!open) {
-                                open = true; aS[aCnt] = k; aE[aCnt] = k
-                                aR[aCnt] = sR[i]; aG[aCnt] = sG[i]; aB[aCnt] = sB[i]; aN[aCnt] = sN[i]; aT[aCnt] = tN[i]
-                            } else {
-                                val cr = aR[aCnt] / aN[aCnt]; val cg = aG[aCnt] / aN[aCnt]; val cb = aB[aCnt] / aN[aCnt]
-                                val mr = sR[i] / sN[i]; val mg = sG[i] / sN[i]; val mb = sB[i] / sN[i]
-                                val dr = (cr - mr).toDouble(); val dgx = (cg - mg).toDouble(); val dbx = (cb - mb).toDouble()
-                                if (kotlin.math.sqrt(dr * dr + dgx * dgx + dbx * dbx) <= thresh) {
-                                    aE[aCnt] = k
-                                    aR[aCnt] += sR[i]; aG[aCnt] += sG[i]; aB[aCnt] += sB[i]; aN[aCnt] += sN[i]; aT[aCnt] += tN[i]
-                                } else {
-                                    aCnt++; aS[aCnt] = k; aE[aCnt] = k
+                // b1487 (his 06:36 screenshot: the Google card wore a pale-blue halo instead of the G's
+                // four colours - pixel-verified: rim avg #486e77, ~83% of sat votes landed in one washed
+                // blue/cyan): adaptive icons are background+foreground LAYERS, and MIUI's Google tile is
+                // a WHITE rounded square with the coloured G centred in ~66%. The combined 32x32 draw
+                // put nothing but background white into the rim band -> zero votes -> silent v1 fallback.
+                // Rule: sample the COMBINED icon first (Telegram/Snapchat tiles vote strongly there),
+                // and only when that yields no palette and the icon is adaptive, resample the FOREGROUND
+                // alone - the colour-carrying layer - so glyph arcs (Google's G) reach the rim band.
+                // Fallback colour and sweep stay source-consistent; the per-package cache stores the winner.
+                fun grab(src: Drawable): Triple<Int, Boolean, GlowPalette?> {
+                    val bmp = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+                    val cv = Canvas(bmp); src.setBounds(0, 0, 32, 32); src.draw(cv)
+                    val px = IntArray(1024); bmp.getPixels(px, 0, 32, 0, 0, 32, 32)
+                    var r = 0L; var g = 0L; var b = 0L; var n = 0
+                    var c2 = 0xFF0096FF.toInt(); var sm2 = false
+                    var pal2: GlowPalette? = null
+                    val NS = 24
+                    val sR = LongArray(NS); val sG = LongArray(NS); val sB = LongArray(NS)
+                    val sN = IntArray(NS); val tN = IntArray(NS)
+                    var ringTotal = 0; var iconTotal = 0; var ringPixels = 0
+                    for (i in px.indices) {
+                        val v = px[i]
+                        val aa = v ushr 24; val rr = (v shr 16) and 255; val gg = (v shr 8) and 255; val bb = v and 255
+                        if (aa > 40) { r += rr; g += gg; b += bb; n++ }
+                        val x = (i and 31) - 15.5; val y = (i shr 5) - 15.5
+                        val dist = kotlin.math.sqrt(x * x + y * y)
+                        val inRing = dist >= 16.0 * 0.68 && dist <= 16.0
+                        if (inRing) ringPixels++
+                        val mx = maxOf(rr, gg, bb); val mn = minOf(rr, gg, bb)
+                        val satur = if (mx > 0) (mx - mn).toDouble() / mx else 0.0
+                        if (aa <= 40 || satur < 0.18 || mx <= 24) continue
+                        var ang = Math.toDegrees(kotlin.math.atan2(y, x)); if (ang < 0) ang += 360.0
+                        val sIdx = (((ang - 270.0) + 360.0) % 360.0 / 15.0).toInt().coerceIn(0, NS - 1)
+                        tN[sIdx]++; iconTotal++
+                        if (inRing) { sR[sIdx] += rr; sG[sIdx] += gg; sB[sIdx] += bb; sN[sIdx]++; ringTotal++ }
+                    }
+                    if (n > 0) {
+                        c2 = (255 shl 24) or (((r / n).toInt() and 255) shl 16) or (((g / n).toInt() and 255) shl 8) or ((b / n).toInt() and 255)
+                        sm2 = true
+                    }
+                    if (ringTotal > 0) {
+                        val sIdx0 = (0 until NS).firstOrNull { sN[it] > 0 } ?: 0
+                        var thresh = 48.0
+                        var arcCols: IntArray? = null; var arcPoss: FloatArray? = null; var arcScal: FloatArray? = null
+                        var attempt = 0
+                        while (arcCols == null) {   // exits on materialise; thresh decays only on >12 arcs
+                            val aR = LongArray(NS + 1); val aG = LongArray(NS + 1); val aB = LongArray(NS + 1)
+                            val aN = IntArray(NS + 1); val aT = IntArray(NS + 1)
+                            val aS = IntArray(NS + 1); val aE = IntArray(NS + 1)
+                            var aCnt = 0; var open = false
+                            for (k in 0 until NS) {
+                                val i = (sIdx0 + k) % NS
+                                if (sN[i] == 0) continue
+                                if (!open) {
+                                    open = true; aS[aCnt] = k; aE[aCnt] = k
                                     aR[aCnt] = sR[i]; aG[aCnt] = sG[i]; aB[aCnt] = sB[i]; aN[aCnt] = sN[i]; aT[aCnt] = tN[i]
+                                } else {
+                                    val cr = aR[aCnt] / aN[aCnt]; val cg = aG[aCnt] / aN[aCnt]; val cb = aB[aCnt] / aN[aCnt]
+                                    val mr = sR[i] / sN[i]; val mg = sG[i] / sN[i]; val mb = sB[i] / sN[i]
+                                    val dr = (cr - mr).toDouble(); val dgx = (cg - mg).toDouble(); val dbx = (cb - mb).toDouble()
+                                    if (kotlin.math.sqrt(dr * dr + dgx * dgx + dbx * dbx) <= thresh) {
+                                        aE[aCnt] = k
+                                        aR[aCnt] += sR[i]; aG[aCnt] += sG[i]; aB[aCnt] += sB[i]; aN[aCnt] += sN[i]; aT[aCnt] += tN[i]
+                                    } else {
+                                        aCnt++; aS[aCnt] = k; aE[aCnt] = k
+                                        aR[aCnt] = sR[i]; aG[aCnt] = sG[i]; aB[aCnt] = sB[i]; aN[aCnt] = sN[i]; aT[aCnt] = tN[i]
+                                    }
                                 }
                             }
-                        }
-                        aCnt++
-                        // seam: if the first and last arcs are really the same colour (Telegram), fold them
-                        if (aCnt > 1) {
-                            val fr = aR[0] / aN[0]; val fg = aG[0] / aN[0]; val fb = aB[0] / aN[0]
-                            val lr = aR[aCnt - 1] / aN[aCnt - 1]; val lg = aG[aCnt - 1] / aN[aCnt - 1]; val lb = aB[aCnt - 1] / aN[aCnt - 1]
-                            val dr = (fr - lr).toDouble(); val dgx = (fg - lg).toDouble(); val dbx = (fb - lb).toDouble()
-                            if (kotlin.math.sqrt(dr * dr + dgx * dgx + dbx * dbx) <= thresh) {
-                                aR[0] += aR[aCnt - 1]; aG[0] += aG[aCnt - 1]; aB[0] += aB[aCnt - 1]
-                                aN[0] += aN[aCnt - 1]; aT[0] += aT[aCnt - 1]
-                                aS[0] = aS[aCnt - 1]; aE[0] += NS   // wrapped arc: centre handled via normalised k
-                                aCnt--
+                            aCnt++
+                            if (aCnt > 1) {
+                                val fr = aR[0] / aN[0]; val fg = aG[0] / aN[0]; val fb = aB[0] / aN[0]
+                                val lr = aR[aCnt - 1] / aN[aCnt - 1]; val lg = aG[aCnt - 1] / aN[aCnt - 1]; val lb = aB[aCnt - 1] / aN[aCnt - 1]
+                                val dr = (fr - lr).toDouble(); val dgx = (fg - lg).toDouble(); val dbx = (fb - lb).toDouble()
+                                if (kotlin.math.sqrt(dr * dr + dgx * dgx + dbx * dbx) <= thresh) {
+                                    aR[0] += aR[aCnt - 1]; aG[0] += aG[aCnt - 1]; aB[0] += aB[aCnt - 1]
+                                    aN[0] += aN[aCnt - 1]; aT[0] += aT[aCnt - 1]
+                                    aS[0] = aS[aCnt - 1]; aE[0] += NS   // wrapped arc: centre normalised below
+                                    aCnt--
+                                }
                             }
+                            if (aCnt <= 12 || thresh > 300.0) {
+                                val tmpC = IntArray(aCnt); val tmpP = FloatArray(aCnt); val tmpS = FloatArray(aCnt)
+                                var meanScale = 0f
+                                for (t in 0 until aCnt) {
+                                    val ac = if (aN[t] > 0) {
+                                        (255 shl 24) or (((aR[t] / aN[t]).toInt() and 255) shl 16) or (((aG[t] / aN[t]).toInt() and 255) shl 8) or ((aB[t] / aN[t]).toInt() and 255)
+                                    } else c2
+                                    val kcRaw = (aS[t] + aE[t]) / 2.0   // aE may exceed NS on a seam-folded arc; normalised below
+                                    val sIdxC = (sIdx0 + kcRaw) % NS
+                                    val angC = (270.0 + sIdxC * 15.0 + 7.5) % 360.0
+                                    tmpC[t] = ac; tmpP[t] = (angC / 360.0).toFloat()
+                                    val rimShare = aN[t].toDouble() / ringTotal
+                                    val iconShare = aT[t].toDouble() / maxOf(1, iconTotal)
+                                    tmpS[t] = (iconShare / rimShare).toFloat().coerceIn(0.55f, 1.5f)
+                                    meanScale += tmpS[t] * rimShare.toFloat()
+                                }
+                                if (meanScale > 0f) for (t in 0 until aCnt) tmpS[t] = tmpS[t] / meanScale
+                                val order = (0 until aCnt).sortedBy { tmpP[it] }
+                                arcCols = IntArray(aCnt) { tmpC[order[it]] }
+                                arcPoss = FloatArray(aCnt) { tmpP[order[it]] }
+                                arcScal = FloatArray(aCnt) { tmpS[order[it]] }
+                            } else { thresh *= 1.5; attempt++ }
                         }
-                        if (aCnt <= 12 || thresh > 300.0) {
-                            // materialise: positions ascending, scales area-share/rim-share normalised to mean 1
-                            val tmpC = IntArray(aCnt); val tmpP = FloatArray(aCnt); val tmpS = FloatArray(aCnt)
-                            var meanScale = 0f
-                            for (t in 0 until aCnt) {
-                                val ac = if (aN[t] > 0) {
-                                    (255 shl 24) or (((aR[t] / aN[t]).toInt() and 255) shl 16) or (((aG[t] / aN[t]).toInt() and 255) shl 8) or ((aB[t] / aN[t]).toInt() and 255)
-                                } else c
-                                val kcRaw = (aS[t] + aE[t]) / 2.0   // aE may exceed NS on a seam-folded arc; normalised below
-                                val sIdxC = (sIdx0 + kcRaw) % NS
-                                val angC = (270.0 + sIdxC * 15.0 + 7.5) % 360.0
-                                tmpC[t] = ac; tmpP[t] = (angC / 360.0).toFloat()
-                                val rimShare = aN[t].toDouble() / ringTotal
-                                val iconShare = aT[t].toDouble() / maxOf(1, iconTotal)
-                                tmpS[t] = (iconShare / rimShare).toFloat().coerceIn(0.55f, 1.5f)
-                                meanScale += tmpS[t] * rimShare.toFloat()
-                            }
-                            if (meanScale > 0f) for (t in 0 until aCnt) tmpS[t] = tmpS[t] / meanScale
-                            // sort by position so the sweep stops are strictly ascending
-                            val order = (0 until aCnt).sortedBy { tmpP[it] }
-                            arcCols = IntArray(aCnt) { tmpC[order[it]] }
-                            arcPoss = FloatArray(aCnt) { tmpP[order[it]] }
-                            arcScal = FloatArray(aCnt) { tmpS[order[it]] }
-                        } else { thresh *= 1.5; attempt++ }
+                        val fCols = arcCols; val fPoss = arcPoss; val fScal = arcScal
+                        if (fCols != null && fPoss != null && fScal != null && fCols.size >= 2) {
+                            pal2 = GlowPalette(fCols, fPoss, fScal, if (ringPixels > 0) ringTotal.toFloat() / ringPixels.toFloat() else 1f)
+                        } else if (fCols != null && fCols.size == 1) {
+                            // uniform rim: paint through the v1 single-colour path (mud kills itself)
+                            c2 = fCols[0]
+                        }
                     }
-                    val fCols = arcCols; val fPoss = arcPoss; val fScal = arcScal
-                    if (fCols != null && fPoss != null && fScal != null && fCols.size >= 2) {
-                        palette = GlowPalette(fCols, fPoss, fScal, if (ringPixels > 0) ringTotal.toFloat() / ringPixels.toFloat() else 1f)
-                    } else if (fCols != null && fCols.size == 1) {
-                        // uniform icon: paint the RIM vote through the v1 single-colour path (mud kills itself)
-                        c = fCols[0]
+                    return Triple(c2, sm2, pal2)
+                }
+                var res = grab(dw)
+                if (res.third == null && dw is AdaptiveIconDrawable) {
+                    val fg = dw.foreground
+                    if (fg != null) {
+                        res = grab(fg)
+                        TraceLog.morph("v2 glow sampling: combined adaptive icon gave no rim votes - resampled FOREGROUND (avg=#" + java.lang.Integer.toHexString(res.first) + " arcs=" + (res.third?.arcColors?.size ?: 1) + ")")
                     }
                 }
+                c = res.first; sampled = res.second; palette = res.third
             }
         } catch (_: Exception) {}
         if (sampled) { glowColorCache[pkg] = c; palette?.let { glowPaletteCache[pkg] = it } }
