@@ -6191,7 +6191,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1489 (chroma fallback: saturated-hue bucket beats white tiles; sat>=0.35 votes; pkg/class in sampling log) era")
+        TraceLog.morph("v2 build marker: b1490 (canonical-icon sampling: morph snapshot can never feed the engine - his identical-stats evidence) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -6352,7 +6352,14 @@ class HyperAccessibilityService : AccessibilityService() {
         var c = 0xFF0096FF.toInt(); var sampled = false
         var palette: GlowPalette? = null
         try {
-            val dw = appIconView?.drawable
+            // b1490 - his 10:25 log proved the engine works but the SOURCE was a traitor: gm / whatsapp /
+            // cashify / glgm reported IDENTICAL sampling stats (alphaPix=637, arcs=8, same #c6d4c2).
+            // Cause: morphIconLauncher (:4539 snapshot of whichever icon was on the view back then) gets
+            // injected over the band icon view from :3976, so four apps all sampled ONE stale bitmap.
+            // Rule: sample the CANONICAL launcher icon (same PackageManager source the band icon loads
+            // from at :1697); the view drawable is only the last-resort fallback.
+            val canonical = loadAppIcon(pkg)
+            val dw = canonical ?: appIconView?.drawable
             if (dw != null) {
                 // b1487 (his 06:36 screenshot: the Google card wore a pale-blue halo instead of the G's
                 // four colours - pixel-verified: rim avg #486e77, ~83% of sat votes landed in one washed
@@ -6526,7 +6533,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     return Triple(c2, sm2, pal2)
                 }
                 var res = grab(dw)
-                TraceLog.morph("v2 glow sampling pkg=" + pkg + " -> arcs=" + (res.third?.arcColors?.size ?: 1) + " colour=#" + java.lang.Integer.toHexString(res.first))
+                TraceLog.morph("v2 glow sampling pkg=" + pkg + " src=" + (if (canonical != null) "canonical" else "view") + " -> arcs=" + (res.third?.arcColors?.size ?: 1) + " colour=#" + java.lang.Integer.toHexString(res.first))
                 if (res.third == null && dw is AdaptiveIconDrawable) {
                     val fg = dw.foreground
                     if (fg != null) {
