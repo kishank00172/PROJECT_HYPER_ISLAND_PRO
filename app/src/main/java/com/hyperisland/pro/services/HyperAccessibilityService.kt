@@ -1191,6 +1191,9 @@ class HyperAccessibilityService : AccessibilityService() {
         // Tap expands/collapses the island shell only.
         // Do NOT auto-open/collapse a notification from a generic tap while full expanded;
         // that breaks action buttons and reply taps.
+        // b1491: a manual expand with an empty ring has nothing for the icon slot to show - hide the
+        // dead cell (and its halo) instead of revealing an empty frame; a ring with a model restores it.
+        if (currentStage != IslandStage.STAGE3_FULL) syncBandIconForContent(notificationRing.isNotEmpty())
         setStageAnimated(
             if (currentStage == IslandStage.STAGE3_FULL) IslandStage.STAGE1_IDLE else IslandStage.STAGE3_FULL,
             ExpandReason.MANUAL_USER
@@ -1694,7 +1697,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // stall sampler caught the main thread sitting in `transactNative` 93 times for 23.3 s total.
         if (model.packageName != lastIconPkg) {
             lastIconPkg = model.packageName
-            appIconView?.setImageDrawable(loadAppIcon(model.packageName))
+            appIconView?.setImageDrawable(loadAppIcon(model.packageName)); syncBandIconForContent(true)
             // issue-C: a mid-morph content switch OWNS the icon now - never let the carry/restore re-stamp the
             // previous page's drawable (morphIconLauncher snapshot was taken at morph begin, i.e. page-1's icon).
             if (morphV2On) { morphIconLauncher = null; morphIconPill = null }
@@ -5928,6 +5931,17 @@ class HyperAccessibilityService : AccessibilityService() {
         TraceLog.line("BOOT", "startup smoke: attached=" + (iv?.isAttachedToWindow == true) +
             " size=" + (iv?.width ?: 0) + "x" + (iv?.height ?: 0) + " prewarm=" + status)
     }
+    // b1491 - his line: "jab notification nahi hota, pill pe tap karo aur expand hota hai, to usme ek
+    // khaali icon slot hota hai. Kyu? Use nahi hona chahiye tha." Diagnosis: the band layout ALWAYS
+    // carries the weight-0.2 icon cell (gridIconSec), and a MANUAL expand never binds a model, so the
+    // cell drew as a dead empty frame (with a leftover halo riding behind it on top). Rule: the slot's
+    // visibility now belongs to CONTENT, not to layout - an empty ring hides slot + halo together,
+    // and the next notification bind restores it. INVISIBLE (not GONE) keeps the 0.2 weight so the
+    // text column never shifts - changing layout weights mid-morph is exactly how the old jumps began.
+    private fun syncBandIconForContent(hasContent: Boolean) {
+        gridIconSec?.visibility = if (hasContent) View.VISIBLE else View.INVISIBLE
+        if (!hasContent) { appIconView?.setImageDrawable(null); glowPalette = null; glowColor = 0 }
+    }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
@@ -6191,7 +6205,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1490 (canonical-icon sampling: morph snapshot can never feed the engine - his identical-stats evidence) era")
+        TraceLog.morph("v2 build marker: b1491 (empty-ring manual expand hides the icon slot + halo - content owns visibility, not layout) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
