@@ -474,8 +474,18 @@ class HyperAccessibilityService : AccessibilityService() {
     private var chipOpen: TextView? = null
     private var pagerRow: LinearLayout? = null       // "slide bar" = pager dots, his term clarified
     private var pagerDialView: PagerDialView? = null  // ROUND H flag-owner: windowed dial replaces dots+track entirely (his "lining hata do")
-    private val shadeWipeEchoGuard = ShadeWipeEchoGuard()   // b1497: read-via-shade pages must not re-pop from an identical repost
-    private val shadeDismissSilencer = ShadeDismissSilencer()   // b1498: HIS shade dismissal = silence that package for 90s (clear-all layer-peel proof 18:40)
+    // b1499 (his 19:12 "last chance" proof): MIUI KILLED the process at 19:12:39 (marker line +
+    // counter reset in his own log), Android re-fired every still-active notification at listener
+    // rebind, and the in-memory guards died with the process. Both guards now RESTORE from prefs
+    // and PERSIST on every mutation - process death cannot resurrect a read chat anymore.
+    private val shadeWipeEchoGuard by lazy { ShadeWipeEchoGuard().also { it.restore(AppSettings.getShadeWipedEchoes(this)) } }   // b1497: identical reposts of read pages drop
+    private val shadeDismissSilencer by lazy { ShadeDismissSilencer().also { it.restore(AppSettings.getShadeSilenceMap(this), System.currentTimeMillis()) } }   // b1498: his dismissal = 90s per-package silence
+    private fun persistShadeGuards() {
+        runCatching {
+            AppSettings.setShadeWipedEchoes(this, shadeWipeEchoGuard.snapshot())
+            AppSettings.setShadeSilenceMap(this, shadeDismissSilencer.snapshot())
+        }.onFailure { TraceLog.line("DEBUG", "persistShadeGuards failed: " + it.javaClass.simpleName) }
+    }
     private var pagerActive: View? = null
     // Ambient glow: reuse ONE Paint, rebuild the shader only when the (colour, quantized centre) key changes
     private val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
@@ -1507,6 +1517,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // repost volley can't re-pop what he just read.
             val nowW = System.currentTimeMillis()
             notificationRing.map { it.packageName }.toSet().forEach { shadeDismissSilencer.stamp(it, nowW) }
+            persistShadeGuards()   // b1499: rebind volleys arrive MINUTES later (his: 6m14s) - memory alone is mortal
         }
         notificationRing.clear()
         currentRingIndex = 0
@@ -1532,6 +1543,7 @@ class HyperAccessibilityService : AccessibilityService() {
             reason == android.service.notification.NotificationListenerService.REASON_CANCEL_ALL) {
             val pkg = conversationKey.substringBefore('|')
             shadeDismissSilencer.stamp(pkg, System.currentTimeMillis())
+            persistShadeGuards()   // b1499: survive process death between his clear-all and the app's repost volley
             ringEvent("shade-dismiss: $pkg silenced ${ShadeDismissSilencer.DEFAULT_WINDOW_MS / 1000}s (his ${if (reason == 1) "swipe" else "clear-all"})")
         }
         var index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
@@ -6380,7 +6392,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1498 (shade-dismiss silencer 90s: his 18:40 clear-all layer-peel proof - VALI MODS File->Feedback send peeled) era")
+        TraceLog.morph("v2 build marker: b1499 (shade guards go DURABLE: his 19:12 process-kill proof - rebind volley died with in-memory state, now persisted) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

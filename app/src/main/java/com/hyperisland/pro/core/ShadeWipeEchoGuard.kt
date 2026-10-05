@@ -33,4 +33,14 @@ class ShadeWipeEchoGuard(private val capacity: Int = 25) {
     }
 
     val size: Int get() = wiped.size
+
+    /** b1499 (his 19:12 proof: MIUI killed the process, rebind re-fired every active notification,
+     *  and the in-memory guard died with it): durable across process death via AppSettings. */
+    fun snapshot(): List<Pair<String, String>> = wiped.entries.map { it.key to it.value }
+
+    fun restore(entries: List<Pair<String, String>>) {
+        wiped.clear()
+        entries.forEach { (k, v) -> wiped[k] = v }
+        while (wiped.size > capacity) wiped.remove(wiped.keys.first())
+    }
 }

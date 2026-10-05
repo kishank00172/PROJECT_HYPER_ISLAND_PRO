@@ -32,4 +32,12 @@ class ShadeDismissSilencer(private val windowMs: Long = DEFAULT_WINDOW_MS) {
     fun remainingMs(pkg: String, now: Long): Long = ((until[pkg] ?: now) - now).coerceAtLeast(0L)
 
     val size: Int get() = until.size
+
+    /** b1499: process death must not forget his "stay quiet" orders. */
+    fun snapshot(): Map<String, Long> = HashMap(until)
+
+    fun restore(map: Map<String, Long>, now: Long) {
+        until.clear()
+        map.forEach { (k, v) -> if (v > now) until[k] = v }   // expired entries die at the border
+    }
 }

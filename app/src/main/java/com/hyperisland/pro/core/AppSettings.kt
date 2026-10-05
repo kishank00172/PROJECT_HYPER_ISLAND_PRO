@@ -41,6 +41,8 @@ object AppSettings {
     private const val KEY_SHADE_PULL_ANIMATION_MODE = "shade_pull_animation_mode"
     private const val KEY_UI_V2_LAYOUT_A = "ui_v2_layout_a"
     private const val KEY_UI_V2_PAGER_DIAL = "ui_v2_pager_dial"   // ROUND H: on (default) = windowed dial; off = legacy dots/track
+    private const val KEY_SHADE_WIPED_ECHOES = "shade_wiped_echoes"     // b1499 durable: Base64 key|fp pairs, newline-joined
+    private const val KEY_SHADE_SILENCE = "shade_dismiss_silence"     // b1499 durable: Base64 pkg|untilMillis lines
     private const val KEY_DEBUG_MORPH_FREEZE_P = "debug_morph_freeze_p"      // float-as-string, -1 = off
     private const val KEY_DEBUG_MORPH_MEASURED = "debug_morph_measured"      // measured-frame logging switch
     private const val KEY_EXPERIENCE_VARIANT = "experience_variant"          // b1455: "claude"|"sol"|"mix" (default mix)
@@ -311,6 +313,33 @@ object AppSettings {
     fun getIslandExpandedCornerRadiusDp(context: Context) = prefs(context).getInt(KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP, DEFAULT_ISLAND_EXPANDED_CORNER_RADIUS_DP)
     fun getUiV2LayoutAEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_LAYOUT_A, true)
     fun getUiV2PagerDialEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_PAGER_DIAL, true)
+
+    // ---- b1499 durable shade guards (Base64 lines; emoji/unicode-safe, no JSON dependency) ----
+    private fun b64enc(v: String) = android.util.Base64.encodeToString(v.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+    private fun b64dec(v: String): String? = try { String(android.util.Base64.decode(v, android.util.Base64.DEFAULT), Charsets.UTF_8) } catch (_: Exception) { null }
+
+    fun getShadeWipedEchoes(context: Context): List<Pair<String, String>> {
+        val raw = prefs(context).getString(KEY_SHADE_WIPED_ECHOES, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split('\n').mapNotNull { line ->
+            val half = line.split('|', limit = 2)
+            if (half.size != 2) null else { val k = b64dec(half[0]); val v = b64dec(half[1]); if (k == null || v == null) null else k to v }
+        }
+    }
+    fun setShadeWipedEchoes(context: Context, entries: List<Pair<String, String>>) {
+        prefs(context).edit().putString(KEY_SHADE_WIPED_ECHOES, entries.joinToString("\n") { b64enc(it.first) + "|" + b64enc(it.second) }).apply()
+    }
+    fun getShadeSilenceMap(context: Context): Map<String, Long> {
+        val raw = prefs(context).getString(KEY_SHADE_SILENCE, "") ?: ""
+        if (raw.isBlank()) return emptyMap()
+        return raw.split('\n').mapNotNull { line ->
+            val half = line.split('|', limit = 2)
+            if (half.size != 2) null else { val k = b64dec(half[0]); val t = half[1].toLongOrNull(); if (k == null || t == null) null else k to t }
+        }.toMap()
+    }
+    fun setShadeSilenceMap(context: Context, map: Map<String, Long>) {
+        prefs(context).edit().putString(KEY_SHADE_SILENCE, map.entries.joinToString("\n") { b64enc(it.key) + "|" + it.value }).apply()
+    }
     fun setUiV2PagerDialEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_UI_V2_PAGER_DIAL, on).apply() }
     fun getDebugMorphFreezeP(context: Context): Float = prefs(context).getString(KEY_DEBUG_MORPH_FREEZE_P, "-1")?.toFloatOrNull() ?: -1f
     fun getDebugMorphMeasured(context: Context) = prefs(context).getBoolean(KEY_DEBUG_MORPH_MEASURED, true)

@@ -36,3 +36,27 @@ class ShadeWipeEchoGuardTest {
         assertTrue(g.shouldDrop("c", "tc", "mc"))
     }
 }
+
+class ShadeWipeEchoGuardPersistenceTest {
+    @Test fun snapshotRestoreSurvivesProcessDeath() {
+        val g = ShadeWipeEchoGuard()
+        g.recordWipe(listOf(Triple("org.telegram.messenger|sender|VIJAY", "VIJAY TRADER", "❤️ Sticker")))
+        val snap = g.snapshot()
+        // b1499: 19:12:39 process kill -> fresh process restores from prefs; identical re-fire still drops
+        val g2 = ShadeWipeEchoGuard()
+        g2.restore(snap)
+        org.junit.Assert.assertTrue(g2.shouldDrop("org.telegram.messenger|sender|VIJAY", "VIJAY TRADER", "❤️ Sticker"))
+        org.junit.Assert.assertFalse(g2.shouldDrop("org.telegram.messenger|sender|VIJAY", "VIJAY TRADER", "naya message"))
+    }
+
+    @Test fun restoreRespectsCapacity() {
+        val entries = (1..30).map { Triple("k$it", "t$it", "m$it") }
+        val g = ShadeWipeEchoGuard(capacity = 5)
+        g.recordWipe(entries)
+        val g2 = ShadeWipeEchoGuard(capacity = 5)
+        g2.restore(g.snapshot())
+        org.junit.Assert.assertEquals(5, g2.size)
+        org.junit.Assert.assertFalse(g2.shouldDrop("k1", "t1", "m1"))
+        org.junit.Assert.assertTrue(g2.shouldDrop("k30", "t30", "m30"))
+    }
+}
