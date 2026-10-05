@@ -85,6 +85,7 @@ import com.hyperisland.pro.core.GpuLayerPrewarm
 import com.hyperisland.pro.core.PagerDots
 import com.hyperisland.pro.core.AbsorbV10
 import com.hyperisland.pro.core.PagerMode
+import com.hyperisland.pro.core.PagerDial
 import com.hyperisland.pro.core.PagerSpecResult
 import com.hyperisland.pro.core.GcSnapshot
 import com.hyperisland.pro.core.IslandGesture
@@ -470,6 +471,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var chipReply: TextView? = null
     private var chipOpen: TextView? = null
     private var pagerRow: LinearLayout? = null       // "slide bar" = pager dots, his term clarified
+    private var pagerDialView: PagerDialView? = null  // ROUND H flag-owner: windowed dial replaces dots+track entirely (his "lining hata do")
     private var pagerActive: View? = null
     // Ambient glow: reuse ONE Paint, rebuild the shader only when the (colour, quantized centre) key changes
     private val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
@@ -750,6 +752,15 @@ class HyperAccessibilityService : AccessibilityService() {
                     "glow_intensity" -> AppSettings.setGlowIntensityMode(this@HyperAccessibilityService, intent.getStringExtra("name"))
                     "pager_set" -> debugPagerSet(intent.getIntExtra("idx", currentRingIndex), intent.getIntExtra("total", notificationRing.size))
                     "pager_clear" -> debugPagerClear()
+                    "pager_step" -> {
+                        val d = intent.getIntExtra("d", 1)
+                        val cur = pagerDebugOverride ?: Pair(currentRingIndex, notificationRing.size)
+                        val tot = cur.second.coerceAtLeast(2)
+                        debugPagerSet(((cur.first + d) % tot + tot) % tot, tot)
+                    }
+                    "pager_slow" -> pagerDialView?.slowFactor = intent.getIntExtra("k", 1).coerceIn(1, 50).toFloat()
+                    "pager_freeze_p" -> pagerDialView?.frozenP = intent.getFloatExtra("p", -1f)
+                    "pager_freeze_off" -> pagerDialView?.frozenP = -1f
                     "absorb_freeze" -> absorbFreezeAt(intent.getFloatExtra("a", -1f))
                     "absorb_freeze_off" -> { resetAbsorbToRest(); TraceLog.morph("v2 absorb v10 freeze OFF - exact rest restored") }
                     "absorb" -> {
@@ -6047,7 +6058,8 @@ class HyperAccessibilityService : AccessibilityService() {
         startupSmokeLogged = true
         val iv = islandView
         TraceLog.line("BOOT", "startup smoke: attached=" + (iv?.isAttachedToWindow == true) +
-            " size=" + (iv?.width ?: 0) + "x" + (iv?.height ?: 0) + " prewarm=" + status)
+            " size=" + (iv?.width ?: 0) + "x" + (iv?.height ?: 0) + " prewarm=" + status +
+            " pager=" + (if (AppSettings.getUiV2PagerDialEnabled(this)) "dial" else "row"))
     }
     // b1491 - his line: "jab notification nahi hota, pill pe tap karo aur expand hota hai, to usme ek
     // khaali icon slot hota hai. Kyu? Use nahi hona chahiye tha." Diagnosis: the band layout ALWAYS
@@ -6323,7 +6335,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1495 (empty-ring undead hunt: pill preview + card text + notificationMode reset on final dismiss) era")
+        TraceLog.morph("v2 build marker: b1496 (round-H pager-v3-dial: windowed dial, dash active, shrink-by-slot dots, TRACK/lining deleted - owner work.md spec) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -6340,6 +6352,9 @@ class HyperAccessibilityService : AccessibilityService() {
             pagerRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
             val tsIdx = header.indexOfChild(timeStampText)
             header.addView(pagerRow, if (tsIdx >= 0) tsIdx else 1, LinearLayout.LayoutParams(-2, -2))
+            pagerDialView = PagerDialView(ctx).apply { visibility = View.GONE }
+            header.addView(pagerDialView, if (tsIdx >= 0) tsIdx + 1 else 2, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(2) })
+            pagerDialView?.setOnSettleLog { m -> TraceLog.morph("v2 pager settled: " + m) }
             timeStampText?.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }
         }
 
@@ -6377,7 +6392,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val sqIcon = dp(32) * 0.30f
             val band = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val trail = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END }
-            for (v in listOf(gridIconSec, appNameText, pagerRow, timeStampText)) (v?.parent as? ViewGroup)?.removeView(v)
+            for (v in listOf(gridIconSec, appNameText, pagerRow, pagerDialView, timeStampText)) (v?.parent as? ViewGroup)?.removeView(v)
             for (v in listOf(titleText, messageText, actionScroll, replyBar)) (v?.parent as? ViewGroup)?.removeView(v)
             (contentSec.parent as? ViewGroup)?.removeView(contentSec)
             contentGrid.removeAllViews()
@@ -6395,6 +6410,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val bandText = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             appNameText?.let { bandText.addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }) }   // 14+32+8 = x=54dp
             trail.addView(pagerRow, LinearLayout.LayoutParams(-2, -2))
+            trail.addView(pagerDialView, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(2) })
             trail.addView(timeStampText, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
             bandText.addView(trail, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(14) })
             band.addView(bandText, LinearLayout.LayoutParams(0, -2, 1f))
@@ -6713,7 +6729,45 @@ class HyperAccessibilityService : AccessibilityService() {
         val overridden = pagerDebugOverride
         val idx = overridden?.first ?: currentRingIndex
         val total = overridden?.second ?: notificationRing.size
+        if (AppSettings.getUiV2PagerDialEnabled(this) && AppSettings.getUiV2LayoutAEnabled(this)) {
+            // ROUND H (flag ON, default): the windowed dial owns the trailing slot; legacy dots+track stay GONE.
+            runCatching {
+                pagerRow?.visibility = View.GONE
+                updatePagerDial(idx.coerceAtLeast(0), total.coerceAtLeast(0), reason)
+            }.onFailure { t -> TraceLog.line("DEBUG", "pager dial draw/animate failed, keeping legacy hidden: " + t.javaClass.simpleName) }
+            return
+        }
+        runCatching { pagerDialView?.visibility = View.GONE }
         renderPager(idx.coerceAtLeast(0), total.coerceAtLeast(0), animate = reason != "content", reason = reason)
+    }
+
+    /** ROUND H owner decision, single point (his words: timestamp abhi jahan hai wahin; any move =
+     *  one-line change HERE): the pager's right edge = timestampView.left - 8dp, dp on screen. */
+    private fun pagerAnchorRightDp(): Float {
+        val ts = timeStampText ?: return -1f
+        if (ts.width <= 0) return -1f
+        val loc = IntArray(2); ts.getLocationOnScreen(loc)
+        return loc[0] / resources.displayMetrics.density - 8f
+    }
+
+    private fun updatePagerDial(idx: Int, total: Int, reason: String) {
+        val dial = pagerDialView ?: return
+        if (total <= 1) {
+            dial.setPage(idx, total, animate = false)
+            TraceLog.morph("v2 pager: idx=" + idx + " N=" + total + " a=" + dial.aNow + " mode=hidden P=- Wdp=- availDp=- anchorDp=" + pagerAnchorRightDp() + " reason=" + reason)
+            return
+        }
+        val anchor = pagerAnchorRightDp()
+        val availDp = if (anchor > 0f) anchor - 12f else Float.MAX_VALUE   // spec §8: anchor minus cutout keep-out + 12dp inset (collapsed to one constant today)
+        val availPx = if (availDp == Float.MAX_VALUE) Float.MAX_VALUE else availDp * resources.displayMetrics.density
+        val p = dial.retunePitch(availPx)
+        val spec = dial.setPage(idx, total, animate = reason != "content" && reason != "rebuild")
+        TraceLog.morph("v2 pager: idx=" + idx + " N=" + total + " a=" + spec.a +
+            " mode=" + (if (spec.mode == PagerDial.Mode.DIAL) "dial" else "row") +
+            " P=" + "%.2f".format(p) + " Wdp=" + "%.1f".format(spec.widthDp) +
+            " availDp=" + (if (anchor > 0f) "%.1f".format(availDp) else "def") +
+            " anchorDp=" + "%.1f".format(anchor) + " reason=" + reason)
+        if (reason != "content") dial.announceForAccessibility("Page " + (idx + 1) + " of " + total)
     }
 
     private fun renderPager(idx: Int, total: Int, animate: Boolean, reason: String) {

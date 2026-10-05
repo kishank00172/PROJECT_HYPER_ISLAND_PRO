@@ -40,6 +40,7 @@ object AppSettings {
     private const val KEY_PILL_ICON_RENDER_MODE = "pill_icon_render_mode"
     private const val KEY_SHADE_PULL_ANIMATION_MODE = "shade_pull_animation_mode"
     private const val KEY_UI_V2_LAYOUT_A = "ui_v2_layout_a"
+    private const val KEY_UI_V2_PAGER_DIAL = "ui_v2_pager_dial"   // ROUND H: on (default) = windowed dial; off = legacy dots/track
     private const val KEY_DEBUG_MORPH_FREEZE_P = "debug_morph_freeze_p"      // float-as-string, -1 = off
     private const val KEY_DEBUG_MORPH_MEASURED = "debug_morph_measured"      // measured-frame logging switch
     private const val KEY_EXPERIENCE_VARIANT = "experience_variant"          // b1455: "claude"|"sol"|"mix" (default mix)
@@ -309,6 +310,8 @@ object AppSettings {
     fun setIslandExpandedHeightDp(context: Context, v: Int) = prefs(context).edit().putInt(KEY_ISLAND_EXPANDED_HEIGHT_DP, v).apply()
     fun getIslandExpandedCornerRadiusDp(context: Context) = prefs(context).getInt(KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP, DEFAULT_ISLAND_EXPANDED_CORNER_RADIUS_DP)
     fun getUiV2LayoutAEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_LAYOUT_A, true)
+    fun getUiV2PagerDialEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_PAGER_DIAL, true)
+    fun setUiV2PagerDialEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_UI_V2_PAGER_DIAL, on).apply() }
     fun getDebugMorphFreezeP(context: Context): Float = prefs(context).getString(KEY_DEBUG_MORPH_FREEZE_P, "-1")?.toFloatOrNull() ?: -1f
     fun getDebugMorphMeasured(context: Context) = prefs(context).getBoolean(KEY_DEBUG_MORPH_MEASURED, true)
     fun setDebugMorphFreezeP(context: Context, p: Float) { prefs(context).edit().putString(KEY_DEBUG_MORPH_FREEZE_P, p.toString()).apply() }
