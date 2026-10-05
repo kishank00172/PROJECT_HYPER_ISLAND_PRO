@@ -1493,10 +1493,22 @@ class HyperAccessibilityService : AccessibilityService() {
             // that was stored WITH the page: the same string, a different field name.
             index = notificationRing.indexOfFirst { it.notificationKey == conversationKey }
             if (index < 0) {
-                ringEvent("dismiss: no page for key=$conversationKey ring=${notificationRing.size}")
-                return
-            }
+                // b1492 #4 (his shade-clear report: shade me saare read karne ke baad bhi icon+badge
+                // ZOMBIE-returns, aur pause-collapse pe sirf rukha hua message bachata): cancels arrive
+                // as status-bar keys; when neither the conversation key nor the stored notification key
+                // matches, that page became undead. Last resort of the chain: the status-bar key's first
+                // segment is the package - if the ring holds a page from that same package, a mass-clear
+                // from the system shade meant it too.
+                val pkg = conversationKey.substringBefore('|')
+                index = notificationRing.indexOfFirst { it.packageName == pkg }
+                if (index < 0) {
+                    ringEvent("dismiss: no page for key=$conversationKey ring=${notificationRing.size}")
+                    return
+                }
+                ringEvent("dismiss: key chain unmatched; package fallback on $pkg (zombie page cashed in)")
+            } else {
             ringEvent("dismiss: matched the stored notification key, not a conversation key ($conversationKey)")
+            }
         }
         val gone = notificationRing[index].title
         notificationRing.removeAt(index)
@@ -3220,6 +3232,10 @@ class HyperAccessibilityService : AccessibilityService() {
         }
 
         captureGlowRestAnchor()   // issue-B: halo's FINAL coordinate, saved before the live view becomes the neighbour
+        // b1492 #2/#3: BEFORE the neighbour re-bind repaints the only halo's colour, cash out the
+        // outgoing page's halo into its own paint-cached state - it will ride the frozen snapshot.
+        glowOutgoingColor = glowColor
+        glowOutgoingPalette = glowPalette
         currentRingIndex = nextIndex
         getCurrentRingModel()?.let { updateNotificationContent(it) }
         host.alpha = 1f
@@ -4884,6 +4900,13 @@ class HyperAccessibilityService : AccessibilityService() {
     /** icon's rest coordinate in islandView-draw space, captured by captureGlowRestAnchor() before a push begins. */
     private var glowRestAnchorX = -1f
     private var glowRestAnchorY = -1f
+    // b1492 dual-halo state: the frozen page keeps ITS halo while the neighbour brings its own.
+    private var glowOutgoingColor = 0
+    private var glowOutgoingPalette: GlowPalette? = null
+    private var glowShaderKeyB = ""
+    private var glowAuraKeyB = ""
+    private var glowPaintB: android.graphics.Paint? = null
+    private var glowAuraPaintB: android.graphics.Paint? = null
     /** false = outgoing page owns the halo; true = incoming (once it is closer to final than the outgoing one). */
     private var glowFadeOnIncoming = false
 
@@ -5420,9 +5443,19 @@ class HyperAccessibilityService : AccessibilityService() {
                 // Har DRAG_PAGES phase (drag / commit / spring-back) me anchor = push-begin rest coordinate;
                 // NO layer tX ride, NO glowFadeOnIncoming position split - dominant-flip ab fade==0 window me
                 // koi position change nahi karta (dono sides same anchor). Transition poora glowDragFade() alpha se.
+                // b1492 - HIS exact words, all three: (1) "glow icon ke saath chale - lock ka matlab rider
+                // tha", (2) "halka sa drag pe bhi 1 ya 3 ka glow instantly aa jata, abhi commit nahi hua"
+                // (startRingPush re-binds the live view to the neighbour and the ONE pinned halo was
+                // repainted in the neighbour's colour at drag-frame one - the flip he measured), and
+                // (3) the fast-swipe pop: incoming page showed NO halo until settle, then the colour
+                // popped at rest. Fix: anchors are page-owned riders - primary halo rides the live view
+                // (its translation carries the incoming icon), the snapshot's halo rides the push layer
+                // below. Both exist from drag-frame one; cancel rides both home; commit settles the
+                // neighbour into rest with ITS OWN halo already in flight. No flip anywhere, no pop -
+                // colourswap-abort impossible because nothing swaps.
                 if (dragMode == DRAG_PAGES && glowRestAnchorX >= 0f) {
-                    cx = l + glowRestAnchorX
-                    cy = t + glowRestAnchorY
+                    cx = l + glowRestAnchorX + (gridRoot?.translationX ?: 0f)
+                    cy = t + glowRestAnchorY + (gridRoot?.translationY ?: 0f)
                     live = true
                 }
 
@@ -5466,7 +5499,7 @@ class HyperAccessibilityService : AccessibilityService() {
                     }
                     glowPaint.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(gp.blurPx.toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null   // Px means px - his spec is "18px", not 18dp
                     glowShaderKey = coreKey
-                    TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
+                    if (dragMode != DRAG_PAGES) TraceLog.morph("v2 glow evidence: color=#" + Integer.toHexString(glowColor) +
                         " glowMode=" + glowModeNow + " arcs=" + (palNow?.arcColors?.size ?: 1) +
                         " arcColours=" + (palNow?.arcColors?.joinToString(",") { "#" + Integer.toHexString(it) } ?: "single") +
                         " coverage=" + "%.2f".format(palNow?.coverage ?: 1f) +
@@ -5479,7 +5512,10 @@ class HyperAccessibilityService : AccessibilityService() {
                 // the gradient stops carry profile alphas only). Writer-audit: between startRingPush and
                 // endRingSwap nothing writes gridRoot.alpha/visibility (V2 push is alpha-free by design),
                 // so dragFade is the sole transient factor here.
-                val dragFade = runCatching { glowDragFade() }.getOrDefault(1f)
+                // b1492: dragFade dips the halo while pages are displaced - wrong contract for the
+                // rider halos (both pages are visibly travelling with their own glow). Dim only
+                // outside the page-push choreography.
+                val dragFade = if (dragMode == DRAG_PAGES) 1f else runCatching { glowDragFade() }.getOrDefault(1f)
                 // HYBRID mode: the icon's total colour coverage sets the WHOLE halo's strength (never dying fully)
                 val finalA = baseA * dragFade * (if (glowModeNow == "hybrid" && palNow != null) (0.55f + 0.45f * palNow.coverage) else 1f)
                 logGlowFade(dragFade, baseA, finalA)
@@ -5510,6 +5546,55 @@ class HyperAccessibilityService : AccessibilityService() {
                     xferNow(glowAuraPaint)
                     glowAuraPaint.alpha = (255 * finalA).toInt().coerceIn(0, 255)
                     canvas.drawCircle(cx, ay, aRad, glowAuraPaint)
+                }
+                // b1492 #1: the OUTGOING page's halo - rides the frozen snapshot layer in the outgoing
+                // page's own colour/palette, mirrored shader cache (paint/key B) so the two riding
+                // halos never ping-pong invalidations. Two tiny gradients per drag frame at most -
+                // accepted cost for halos that stay parented under the finger.
+                if (dragMode == DRAG_PAGES && glowRestAnchorX >= 0f && (glowOutgoingColor != 0 || glowOutgoingPalette != null)) {
+                    val cxO = l + glowRestAnchorX + (ringPushLayer?.translationX ?: 0f)
+                    val cyO = t + glowRestAnchorY + (ringPushLayer?.translationY ?: 0f)
+                    val colO = if (glowOutgoingColor != 0) glowOutgoingColor else glowColor
+                    val palO = glowOutgoingPalette
+                    val paintO = glowPaintB ?: android.graphics.Paint().apply { isAntiAlias = true }.also { glowPaintB = it }
+                    val coreKeyO = colO.toString() + ":" + System.identityHashCode(palO) + ":" + cxO.toInt() + ":" + cyO.toInt() + ":" + glowModeNow
+                    if (coreKeyO != glowShaderKeyB) {
+                        if (palO != null && palO.arcColors.size > 1) {
+                            val colsO = IntArray(palO.arcColors.size + 1) { i -> val idx = if (i < palO.arcColors.size) i else 0; val a = if (glowModeNow == "area") (palO.arcScales[idx] * 255f).toInt().coerceIn(0, 255) else 255; (a shl 24) or (palO.arcColors[idx] and 0x00FFFFFF) }
+                            val possO = FloatArray(palO.arcPositions.size + 1) { i -> if (i < palO.arcPositions.size) palO.arcPositions[i] else 1f }
+                            val sweepO = android.graphics.SweepGradient(cxO, cyO, colsO, possO)
+                            val whiteO = RadialGradient(cxO, cyO, coreRad, whiteStopsFor(gp.coreAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                            paintO.shader = android.graphics.ComposeShader(sweepO, whiteO, android.graphics.PorterDuff.Mode.MULTIPLY)
+                        } else {
+                            paintO.shader = RadialGradient(cxO, cyO, coreRad, IntArray(gp.stopFractions.size) { i -> ((gp.stopAlphaMul[i] * gp.coreAlpha * 255).toInt().coerceIn(0, 255) shl 24) or (colO and 0x00FFFFFF) }, gp.stopFractions, Shader.TileMode.CLAMP)
+                        }
+                        paintO.maskFilter = if (gp.blurPx > 0) android.graphics.BlurMaskFilter(gp.blurPx.toFloat(), android.graphics.BlurMaskFilter.Blur.NORMAL) else null
+                        glowShaderKeyB = coreKeyO
+                    }
+                    xferNow(paintO)
+                    paintO.alpha = (255 * finalA).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(cxO, cyO, coreRad, paintO)
+                    if (gp.twoLayer) {
+                        val aRadO = dp(gp.auraRadiusDp).toFloat(); val ayO = cyO + dp(gp.auraOffsetYDp).toFloat()
+                        val paintAO = glowAuraPaintB ?: android.graphics.Paint().apply { isAntiAlias = true }.also { glowAuraPaintB = it }
+                        val auraKeyO = coreKeyO + ":aura"
+                        if (auraKeyO != glowAuraKeyB) {
+                            if (palO != null && palO.arcColors.size > 1) {
+                                val colsAO = IntArray(palO.arcColors.size + 1) { i -> val idx = if (i < palO.arcColors.size) i else 0; val a = if (glowModeNow == "area") (palO.arcScales[idx] * 255f).toInt().coerceIn(0, 255) else 255; (a shl 24) or (palO.arcColors[idx] and 0x00FFFFFF) }
+                                val possAO = FloatArray(palO.arcPositions.size + 1) { i -> if (i < palO.arcPositions.size) palO.arcPositions[i] else 1f }
+                                val sweAO = android.graphics.SweepGradient(cxO, ayO, colsAO, possAO)
+                                val whAO = RadialGradient(cxO, ayO, aRadO, whiteStopsFor(gp.auraAlpha), gp.stopFractions, Shader.TileMode.CLAMP)
+                                paintAO.shader = android.graphics.ComposeShader(sweAO, whAO, android.graphics.PorterDuff.Mode.MULTIPLY)
+                            } else {
+                                paintAO.shader = RadialGradient(cxO, ayO, aRadO, IntArray(gp.stopFractions.size) { i -> ((gp.stopAlphaMul[i] * gp.auraAlpha * 255).toInt().coerceIn(0, 255) shl 24) or 0x00FFFFFF }, gp.stopFractions, Shader.TileMode.CLAMP)
+                            }
+                            paintAO.maskFilter = paintO.maskFilter
+                            glowAuraKeyB = auraKeyO
+                        }
+                        xferNow(paintAO)
+                        paintAO.alpha = (255 * finalA).toInt().coerceIn(0, 255)
+                        canvas.drawCircle(cxO, ayO, aRadO, paintAO)
+                    }
                 }
             }   // b1452 standing rule: a cosmetic painter must never crash the service
 
@@ -6205,7 +6290,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1491 (empty-ring manual expand hides the icon slot + halo - content owns visibility, not layout) era")
+        TraceLog.morph("v2 build marker: b1492 (rider halos: page-owned anchors, no flip on drag-start, no pop on commit; shade-clear package fallback) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
