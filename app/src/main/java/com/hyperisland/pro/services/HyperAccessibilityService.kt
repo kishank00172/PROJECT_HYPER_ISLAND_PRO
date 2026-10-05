@@ -1212,7 +1212,11 @@ class HyperAccessibilityService : AccessibilityService() {
             pillPreviewRoot?.alpha = 1f
             setStageAnimated(IslandStage.STAGE2_PING, ExpandReason.MANUAL_USER)
         } else {
-            clearNotificationRing("swipe-up")
+            // b1493 #3 (his TraceLog 10:10:08 smoking gun: CLEAR 14 pages because=swipe-up): a plain
+            // manual collapse fired this else-branch when notificationMode was false and POISONED the
+            // whole ring. A collapse is shape-only: pages outlive the shell. Wipes belong to explicit
+            // read-all policies (shade-open WIPES), never to a gesture that only closes the card.
+            ringEvent("swipe-up collapse: ${notificationRing.size} pages kept (no wipe)")
             pillPreviewCount?.visibility = View.GONE
             setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
         }
@@ -3281,6 +3285,12 @@ class HyperAccessibilityService : AccessibilityService() {
             ?.translationX(layerTarget)
             ?.setDuration(settleMs)
             ?.setInterpolator(ghostMagneticInterpolator)
+            // b1493 #1 (his verdict: "finger tak lift na ho to ride karta, lift ke baad glow lock, settle
+            // pe jhatke se teleport"): during the SETTLE both pages still translate every frame, but ONLY
+            // showDragOffset ever invalidated the island - so the rider halo froze at the last drag frame
+            // and the dragMode reset teleported it. The settle's animators now invalidate per frame, the
+            // halo rides the settle curve exactly like it rides the finger.
+            ?.setUpdateListener { _ -> islandView?.invalidate() }
             ?.setListener(object : AnimatorListenerAdapter() {
                 // withEndAction alone is NOT enough: it is skipped when the animation is cancelled (e.g.
                 // the user collapses mid-push), which strands the frozen page on screen.
@@ -3296,6 +3306,7 @@ class HyperAccessibilityService : AccessibilityService() {
             ?.translationX(hostTarget)
             ?.setDuration(settleMs)
             ?.setInterpolator(ghostMagneticInterpolator)
+            ?.setUpdateListener { _ -> islandView?.invalidate() }
             ?.withEndAction {
                 if (!commit) {
                     // The live view was holding the neighbour; give the page back to the finger's origin.
@@ -6290,7 +6301,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1492 (rider halos: page-owned anchors, no flip on drag-start, no pop on commit; shade-clear package fallback) era")
+        TraceLog.morph("v2 build marker: b1493 (settle rides: per-frame invalidate; swipe-up collapse never wipes the ring) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
