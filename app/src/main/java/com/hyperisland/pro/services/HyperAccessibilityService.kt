@@ -1531,11 +1531,19 @@ class HyperAccessibilityService : AccessibilityService() {
                 "gone='$gone' because=${removalReasonName(reason)}"
         )
         if (current == null) {
-            // b1494 #2 (his: "last message pe tap karte raho, remove nahi hota island se"): with the
-            // queue left EMPTY this path skipped every content refresh - the band still rendered the
-            // dismissed final chat (icon + text ghost). Empty-ring visual reset must follow the ring,
-            // not the queue. (postCollapseIsland alone only morphs the shell.)
+            // b1495 (his 14:05:12 evidence: three taps dropped remaining 2->1->0 - the RING is legitimately
+            // empty - and yet 20-40 seconds later the compact pill still wore the last app's icon and a
+            // manual expand re-showed the whole dismissed card. Cause: this branch never touched the pill
+            // preview surfaces (updatePillBadge-owned, skipped for null model) nor the expanded card's text.
+            // Kill both undeads here; the shell collapse is the LAST act.
             syncBandIconForContent(false)
+            pillPreviewCount?.visibility = View.GONE
+            pillPreviewRoot?.visibility = View.GONE
+            pillPreviewRoot?.alpha = 0f
+            appNameText?.text = ""
+            titleText?.text = ""
+            messageText?.text = ""
+            notificationMode = false
             postCollapseIsland()
             return
         }
@@ -6315,7 +6323,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1494 (tap-open collapses shell; last-page dismiss resets band visuals; shade-open = all-read default) era")
+        TraceLog.morph("v2 build marker: b1495 (empty-ring undead hunt: pill preview + card text + notificationMode reset on final dismiss) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
