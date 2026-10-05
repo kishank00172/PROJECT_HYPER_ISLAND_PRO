@@ -87,6 +87,7 @@ import com.hyperisland.pro.core.AbsorbV10
 import com.hyperisland.pro.core.PagerMode
 import com.hyperisland.pro.core.PagerDial
 import com.hyperisland.pro.core.ShadeWipeEchoGuard
+import com.hyperisland.pro.core.ShadeDismissSilencer
 import com.hyperisland.pro.core.PagerSpecResult
 import com.hyperisland.pro.core.GcSnapshot
 import com.hyperisland.pro.core.IslandGesture
@@ -474,6 +475,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var pagerRow: LinearLayout? = null       // "slide bar" = pager dots, his term clarified
     private var pagerDialView: PagerDialView? = null  // ROUND H flag-owner: windowed dial replaces dots+track entirely (his "lining hata do")
     private val shadeWipeEchoGuard = ShadeWipeEchoGuard()   // b1497: read-via-shade pages must not re-pop from an identical repost
+    private val shadeDismissSilencer = ShadeDismissSilencer()   // b1498: HIS shade dismissal = silence that package for 90s (clear-all layer-peel proof 18:40)
     private var pagerActive: View? = null
     // Ambient glow: reuse ONE Paint, rebuild the shader only when the (colour, quantized centre) key changes
     private val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
@@ -1238,6 +1240,13 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun postNotificationEvent(packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
+            val nowIn = System.currentTimeMillis()
+            if (shadeDismissSilencer.isSilenced(packageName, nowIn)) {
+                // b1498: he dismissed/clear-all'd (or shade-wipe read) this package moments ago.
+                // Apps re-feed the same chats peeled one layer deep - silence, by his order.
+                TraceLog.ingest("drop shade-silenced: $packageName '$title' (${shadeDismissSilencer.remainingMs(packageName, nowIn) / 1000}s left)")
+                return@post
+            }
             // Two separate questions used to be one: "should the island pop while he reads the shelf?" and
             // "should this message exist in the ring?". The answer to the first is no; the answer to the second
             // is always yes, and refusing it is what made messages vanish during a rain.
@@ -1494,6 +1503,10 @@ class HyperAccessibilityService : AccessibilityService() {
             // still-active notifications the moment the shade closes; fingerprints below let
             // postNotificationEvent drop the identical echo (same chat + same content).
             shadeWipeEchoGuard.recordWipe(notificationRing.map { Triple(it.conversationKey, it.title, it.message) })
+            // b1498: same wipe also silences the affected packages briefly, so the close-of-shade
+            // repost volley can't re-pop what he just read.
+            val nowW = System.currentTimeMillis()
+            notificationRing.map { it.packageName }.toSet().forEach { shadeDismissSilencer.stamp(it, nowW) }
         }
         notificationRing.clear()
         currentRingIndex = 0
@@ -1512,6 +1525,15 @@ class HyperAccessibilityService : AccessibilityService() {
      * badge only ever went up.
      */
     private fun dismissConversationFromRing(conversationKey: String, reason: Int = -1) {
+        // b1498 (his 18:40 proof): his own shade SWIPE / CLEAR-ALL is a "stay quiet" order for that
+        // package - apps instantly re-post the same conversations peeled one layer down, which a
+        // content-fingerprint guard rightly calls "new content". REASON_CANCEL=1, REASON_CANCEL_ALL=2.
+        if (reason == android.service.notification.NotificationListenerService.REASON_CANCEL ||
+            reason == android.service.notification.NotificationListenerService.REASON_CANCEL_ALL) {
+            val pkg = conversationKey.substringBefore('|')
+            shadeDismissSilencer.stamp(pkg, System.currentTimeMillis())
+            ringEvent("shade-dismiss: $pkg silenced ${ShadeDismissSilencer.DEFAULT_WINDOW_MS / 1000}s (his ${if (reason == 1) "swipe" else "clear-all"})")
+        }
         var index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
         if (index < 0) {
             // A cancel arrives with the status-bar key (`pkg|tag|id`), while pages are filed under the
@@ -6358,7 +6380,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1497 (shade-wipe echo guard + no-notification-icon launcher fallback - his 17:53 VIJAY TRADER proof + white-icon rule) era")
+        TraceLog.morph("v2 build marker: b1498 (shade-dismiss silencer 90s: his 18:40 clear-all layer-peel proof - VALI MODS File->Feedback send peeled) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
