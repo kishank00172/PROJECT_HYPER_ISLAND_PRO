@@ -1531,6 +1531,11 @@ class HyperAccessibilityService : AccessibilityService() {
                 "gone='$gone' because=${removalReasonName(reason)}"
         )
         if (current == null) {
+            // b1494 #2 (his: "last message pe tap karte raho, remove nahi hota island se"): with the
+            // queue left EMPTY this path skipped every content refresh - the band still rendered the
+            // dismissed final chat (icon + text ghost). Empty-ring visual reset must follow the ring,
+            // not the queue. (postCollapseIsland alone only morphs the shell.)
+            syncBandIconForContent(false)
             postCollapseIsland()
             return
         }
@@ -5183,7 +5188,16 @@ class HyperAccessibilityService : AccessibilityService() {
         // every other unread chat vanished unopened, while the chat you had just read stayed in the ring
         // and came back on the next notification.
         ringEvent("open tapped chat key=$openedKey")
-        if (openedKey != null) dismissConversationFromRing(openedKey, reason = 0) else postCollapseIsland()
+        if (openedKey != null) {
+            dismissConversationFromRing(openedKey, reason = 0)
+            // b1494 #1 (his: "tap pe notification island se remove hui aur khuli - to island ko collapse
+            // ho jaana chahiye, jo abhi nahi ho rha"): the deliberate no-stage-change served the old
+            // multi-chat truth, but his frame reference is one handled tap = one closed card; pages
+            // keep living in the ring (his b1493 #2 verdict stands), the SHELL collapses.
+            if (notificationRing.isNotEmpty() && currentStage == IslandStage.STAGE3_FULL) {
+                setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.MANUAL_USER)
+            }
+        } else postCollapseIsland()
     }
 
     private fun showIslandInternal() {
@@ -6301,7 +6315,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1493 (settle rides: per-frame invalidate; swipe-up collapse never wipes the ring) era")
+        TraceLog.morph("v2 build marker: b1494 (tap-open collapses shell; last-page dismiss resets band visuals; shade-open = all-read default) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

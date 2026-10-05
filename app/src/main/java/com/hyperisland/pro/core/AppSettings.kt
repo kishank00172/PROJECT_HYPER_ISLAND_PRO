@@ -190,7 +190,9 @@ object AppSettings {
      */
     const val SHADE_POLICY_COUNT_QUIETLY = 0  // keep counting, never pop, never wipe
     const val SHADE_POLICY_WIPES = 1          // old: opening the shelf marks everything read
-    const val DEFAULT_SHADE_POLICY = SHADE_POLICY_COUNT_QUIETLY
+    // b1494 #3 - his standing rule, verbatim: "notification panel khula to all read maan ke
+    // notification remove karo" - and the shade read + zombies kept returning under the quiet default.
+    const val DEFAULT_SHADE_POLICY = SHADE_POLICY_WIPES
     const val DEFAULT_ISLAND_CORNER_RADIUS_DP = 19
     const val DEFAULT_ISLAND_STAGE2_WIDTH_DP = 180
     const val DEFAULT_ISLAND_EXPANDED_WIDTH_DP = 390
