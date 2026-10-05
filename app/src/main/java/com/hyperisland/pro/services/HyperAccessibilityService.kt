@@ -86,6 +86,7 @@ import com.hyperisland.pro.core.PagerDots
 import com.hyperisland.pro.core.AbsorbV10
 import com.hyperisland.pro.core.PagerMode
 import com.hyperisland.pro.core.PagerDial
+import com.hyperisland.pro.core.ShadeWipeEchoGuard
 import com.hyperisland.pro.core.PagerSpecResult
 import com.hyperisland.pro.core.GcSnapshot
 import com.hyperisland.pro.core.IslandGesture
@@ -472,6 +473,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var chipOpen: TextView? = null
     private var pagerRow: LinearLayout? = null       // "slide bar" = pager dots, his term clarified
     private var pagerDialView: PagerDialView? = null  // ROUND H flag-owner: windowed dial replaces dots+track entirely (his "lining hata do")
+    private val shadeWipeEchoGuard = ShadeWipeEchoGuard()   // b1497: read-via-shade pages must not re-pop from an identical repost
     private var pagerActive: View? = null
     // Ambient glow: reuse ONE Paint, rebuild the shader only when the (colour, quantized centre) key changes
     private val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
@@ -1267,6 +1269,13 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             val finalConversationKey = conversationKey ?: "$packageName|title|${title.lowercase(Locale.getDefault()).trim()}"
             val finalConversationKeySource = conversationKeySource ?: "serviceFallback"
+            if (shadeWipeEchoGuard.shouldDrop(finalConversationKey, title, message)) {
+                // b1497: shade WIPE (17:53:08) then Telegram re-posts the SAME notification 0.3s after
+                // shade-close (17:53:09.729, age=248s, same '❤️ Sticker') - identical echo of a READ
+                // page, not news. Same chat with NEW content falls through and gets its page.
+                TraceLog.ingest("drop shade-wiped echo: $packageName '${display.title}' (read via shade, identical repost)")
+                return@post
+            }
             val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs)
             addOrUpdateNotificationRing(incomingModel)
             if (quietForShade) {
@@ -1479,6 +1488,12 @@ class HyperAccessibilityService : AccessibilityService() {
             val killed = notificationRing.take(4).joinToString(", ") { "'${it.title}'" } +
                 if (notificationRing.size > 4) ", +${notificationRing.size - 4} more" else ""
             ringEvent("CLEAR ${notificationRing.size} pages [$killed] because=$cause")
+        }
+        if (cause == "shade-open") {
+            // b1497 (his 17:53 proof): a shade-open wipe = he READ these pages. Apps re-post their
+            // still-active notifications the moment the shade closes; fingerprints below let
+            // postNotificationEvent drop the identical echo (same chat + same content).
+            shadeWipeEchoGuard.recordWipe(notificationRing.map { Triple(it.conversationKey, it.title, it.message) })
         }
         notificationRing.clear()
         currentRingIndex = 0
@@ -6092,7 +6107,13 @@ class HyperAccessibilityService : AccessibilityService() {
             val adaptive = { loadPillDisplayIcon(pkg) }
             val generic = { loadGenericPillGlyph(pkg) }
 
-            val chosen = when (mode) {
+            val noNotifIcon = iconToUse == null && legacyResId == 0
+            val chosen = if (mode == AppSettings.PILL_ICON_AUTO && noNotifIcon) {
+                // b1497 (his rule: "jiska notification icon nahi hai uska launcher icon le lo"): no
+                // notification glyph anywhere -> the app's REAL launcher icon, full colour, instead
+                // of the monochrome blob that painted plain white for him.
+                loadAppIcon(pkg) ?: generic()
+            } else when (mode) {
                 AppSettings.PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION -> manual()
                 AppSettings.PILL_ICON_MANUAL_RESOURCE_VALIDATED -> manual()?.takeIf { looksLikeGlyph(it) }
                 AppSettings.PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION -> loaded()
@@ -6111,10 +6132,12 @@ class HyperAccessibilityService : AccessibilityService() {
 
             Log.d(
                 "HyperIslandPro",
-                "PillIcon mode=${AppSettings.getPillIconRenderModeName(mode)} pkg=$pkg cached=${cached != null} legacy=$legacyResId chosen=${chosen?.javaClass?.simpleName}"
+                "PillIcon mode=${AppSettings.getPillIconRenderModeName(mode)} pkg=$pkg cached=${cached != null} legacy=$legacyResId noNotifIcon=$noNotifIcon chosen=${chosen?.javaClass?.simpleName}"
             )
 
-            if (mode == AppSettings.PILL_ICON_LAUNCHER) chosen else chosen?.let { tintGlyph(it, tint) }
+            // b1497: the launcher fallback keeps its real colours - tint is only for true glyph sources.
+            if (mode == AppSettings.PILL_ICON_LAUNCHER || (mode == AppSettings.PILL_ICON_AUTO && noNotifIcon)) chosen
+            else chosen?.let { tintGlyph(it, tint) }
         }
     } catch (e: Exception) {
         Log.d("HyperIslandPro", "Pill icon resolver failed for $pkg: ${e.message}")
@@ -6335,7 +6358,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1496 (round-H pager-v3-dial: windowed dial, dash active, shrink-by-slot dots, TRACK/lining deleted - owner work.md spec) era")
+        TraceLog.morph("v2 build marker: b1497 (shade-wipe echo guard + no-notification-icon launcher fallback - his 17:53 VIJAY TRADER proof + white-icon rule) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
