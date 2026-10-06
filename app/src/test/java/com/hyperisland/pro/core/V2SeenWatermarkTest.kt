@@ -175,6 +175,45 @@ class V2SeenWatermarkTest {
         assertEquals(m.stateOf("k2")?.nonTextFp, copy.stateOf("k2")?.nonTextFp)
     }
 
+
+    // b1502 survivor fix: HIS clear-all speaks for the PACKAGE - an unseeded conv (seed missed, as
+    // telegram's extract-null removal on his 16:17 log) stays dead under the package clock.
+    @Test
+    fun pkgClockEchoesUnseededConv() {
+        val m = V2SeenWatermark()
+        m.markSeen(V2SeenWatermark.SeenStamp("other", "apkg", NOW, "", 1, 0L, "", advancePkg = true), NOW)
+        // never-seeded chat re-fires with an older message clock -> ECHO (his demand)
+        val r = m.judgeMessaging("apkg|shortcut|ndid_99", "apkg", listOf(stamp(NOW - 3_000, "peeled old")), NOW - 3_000, NOW + 1_000)
+        assertEquals(V2SeenWatermark.Verdict.ECHO, r.verdict)
+        // genuinely new arrival (ts > package clock) -> NEW instantly
+        assertEquals(V2SeenWatermark.Verdict.NEW,
+            m.judgeMessaging("apkg|shortcut|ndid_99", "apkg", listOf(stamp(NOW + 9_000, "fresh")), NOW + 9_000, NOW + 60_000).verdict)
+    }
+
+    @Test
+    fun noClockConvsJudgeByWhen() {
+        val m = V2SeenWatermark()
+        // app post has NO per-message ts; he cleared the shelf (package clock advanced)
+        m.markSeen(V2SeenWatermark.SeenStamp("c", "tg", NOW, "", 1, 0L, "", advancePkg = true), NOW)
+        val r = m.judgeMessaging("tg|shortcut|ndid_7", "tg", listOf(stamp(0L, "channel post")), NOW, NOW + 1_000, whenMs = NOW - 30_000)
+        assertEquals(V2SeenWatermark.Verdict.ECHO, r.verdict)
+        assertEquals("pkg-noclock", r.cmp)
+        // a later post (when > pkgH) is genuinely new even without message clocks
+        assertEquals(V2SeenWatermark.Verdict.UNKNOWN,
+            m.judgeMessaging("tg|shortcut|ndid_7", "tg", listOf(stamp(0L, "new channel post")), NOW + 60_000, NOW + 60_000, whenMs = NOW + 60_000).verdict)
+    }
+
+    @Test
+    fun pkgClockSurvivesBlobRoundTrip() {
+        val m = V2SeenWatermark()
+        m.markSeen(V2SeenWatermark.SeenStamp("c", "tg", NOW, "", advancePkg = true), NOW)
+        val copy = V2SeenWatermark()
+        assertTrue(copy.decodeInto(m.encode()))
+        assertEquals(NOW, copy.pkgHighOf("tg"))
+        assertEquals(V2SeenWatermark.Verdict.ECHO,
+            copy.judgeMessaging("tg|shortcut|x", "tg", listOf(stamp(NOW - 1_000, "old")), NOW, NOW + 1_000).verdict)
+    }
+
     @Test
     fun boundaryCapsAtEightFingerprints() {
         val m = V2SeenWatermark()

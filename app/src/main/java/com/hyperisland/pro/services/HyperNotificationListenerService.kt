@@ -100,7 +100,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
     fun markAllActivesSeenFromShade() {
         runCatching {
             val actives = getActiveNotifications()?.toList().orEmpty().filter { it.packageName != packageName }
-            val entries = actives.mapNotNull { asbn -> v2SeenStampFor(asbn, msgKindFallback = true) }
+            val entries = actives.mapNotNull { asbn -> v2SeenStampFor(asbn, msgKindFallback = true)?.copy(advancePkg = true) }
             if (entries.isNotEmpty()) V2SeenEngine.markSeenNow(this, entries, "shade-open sweep n=" + entries.size)
         }
     }
@@ -255,7 +255,7 @@ class HyperNotificationListenerService : NotificationListenerService() {
         var v2NonFp = ""
         if (v2Mode != V2SeenWatermark.Mode.LEGACY_ONLY) {
             if (v2Stamps.isNotEmpty()) {
-                val jr = V2SeenEngine.judgeMessaging(this, extracted.conversationKey, pkg, v2Stamps, sbn.postTime)
+                val jr = V2SeenEngine.judgeMessaging(this, extracted.conversationKey, pkg, v2Stamps, sbn.postTime, notification.`when`)
                 v2Verdict = jr.verdict.name
                 v2NewestTs = jr.newestTs
                 v2FpsCsv = jr.boundaryCsv
@@ -360,9 +360,9 @@ class HyperNotificationListenerService : NotificationListenerService() {
         // accessibility service missed the shade event). Never for app/system/listener reasons.
         if (reason == REASON_CLICK || reason == REASON_CANCEL || reason == REASON_CANCEL_ALL) {
             runCatching {
-                v2SeenStampFor(sbn, msgKindFallback = true)?.let { stamp ->
-                    V2SeenEngine.markSeenNow(this, listOf(stamp), "user-removal r" + reason)
-                }
+                val stamp = v2SeenStampFor(sbn, msgKindFallback = true)
+                if (stamp != null) V2SeenEngine.markSeenNow(this, listOf(stamp.copy(advancePkg = true)), "user-removal r" + reason)
+                else TraceLog.count("v2 seen: removal mark SKIPPED (extract null) pkg=$pkg reason=$reason")
             }
         }
         if (reason == REASON_CANCEL_ALL || reason == REASON_APP_CANCEL_ALL) {

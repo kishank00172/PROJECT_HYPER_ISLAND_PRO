@@ -60,10 +60,14 @@ class V2SeenWatermark {
     )
 
     data class SeenStamp(val convKey: String, val pkg: String, val newestTs: Long, val fpsCsv: String,
-                         val kind: Int = 1, val nonWhen: Long = 0L, val nonTextFp: String = "")
+                         val kind: Int = 1, val nonWhen: Long = 0L, val nonTextFp: String = "",
+                         /** His direct actions (swipe/clear-all/shade-wipe/tap) also speak for the PACKAGE:
+                          *  convs a seed never captured still stay dead under the package clock, while a
+                          *  genuinely new message (ts > pkgH) passes instantly. */
+                         val advancePkg: Boolean = false)
 
     companion object {
-        const val SNAPSHOT_VERSION = 1
+        const val SNAPSHOT_VERSION = 2
         const val MAX_CONVS = 500
         const val TTL_MS = 30L * 24 * 60 * 60 * 1000
         const val MAX_BOUNDARY = 8
@@ -96,6 +100,9 @@ class V2SeenWatermark {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ConState>?): Boolean = false // manual pruning only
     }
     private val trust = HashMap<String, Trust>()
+    private val pkgH = HashMap<String, Long>()
+
+    fun pkgHighOf(pkg: String): Long = pkgH[pkg] ?: 0L
 
     var echoCount = 0; var newCount = 0; var unknownCount = 0; var conflictCount = 0
     fun legacyConflict(pkg: String, key: String) { conflictCount++ }
@@ -125,17 +132,36 @@ class V2SeenWatermark {
 
     /** P1-3 MESSAGING path garlic bread. msgs MUST be raw ts (normalizeTsMs applied by caller for display;
      *  here we normalize defensively - idempotent). Returns metrics for the proof line. */
-    fun judgeMessaging(key: String, pkg: String, msgs: List<MsgStamp>, postTimeMs: Long, nowMs: Long): JudgeResult {
+    fun judgeMessaging(key: String, pkg: String, msgs: List<MsgStamp>, postTimeMs: Long, nowMs: Long, whenMs: Long = 0L): JudgeResult {
         if (msgs.isEmpty()) { unknownCount++; return JudgeResult(Verdict.UNKNOWN, trust = trustOf(pkg).name) }
         val norm = msgs.filter { it.tsMs > 0L }.map { it.copy(tsMs = normalizeTsMs(it.tsMs)) }
+        // Telegram MODS (his device: ndid_* chats) post with ZERO per-message clocks - judge by the
+        // notification's own `when` against the conversation/package clock (his fix demand: nothing
+        // returns after his clear, but a real new message posts when > pkgH and still appears).
+        if (norm.isEmpty()) {
+            val t = trustOf(pkg)
+            if (whenMs > 0L) {
+                val stNoClock = synchronized(convs) { convs[key] }
+                if (stNoClock != null && stNoClock.h >= whenMs) { echoCount++; return JudgeResult(Verdict.ECHO, stNoClock.h, 0, "", "", "noclock", t.name) }
+                if (stNoClock == null && (pkgH[pkg] ?: 0L) >= whenMs) { echoCount++; return JudgeResult(Verdict.ECHO, pkgH[pkg] ?: 0L, 0, "", "", "pkg-noclock", t.name) }
+            }
+            unknownCount++; return JudgeResult(Verdict.UNKNOWN, trust = t.name)
+        }
         val t = trustGate(pkg, norm, normalizeTsMs(postTimeMs), nowMs)
-        if (norm.isEmpty() || t == Trust.UNTRUSTED) {
+        if (t == Trust.UNTRUSTED) {
             unknownCount++; return JudgeResult(Verdict.UNKNOWN, trust = t.name)
         }
         val st = synchronized(convs) { convs[key] }
         if (st == null) {
-            // No seen state: P1-5 connect baseline is the only full-resolution answer; if the caller
-            // ran it, a state exists. Here: treat as NEW so a truly first-seen chat can appear.
+            // Unseeded conv: the PACKAGE clock (set only by HIS actions) decides old-vs-new.
+            val ph = pkgH[pkg] ?: 0L
+            if (ph > 0L) {
+                val unseen = norm.filter { it.tsMs > ph }
+                if (unseen.isEmpty()) { echoCount++; return JudgeResult(Verdict.ECHO, ph, 0, "", "", "pkg-lt", t.name) }
+                val newest = unseen.maxBy { it.tsMs }!!
+                newCount++
+                return JudgeResult(Verdict.NEW, newest.tsMs, unseen.size, newest.text, boundaryFor(norm, newest.tsMs), "pkg-gt", t.name)
+            }
             val newest = norm.maxBy { it.tsMs }!!
             newCount++
             return JudgeResult(Verdict.NEW, newest.tsMs, norm.count { it.tsMs == newest.tsMs },
@@ -194,6 +220,11 @@ class V2SeenWatermark {
                 }
             }
             st.updatedAt = nowMs
+        }
+        if (stamp.advancePkg) {
+            val t = normalizeTsMs(stamp.newestTs)
+            if (stamp.kind == 2 && stamp.nonWhen > 0L) pkgH[stamp.pkg] = maxOf(pkgH[stamp.pkg] ?: 0L, stamp.nonWhen)
+            else if (t > 0L) pkgH[stamp.pkg] = maxOf(pkgH[stamp.pkg] ?: 0L, t)
         }
     }
 
@@ -267,6 +298,8 @@ class V2SeenWatermark {
         }
         out.writeInt(trust.size)
         trust.forEach { (p, t) -> out.writeUTF(p); out.writeByte(t.ordinal) }
+        out.writeInt(pkgH.size)
+        pkgH.forEach { (p, h) -> out.writeUTF(p); out.writeLong(h) }
         out.flush()
         return buf.toByteArray()
     }
@@ -274,7 +307,8 @@ class V2SeenWatermark {
     /** Corrupt/unknown version -> EMPTY model + false, so callers can log and the baseline protects. */
     fun decodeInto(bytes: ByteArray): Boolean = try {
         val din = java.io.DataInputStream(java.io.ByteArrayInputStream(bytes))
-        if (din.readByte().toInt() != SNAPSHOT_VERSION) { false } else {
+        val version = din.readByte().toInt()
+        if (version != SNAPSHOT_VERSION && version != 1) { false } else {
             val n = din.readInt()
             synchronized(convs) {
                 convs.clear()
@@ -291,6 +325,10 @@ class V2SeenWatermark {
             repeat(din.readInt()) {
                 val p = din.readUTF(); val t = Trust.values().getOrElse(din.readByte().toInt()) { Trust.UNKNOWN }
                 trust[p] = t
+            }
+            pkgH.clear()
+            if (version >= 2 && din.available() > 0) {
+                repeat(din.readInt()) { pkgH[din.readUTF()] = din.readLong() }
             }
             true
         }

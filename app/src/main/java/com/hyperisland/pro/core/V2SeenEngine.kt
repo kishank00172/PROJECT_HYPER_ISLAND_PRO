@@ -48,9 +48,9 @@ object V2SeenEngine {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_MODE, m.slug).commit()
     }
 
-    fun judgeMessaging(context: Context, key: String, pkg: String, msgs: List<V2SeenWatermark.MsgStamp>, postTime: Long): V2SeenWatermark.JudgeResult {
+    fun judgeMessaging(context: Context, key: String, pkg: String, msgs: List<V2SeenWatermark.MsgStamp>, postTime: Long, whenMs: Long = 0L): V2SeenWatermark.JudgeResult {
         ensureLoaded(context)
-        val r = model.judgeMessaging(key, pkg, msgs, postTime, System.currentTimeMillis())
+        val r = model.judgeMessaging(key, pkg, msgs, postTime, System.currentTimeMillis(), whenMs)
         proof("verdict=${r.verdict} src=msg pkg=$pkg convKey=$key newestTs=${r.newestTs} H=${model.stateOf(key)?.h ?: 0} cmp=${r.cmp} unseen=${r.unseenCount} mode=${mode(context).slug}")
         return r
     }
@@ -275,9 +275,21 @@ object V2SeenEngine {
                 }
             ))
         }
+        fun chainG() = report("G", listOf(
+            Step("pkg-clock-unseeded-conv", V2SeenWatermark.Verdict.ECHO) {
+                m.markSeen(V2SeenWatermark.SeenStamp("seen-one", "tg", now, "", 1, 0L, "", advancePkg = true), now)
+                m.judgeMessaging("tg|shortcut|ndid_x", "tg", listOf(stamp(now - 10_000, "peeled back")), now, now).verdict
+            },
+            Step("pkg-clock-real-new-passes", V2SeenWatermark.Verdict.NEW) {
+                m.judgeMessaging("tg|shortcut|ndid_x", "tg", listOf(stamp(now + 7_000, "real fresh")), now, now).verdict
+            },
+            Step("noclock-by-when", V2SeenWatermark.Verdict.ECHO) {
+                m.judgeMessaging("tg|shortcut|ndid_y", "tg", listOf(stamp(0L, "channel noise")), now, now, whenMs = now - 5_000).verdict
+            }
+        ))
         when (chain) {
-            "A" -> chainA(); "B" -> chainB(); "C" -> chainC(); "D" -> chainD(); "E" -> chainE(); "F" -> chainF()
-            else -> { chainA(); chainB(); chainC(); chainD(); chainE(); chainF() }
+            "A" -> chainA(); "B" -> chainB(); "C" -> chainC(); "D" -> chainD(); "E" -> chainE(); "F" -> chainF(); "G" -> chainG()
+            else -> { chainA(); chainB(); chainC(); chainD(); chainE(); chainF(); chainG() }
         }
         TraceLog.line("V2SEEN", results.toString().trimEnd())
         return "sim $chain: $pass/$total PASS"

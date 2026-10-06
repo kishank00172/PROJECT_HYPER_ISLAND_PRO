@@ -5284,7 +5284,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         val kind = if (model.isMessagingStyle) 1 else 2
         val nonFp = if (kind == 2) com.hyperisland.pro.core.V2SeenWatermark.nonMsgFp(model.title, model.message, "") else ""
-        return com.hyperisland.pro.core.V2SeenWatermark.SeenStamp(model.conversationKey, model.packageName, ts, model.v2FpsCsv, kind, ts, nonFp)
+        return com.hyperisland.pro.core.V2SeenWatermark.SeenStamp(model.conversationKey, model.packageName, ts, model.v2FpsCsv, kind, ts, nonFp, advancePkg = true)
     }
 
     private fun openCurrentNotification() {
@@ -6440,7 +6440,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1501 (Round-I P1 seen-watermark: chains A/B/C die by per-message clock; legacy guards now report CONFLICTs) era")
+        TraceLog.morph("v2 build marker: b1502 (survivor fix: package clock - HIS clear speaks for the whole app; no-clock convs judged by when) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
