@@ -1717,7 +1717,7 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewIcon?.background = null
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
-        pillPreviewIcon?.setImageDrawable(loadPillNotificationIcon(model.packageName, model.smallIcon))
+        pillPreviewIcon?.setImageDrawable(loadPillNotificationIconCached(model.packageName, model.smallIcon))
         // The digit and its visibility belong to the `pillChatCount` property now - one writer, one log line.
         // This function owns the icon, which is the only part of the badge that used to be re-decided here.
     }
@@ -4480,13 +4480,22 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     /** The runtime's GC counters. Public API, and the one stall source we can name without a stack sample. */
-    private fun gcSnapshot(): GcSnapshot = GcSnapshot(
-        gcStat("art.gc.gc-count"),
-        gcStat("art.gc.gc-time"),
-        gcStat("art.gc.blocking-gc-count"),
-        gcStat("art.gc.blocking-gc-time"),
-        gcStat("art.gc.bytes-allocated"),
-    )
+    // b1505: getRuntimeStat is a /proc read - his STALL log caught 32 ms on the main thread per morph.
+    // A morph's begin and end bracket ~300 ms, so a 1 s window of reuse loses only duplicate work.
+    private var gcSnapshotCachedAtMs = 0L
+    private var gcSnapshotCached: GcSnapshot? = null
+    private fun gcSnapshot(): GcSnapshot {
+        val now = System.currentTimeMillis()
+        val cached = gcSnapshotCached
+        if (cached != null && now - gcSnapshotCachedAtMs < 1_000L) return cached
+        return GcSnapshot(
+            gcStat("art.gc.gc-count"),
+            gcStat("art.gc.gc-time"),
+            gcStat("art.gc.blocking-gc-count"),
+            gcStat("art.gc.blocking-gc-time"),
+            gcStat("art.gc.bytes-allocated"),
+        ).also { gcSnapshotCached = it; gcSnapshotCachedAtMs = now }
+    }
 
     private fun gcStat(name: String): Long = try {
         android.os.Debug.getRuntimeStat(name)?.toLongOrNull() ?: 0L
@@ -5360,7 +5369,17 @@ class HyperAccessibilityService : AccessibilityService() {
         val rateVote = refreshRateVote()
         // Seed the frame budget from the vote, so a 120 Hz panel is not judged on an assumed 16 ms frame.
         if (rateVote > 1f) frameWatch.notePanelPeriod((1000f / rateVote).toLong())
-        visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; windowAnimations = 0; title = "HyperIslandProVisual"; if (rateVote > 0f) preferredRefreshRate = rateVote }
+        // b1505 (his "120fps implementation"): HyperOS/MIUI picks a render mode per WINDOW, and the
+        // deprecated preferredRefreshRate hint alone reads as decorate-only there. Vote with the real
+        // Display.modeId instead - this is what actually flips the surface to 120 Hz for our overlay.
+        val peakModeId = try {
+            if (AppSettings.getIslandHighRefreshEnabled(this))
+                getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+                    ?.supportedModes?.maxByOrNull { it.refreshRate }?.modeId ?: 0
+            else 0
+        } catch (_: Throwable) { 0 }
+        visualParams = WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WINDOW_FLAGS_MASTER, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP; y = 0; if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = 1; windowAnimations = 0; title = "HyperIslandProVisual"; if (rateVote > 0f) preferredRefreshRate = rateVote; if (peakModeId > 0) preferredDisplayModeId = peakModeId }
+        TraceLog.display("fps vote: rate=$rateVote modeId=$peakModeId")
         
         // THE INTERCEPTOR: Detects touches based on Reply State
         // Phase 3.5 Fluid — Off-Switch + Reflection Hack (compile-safe)
@@ -6200,6 +6219,28 @@ class HyperAccessibilityService : AccessibilityService() {
     }
     private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
 
+    // b1505: updatePillBadge repaints every tick; the full resolver chain (resource loads + glyph
+    // probe + tint) used to run per repaint on the main thread. 5 s cooldown + LRU 24 kills that.
+    private val pillFinalIconCache = java.util.LinkedHashMap<String, Pair<Long, Drawable?>>(16, 0.75f, true)
+
+    private fun loadPillNotificationIconCached(pkg: String, smallIcon: Icon?): Drawable? {
+        val key = AppSettings.getPillIconRenderMode(this).toString() + "|" + pkg + "|" + getPillIconTint(pkg)
+        val now = System.currentTimeMillis()
+        synchronized(pillFinalIconCache) {
+            val hit = pillFinalIconCache[key]
+            if (hit != null && now - hit.first < 5_000L) return hit.second?.constantState?.newDrawable()
+        }
+        val drawn = loadPillNotificationIcon(pkg, smallIcon)
+        val cs = drawn?.constantState
+        if (cs != null) synchronized(pillFinalIconCache) {
+            // custom drawables without constantState (e.g. the Instagram gradient) never sit in the
+            // cache - they are cheap to build, and a null cached entry would blank the icon.
+            pillFinalIconCache[key] = now to cs
+            while (pillFinalIconCache.size > 24) pillFinalIconCache.remove(pillFinalIconCache.keys.first())
+        }
+        return drawn
+    }
+
     private fun loadPillNotificationIcon(pkg: String, smallIcon: Icon?) = try {
         val cached = PillIconCache.get(pkg) // lets TestLab reuse the latest real smallIcon/legacy icon
         val iconToUse = smallIcon ?: cached?.smallIcon
@@ -6226,17 +6267,17 @@ class HyperAccessibilityService : AccessibilityService() {
                 loadAppIcon(pkg) ?: generic()
             } else when (mode) {
                 AppSettings.PILL_ICON_MANUAL_RESOURCE_NO_VALIDATION -> manual()
-                AppSettings.PILL_ICON_MANUAL_RESOURCE_VALIDATED -> manual()?.takeIf { looksLikeGlyph(it) }
+                AppSettings.PILL_ICON_MANUAL_RESOURCE_VALIDATED -> manual()?.takeIf { looksLikeGlyphCached(it) }
                 AppSettings.PILL_ICON_LOAD_DRAWABLE_NO_VALIDATION -> loaded()
-                AppSettings.PILL_ICON_LOAD_DRAWABLE_VALIDATED -> loaded()?.takeIf { looksLikeGlyph(it) }
+                AppSettings.PILL_ICON_LOAD_DRAWABLE_VALIDATED -> loaded()?.takeIf { looksLikeGlyphCached(it) }
                 AppSettings.PILL_ICON_LEGACY_NO_VALIDATION -> legacy()
                 AppSettings.PILL_ICON_ADAPTIVE_NO_VALIDATION -> adaptive()
                 AppSettings.PILL_ICON_LAUNCHER -> loadLauncherPillIcon(pkg)
                 AppSettings.PILL_ICON_GENERIC -> generic()
                 else -> {
-                    manual()?.takeIf { looksLikeGlyph(it) }
-                        ?: loaded()?.takeIf { looksLikeGlyph(it) }
-                        ?: adaptive()?.takeIf { looksLikeGlyph(it) }
+                    manual()?.takeIf { looksLikeGlyphCached(it) }
+                        ?: loaded()?.takeIf { looksLikeGlyphCached(it) }
+                        ?: adaptive()?.takeIf { looksLikeGlyphCached(it) }
                         ?: generic()
                 }
             }
@@ -6315,6 +6356,21 @@ class HyperAccessibilityService : AccessibilityService() {
         icon.javaClass.getMethod("getResPackage").invoke(icon)?.toString().orEmpty()
     } catch (_: Exception) { "" }
 
+    /** b1505: verdict per drawable-identity; one 61 ms getPixel walk must not strike every badge paint. */
+    private val glyphVerdictCache = java.util.LinkedHashMap<Int, Boolean>(32, 0.75f, true)
+    private fun looksLikeGlyphCached(drawable: Drawable): Boolean {
+        val key = drawable.constantState?.hashCode() ?: System.identityHashCode(drawable)
+        synchronized(glyphVerdictCache) {
+            glyphVerdictCache[key]?.let { return it }
+        }
+        val v = looksLikeGlyph(drawable)
+        synchronized(glyphVerdictCache) {
+            glyphVerdictCache[key] = v
+            while (glyphVerdictCache.size > 32) glyphVerdictCache.remove(glyphVerdictCache.keys.first())
+        }
+        return v
+    }
+
     private fun looksLikeGlyph(drawable: Drawable): Boolean {
         return try {
             val size = 64
@@ -6334,9 +6390,9 @@ class HyperAccessibilityService : AccessibilityService() {
                 while (y < size) {
                     total++
                     if (Color.alpha(bmp.getPixel(x, y)) > 18) nonTransparent++
-                    y += 2
+                    y += 4   // b1505: stride-4 probes - same qualitative verdict at 1/4 the getPixel cost
                 }
-                x += 2
+                x += 4
             }
             val fraction = nonTransparent.toFloat() / total.toFloat().coerceAtLeast(1f)
             bmp.recycle()
@@ -6469,7 +6525,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1504 (ghost kill p2: wipe also strips the quick-action buttons - footer/chips children die with the message) era")
+        TraceLog.morph("v2 build marker: b1505 (smooth pack: 120Hz preferredDisplayModeId vote + icon cache LRU + glyph verdict cache + gcStat 1s diet) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
