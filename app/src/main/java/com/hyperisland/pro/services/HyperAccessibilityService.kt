@@ -6221,14 +6221,14 @@ class HyperAccessibilityService : AccessibilityService() {
 
     // b1505: updatePillBadge repaints every tick; the full resolver chain (resource loads + glyph
     // probe + tint) used to run per repaint on the main thread. 5 s cooldown + LRU 24 kills that.
-    private val pillFinalIconCache = java.util.LinkedHashMap<String, Pair<Long, Drawable?>>(16, 0.75f, true)
+    private val pillFinalIconCache = java.util.LinkedHashMap<String, Pair<Long, Drawable.ConstantState>>(16, 0.75f, true)
 
     private fun loadPillNotificationIconCached(pkg: String, smallIcon: Icon?): Drawable? {
         val key = AppSettings.getPillIconRenderMode(this).toString() + "|" + pkg + "|" + getPillIconTint(pkg)
         val now = System.currentTimeMillis()
         synchronized(pillFinalIconCache) {
             val hit = pillFinalIconCache[key]
-            if (hit != null && now - hit.first < 5_000L) return hit.second?.constantState?.newDrawable()
+            if (hit != null && now - hit.first < 5_000L) return hit.second.newDrawable()
         }
         val drawn = loadPillNotificationIcon(pkg, smallIcon)
         val cs = drawn?.constantState
