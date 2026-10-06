@@ -1558,6 +1558,27 @@ class HyperAccessibilityService : AccessibilityService() {
         // A collapse/clear mid-push would otherwise strand the snapshot layer and the guard.
         ringSwapInFlight = false
         detachRingPushLayer()
+        // b1503 (his 16:45 anger, exact words "message hatao, to hatao"): a wipe that only clears
+        // DATA leaves the Ghost card + pill icon painted - tap the pill and the murdered message
+        // resurrects in the expand (dismiss-null branch got this cure at b1495; the WIPE path never
+        // did). A wipe is a wipe: text, icon, badge, preview - everything dies here.
+        syncBandIconForContent(false)
+        pillPreviewCount?.visibility = View.GONE
+        pillPreviewRoot?.visibility = View.GONE
+        pillPreviewRoot?.alpha = 0f
+        appNameText?.text = ""
+        titleText?.text = ""
+        messageText?.text = ""
+        timeStampText?.text = ""
+        notificationMode = false
+        currentPendingIntent = null
+        currentPackageName = null
+        currentNotificationKey = null
+        currentReplyAction = null
+        pillPreviewIcon?.background = null
+        pillPreviewIcon?.imageTintList = null
+        pillPreviewIcon?.clearColorFilter()
+        pillPreviewIcon?.setImageDrawable(null)
     }
 
     /**
@@ -6440,7 +6461,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1502 (survivor fix: package clock - HIS clear speaks for the whole app; no-clock convs judged by when) era")
+        TraceLog.morph("v2 build marker: b1503 (ghost kill: a WIPE now empties card text + pill icon + intents too - tap on empty = nothing returns) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
