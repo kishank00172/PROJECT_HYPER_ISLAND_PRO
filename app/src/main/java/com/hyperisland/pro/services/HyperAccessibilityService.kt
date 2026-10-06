@@ -1579,6 +1579,14 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(null)
+        // b1504 (his: "content gaya, bas quick action bach ja raha hai"): the action strip's CHILD
+        // VIEWS survive a wipe (footerActions re-renders only inside updateNotificationContent, which
+        // never runs on empty ring) - the murdered message left its Reply/Open buttons hanging there.
+        footerActions?.removeAllViews()
+        actionScroll?.removeAllViews()
+        chipsRow?.removeAllViews()
+        chipReply = null
+        chipOpen = null
     }
 
     /**
@@ -6461,7 +6469,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1503 (ghost kill: a WIPE now empties card text + pill icon + intents too - tap on empty = nothing returns) era")
+        TraceLog.morph("v2 build marker: b1504 (ghost kill p2: wipe also strips the quick-action buttons - footer/chips children die with the message) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
