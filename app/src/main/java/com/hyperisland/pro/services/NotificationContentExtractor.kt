@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Bundle
 import android.service.notification.StatusBarNotification
 import com.hyperisland.pro.core.ChatDisplayPolicy
+import com.hyperisland.pro.core.V2SeenWatermark
 import com.hyperisland.pro.core.ConversationIdentity
 
 /**

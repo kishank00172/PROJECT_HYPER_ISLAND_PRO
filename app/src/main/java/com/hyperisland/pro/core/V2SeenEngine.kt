@@ -76,7 +76,7 @@ object V2SeenEngine {
         stamps.forEach { model.markSeen(it, now) }
         TraceLog.line("V2SEEN", "markSeen n=${stamps.size} because=$why")
         persistNow(context)
-        runCatching { activeKeysSupplier?.invoke() }?.onSuccess { model.prune(it, now) }
+        runCatching { activeKeysSupplier?.invoke() }?.onSuccess { it?.let { keys -> model.prune(keys, now) } }
     }
 
     fun connectBaseline(context: Context, actives: List<V2SeenWatermark.SeenStamp>): Triple<Int, Int, Int> {
@@ -238,7 +238,7 @@ object V2SeenEngine {
             },
             Step("new-arrived-while-dead", V2SeenWatermark.Verdict.NEW) {
                 val fresh = V2SeenWatermark(); fresh.decodeInto(m.encode())
-                fresh.judgeMessaging("pkg|shortcut|vali3", "pkg", listOf(stamp(k, now + 60_000, "came while dead")), now + 60_000, now + 365_000).verdict
+                fresh.judgeMessaging("pkg|shortcut|vali3", "pkg", listOf(stamp("pkg|shortcut|vali3", now + 60_000, "came while dead")), now + 60_000, now + 365_000).verdict
             }
         ))
         fun chainD() = report("D", listOf(
@@ -262,16 +262,16 @@ object V2SeenEngine {
             val k = "pkg3|title|download"
             report("F", listOf(
                 Step("first-post", V2SeenWatermark.Verdict.NEW_FALLBACK) {
-                    m.judgeNonMessaging(k, now, V2SeenWatermark.nonMsgFp("App", "Downloading 1%", "")).verdict
+                    m.judgeNonMessaging(k, now, V2SeenWatermark.nonMsgFp("App", "Downloading 1%", ""), false).verdict
                 }
             ))
             m.markSeen(V2SeenWatermark.SeenStamp(k, "pkg3", now, "", 2, now, V2SeenWatermark.nonMsgFp("App", "Downloading 1%", "")), now)
             report("F", listOf(
                 Step("progress-update-after-wipe", V2SeenWatermark.Verdict.ECHO) {
-                    m.judgeNonMessaging(k, now, V2SeenWatermark.nonMsgFp("App", "Downloading 99%", "")).verdict
+                    m.judgeNonMessaging(k, now, V2SeenWatermark.nonMsgFp("App", "Downloading 99%", ""), false).verdict
                 },
                 Step("complete-text-change", V2SeenWatermark.Verdict.NEW_FALLBACK) {
-                    m.judgeNonMessaging(k, now, V2SeenWatermark.nonMsgFp("App", "Download complete", "")).verdict
+                    m.judgeNonMessaging(k, now, V2SeenWatermark.nonMsgFp("App", "Download complete", ""), false).verdict
                 }
             ))
         }

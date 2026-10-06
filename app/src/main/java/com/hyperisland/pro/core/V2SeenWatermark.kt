@@ -78,7 +78,7 @@ class V2SeenWatermark {
 
         /** fp = hash(ts, text, sender). 64-bit hex keeps collisions ~impossible at ring scale. */
         fun fp(tsMs: Long, text: String, sender: String): String {
-            var h = 0xcbf29ce484222325L
+            var h = -3750763034362895579L   // FNV-1a 64-bit offset basis (signed)
             fun bytes(s: String) { for (c in s) { h = h xor c.code.toLong(); h *= 1099511628211L } }
             fun num(v: Long) { for (i in 0 until 8) { h = h xor ((v shr (i * 8)) and 0xff); h *= 1099511628211L } }
             num(tsMs); bytes(text); num(0xA5A5); bytes(sender)
