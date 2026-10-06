@@ -1,6 +1,7 @@
 package com.hyperisland.pro.services
 
 import android.app.Notification
+import android.content.ComponentName
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -18,6 +19,20 @@ class HyperNotificationListenerService : NotificationListenerService() {
         private const val TRACE_TAG = "HIP_TRACE"
         @Volatile var isConnected: Boolean = false
         @Volatile var lastDebugMessage: String = "Notification listener not connected"
+
+        /**
+         * b1500 (his ops report: after APK updates the listener shows ON in settings but nothing
+         * arrives, and only a manual OFF->ON revives it; MIUI drops the binding on package
+         * replace). requestRebind is the supported way to ask Android for a fresh binding -
+         * free when already bound, so BootReceiver and MainActivity can ask liberally.
+         */
+        fun requestRebindNow(context: Context) {
+            runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= 24)
+                    requestRebind(ComponentName(context, HyperNotificationListenerService::class.java))
+                TraceLog.line("BOOT", "binding heal: listener rebind requested")
+            }.onFailure { TraceLog.line("BOOT", "binding heal: rebind failed " + it.javaClass.simpleName) }
+        }
 
         /** How long a re-posted notification stays blocked as a zombie repeat. */
         private const val ZOMBIE_BLOCK_MS = 20_000L

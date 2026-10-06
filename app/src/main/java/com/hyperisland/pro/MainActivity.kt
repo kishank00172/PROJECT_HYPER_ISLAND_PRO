@@ -99,6 +99,10 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         updateStatus()
+        // b1500 (his ops report): after an update the listener is ON-but-dead until manually
+        // toggled; asking for a rebind on every app foreground costs nothing when already bound.
+        if (com.hyperisland.pro.core.AppSettings.getAutoRebindListenerEnabled(this))
+            com.hyperisland.pro.services.HyperNotificationListenerService.requestRebindNow(this)
     }
 
     private fun updateStatus() {

@@ -41,6 +41,7 @@ object AppSettings {
     private const val KEY_SHADE_PULL_ANIMATION_MODE = "shade_pull_animation_mode"
     private const val KEY_UI_V2_LAYOUT_A = "ui_v2_layout_a"
     private const val KEY_UI_V2_PAGER_DIAL = "ui_v2_pager_dial"   // ROUND H: on (default) = windowed dial; off = legacy dots/track
+    private const val KEY_AUTO_REBIND_LISTENER = "auto_rebind_listener"     // b1500: post-update/boot/app-open listener rebind heal
     private const val KEY_SHADE_WIPED_ECHOES = "shade_wiped_echoes"     // b1499 durable: Base64 key|fp pairs, newline-joined
     private const val KEY_SHADE_SILENCE = "shade_dismiss_silence"     // b1499 durable: Base64 pkg|untilMillis lines
     private const val KEY_DEBUG_MORPH_FREEZE_P = "debug_morph_freeze_p"      // float-as-string, -1 = off
@@ -313,6 +314,8 @@ object AppSettings {
     fun getIslandExpandedCornerRadiusDp(context: Context) = prefs(context).getInt(KEY_ISLAND_EXPANDED_CORNER_RADIUS_DP, DEFAULT_ISLAND_EXPANDED_CORNER_RADIUS_DP)
     fun getUiV2LayoutAEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_LAYOUT_A, true)
     fun getUiV2PagerDialEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_PAGER_DIAL, true)
+    fun getAutoRebindListenerEnabled(context: Context) = prefs(context).getBoolean(KEY_AUTO_REBIND_LISTENER, true)
+    fun setAutoRebindListenerEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_AUTO_REBIND_LISTENER, on).apply() }
 
     // ---- b1499 durable shade guards (Base64 lines; emoji/unicode-safe, no JSON dependency) ----
     private fun b64enc(v: String) = android.util.Base64.encodeToString(v.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
