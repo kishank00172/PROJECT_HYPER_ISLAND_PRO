@@ -278,13 +278,13 @@ object V2SeenEngine {
         fun chainG() = report("G", listOf(
             Step("pkg-clock-unseeded-conv", V2SeenWatermark.Verdict.ECHO) {
                 m.markSeen(V2SeenWatermark.SeenStamp("seen-one", "tg", now, "", 1, 0L, "", advancePkg = true), now)
-                m.judgeMessaging("tg|shortcut|ndid_x", "tg", listOf(stamp(now - 10_000, "peeled back")), now, now).verdict
+                m.judgeMessaging("tg|shortcut|ndid_x", "tg", listOf(stamp("ndid_x", now - 10_000, "peeled back")), now, now).verdict
             },
             Step("pkg-clock-real-new-passes", V2SeenWatermark.Verdict.NEW) {
-                m.judgeMessaging("tg|shortcut|ndid_x", "tg", listOf(stamp(now + 7_000, "real fresh")), now, now).verdict
+                m.judgeMessaging("tg|shortcut|ndid_x", "tg", listOf(stamp("ndid_x", now + 7_000, "real fresh")), now, now).verdict
             },
             Step("noclock-by-when", V2SeenWatermark.Verdict.ECHO) {
-                m.judgeMessaging("tg|shortcut|ndid_y", "tg", listOf(stamp(0L, "channel noise")), now, now, whenMs = now - 5_000).verdict
+                m.judgeMessaging("tg|shortcut|ndid_y", "tg", listOf(stamp("ndid_y", 0L, "channel noise")), now, now, whenMs = now - 5_000).verdict
             }
         ))
         when (chain) {
