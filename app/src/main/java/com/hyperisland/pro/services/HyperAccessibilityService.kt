@@ -134,7 +134,9 @@ class HyperAccessibilityService : AccessibilityService() {
          *  Drives ring eviction: junk that only wears CATEGORY_MESSAGE must not push real chats out. */
         val isMessagingStyle: Boolean = false,
         /** The message's own instant, when the app told us one; 0 means "fall back to postTime". */
-        val displayTimeMs: Long = 0L
+        val displayTimeMs: Long = 0L,
+        /** b1501 seen-watermark: what the listener judged, the newest UNSEEN ts, and its boundary fps. */
+        val v2Verdict: String = "", val v2NewestTs: Long = 0L, val v2FpsCsv: String = ""
     )
 
     private class InstagramGradientCameraDrawable : Drawable() {
@@ -427,8 +429,11 @@ class HyperAccessibilityService : AccessibilityService() {
         fun expandIslandFromApp(context: Context) = instance?.run { postExpandIsland(); true } ?: false
         fun collapseIslandFromApp(context: Context) = instance?.run { postCollapseIsland(); true } ?: false
         fun toggleExpandFromApp(context: Context) = instance?.run { postToggleExpanded(); true } ?: false
-        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) =
-            instance?.run { postNotificationEvent(packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs); true } ?: false
+        fun showNotificationFromApp(context: Context, packageName: String, notificationKey: String? = null, appName: String, title: String, message: String, unreadCount: Int = 1, conversationKey: String? = null, conversationKeySource: String? = null, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon? = null, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L, v2Verdict: String = "", v2NewestTs: Long = 0L, v2FpsCsv: String = "") =
+            instance?.run { postNotificationEvent(packageName, notificationKey, appName, title, message, unreadCount, conversationKey, conversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs, v2Verdict, v2NewestTs, v2FpsCsv); true } ?: false
+        /** b1501 P1-3 NONMSG: echo only when the island has NO live page for this conversation. */
+        fun hasLiveRingPageForApp(conversationKey: String): Boolean =
+            instance?.run { notificationRing.any { it.conversationKey == conversationKey } } ?: false
         /**
          * Drop exactly one conversation from the ring (the listener's removal callback and the island's own
          * tap-to-open both use it). [reason] is the removal code, carried so every drop in the log can say who
@@ -773,6 +778,16 @@ class HyperAccessibilityService : AccessibilityService() {
                         debugPagerSet(((cur.first + d) % tot + tot) % tot, tot)
                     }
                     "pager_slow" -> pagerDialView?.slowFactor = intent.getIntExtra("k", 1).coerceIn(1, 50).toFloat()
+                    // ---- b1501 / Round-I P1-9: on-device acceptance, no real notifications needed ----
+                    "sim_chain" -> TraceLog.line("V2SEEN", com.hyperisland.pro.core.V2SeenEngine.runSelfTest(intent.getStringExtra("chain") ?: "ALL"))
+                    "seen_dump" -> com.hyperisland.pro.core.V2SeenEngine.dumpLines(intent.getIntExtra("n", 50)).forEach { TraceLog.line("V2SEEN", "dump: " + it) }
+                    "seen_clear" -> com.hyperisland.pro.core.V2SeenEngine.clear(this@HyperAccessibilityService)
+                    "seen_mode" -> {
+                        val m = com.hyperisland.pro.core.V2SeenWatermark.Mode.from(intent.getStringExtra("mode"))
+                        com.hyperisland.pro.core.V2SeenEngine.setMode(this@HyperAccessibilityService, m)
+                        TraceLog.line("V2SEEN", "seen_mode -> " + m.slug)
+                    }
+                    "seen_stats" -> TraceLog.line("V2SEEN", com.hyperisland.pro.core.V2SeenEngine.stats())
                     "pager_freeze_p" -> pagerDialView?.frozenP = intent.getFloatExtra("p", -1f)
                     "pager_freeze_off" -> pagerDialView?.frozenP = -1f
                     "absorb_freeze" -> absorbFreezeAt(intent.getFloatExtra("a", -1f))
@@ -1247,15 +1262,22 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun postNotificationEvent(packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L) {
+    private fun postNotificationEvent(packageName: String, notificationKey: String?, appName: String, title: String, message: String, unreadCount: Int, conversationKey: String?, conversationKeySource: String?, postTime: Long, contentIntent: PendingIntent?, actions: List<Notification.Action>, smallIcon: Icon?, isMessagingStyle: Boolean = false, displayTimeMs: Long = 0L, v2Verdict: String = "", v2NewestTs: Long = 0L, v2FpsCsv: String = "") {
         mainHandler.post {
             if (!AppSettings.isIslandEnabled(this)) return@post
             val nowIn = System.currentTimeMillis()
+            val v2Mode = com.hyperisland.pro.core.V2SeenEngine.mode(this)
             if (shadeDismissSilencer.isSilenced(packageName, nowIn)) {
                 // b1498: he dismissed/clear-all'd (or shade-wipe read) this package moments ago.
                 // Apps re-feed the same chats peeled one layer deep - silence, by his order.
-                TraceLog.ingest("drop shade-silenced: $packageName '$title' (${shadeDismissSilencer.remainingMs(packageName, nowIn) / 1000}s left)")
-                return@post
+                // b1501 CONFLICT metering: the watermark may know the silencer is eating a REAL message.
+                if (v2Verdict == "NEW") com.hyperisland.pro.core.V2SeenEngine.legacyConflict(this, "b1498", packageName, conversationKey ?: title, v2NewestTs)
+                if (v2Mode == com.hyperisland.pro.core.V2SeenWatermark.Mode.WATERMARK_ONLY && v2Verdict == "NEW") {
+                    TraceLog.ingest("legacy bypass (watermark-only): shade-silence skipped for $packageName")
+                } else {
+                    TraceLog.ingest("drop shade-silenced: $packageName '$title' (${shadeDismissSilencer.remainingMs(packageName, nowIn) / 1000}s left)")
+                    return@post
+                }
             }
             // Two separate questions used to be one: "should the island pop while he reads the shelf?" and
             // "should this message exist in the ring?". The answer to the first is no; the answer to the second
@@ -1292,10 +1314,15 @@ class HyperAccessibilityService : AccessibilityService() {
                 // b1497: shade WIPE (17:53:08) then Telegram re-posts the SAME notification 0.3s after
                 // shade-close (17:53:09.729, age=248s, same '❤️ Sticker') - identical echo of a READ
                 // page, not news. Same chat with NEW content falls through and gets its page.
-                TraceLog.ingest("drop shade-wiped echo: $packageName '${display.title}' (read via shade, identical repost)")
-                return@post
+                if (v2Verdict == "NEW") com.hyperisland.pro.core.V2SeenEngine.legacyConflict(this, "b1497", packageName, finalConversationKey, v2NewestTs)
+                if (v2Mode == com.hyperisland.pro.core.V2SeenWatermark.Mode.WATERMARK_ONLY && v2Verdict == "NEW") {
+                    TraceLog.ingest("legacy bypass (watermark-only): echo guard skipped for $packageName")
+                } else {
+                    TraceLog.ingest("drop shade-wiped echo: $packageName '${display.title}' (read via shade, identical repost)")
+                    return@post
+                }
             }
-            val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs)
+            val incomingModel = NotificationModel(packageName, notificationKey, appName, title, message, unreadCount, finalConversationKey, finalConversationKeySource, postTime, contentIntent, actions, smallIcon, isMessagingStyle, displayTimeMs, v2Verdict, v2NewestTs, v2FpsCsv)
             addOrUpdateNotificationRing(incomingModel)
             if (quietForShade) {
                 TraceLog.ingest("quiet: shade open, ring=${notificationRing.size}, no pop from $packageName")
@@ -1518,6 +1545,11 @@ class HyperAccessibilityService : AccessibilityService() {
             val nowW = System.currentTimeMillis()
             notificationRing.map { it.packageName }.toSet().forEach { shadeDismissSilencer.stamp(it, nowW) }
             persistShadeGuards()   // b1499: rebind volleys arrive MINUTES later (his: 6m14s) - memory alone is mortal
+            // b1501 / Round-I P1-4b (the core): he READ all of this. Everything at-or-below each page's
+            // newest message clock now judges ECHO forever - chain A/B/C killed by semantics, not heuristics.
+            val stamps = notificationRing.map { v2StampForModel(it) }
+            com.hyperisland.pro.core.V2SeenEngine.markSeenNow(this, stamps, "shade-open wipe n=" + stamps.size)
+            HyperNotificationListenerService.markShadeAllSeenFromApp()  // sweep the whole shelf, not just island pages
         }
         notificationRing.clear()
         currentRingIndex = 0
@@ -1544,7 +1576,7 @@ class HyperAccessibilityService : AccessibilityService() {
             val pkg = conversationKey.substringBefore('|')
             shadeDismissSilencer.stamp(pkg, System.currentTimeMillis())
             persistShadeGuards()   // b1499: survive process death between his clear-all and the app's repost volley
-            ringEvent("shade-dismiss: $pkg silenced ${ShadeDismissSilencer.DEFAULT_WINDOW_MS / 1000}s (his ${if (reason == 1) "swipe" else "clear-all"})")
+            ringEvent("shade-dismiss: $pkg silenced ${ShadeDismissSilencer.DEFAULT_WINDOW_MS / 1000}s (his ${if (reason == android.service.notification.NotificationListenerService.REASON_CANCEL) "swipe" else "clear-all"})")
         }
         var index = notificationRing.indexOfFirst { it.conversationKey == conversationKey }
         if (index < 0) {
@@ -5243,9 +5275,25 @@ class HyperAccessibilityService : AccessibilityService() {
         autoCollapseRunnable = Runnable { if (notificationQueue.isNotEmpty()) processNextInQueue() else setStageAnimated(IslandStage.STAGE1_IDLE, ExpandReason.AUTO_NOTIFICATION) }.also { mainHandler.postDelayed(it, delay) }
     }
 
+    /** b1501: one SeenStamp off a ring page (per-message clock it showed, else displayTime/postTime). */
+    private fun v2StampForModel(model: NotificationModel): com.hyperisland.pro.core.V2SeenWatermark.SeenStamp {
+        val ts = when {
+            model.v2NewestTs > 0L -> model.v2NewestTs
+            model.displayTimeMs > 0L -> model.displayTimeMs
+            else -> model.postTime
+        }
+        val kind = if (model.isMessagingStyle) 1 else 2
+        val nonFp = if (kind == 2) com.hyperisland.pro.core.V2SeenWatermark.nonMsgFp(model.title, model.message, "") else ""
+        return com.hyperisland.pro.core.V2SeenWatermark.SeenStamp(model.conversationKey, model.packageName, ts, model.v2FpsCsv, kind, ts, nonFp)
+    }
+
     private fun openCurrentNotification() {
         if (isReplyMode) return
         val openedKey = getCurrentRingModel()?.conversationKey
+        // b1501 / Round-I P1-4c: tap-to-open = read THIS conversation (R2: its messages judge ECHO now).
+        getCurrentRingModel()?.let { opened ->
+            com.hyperisland.pro.core.V2SeenEngine.markSeenNow(this, listOf(v2StampForModel(opened)), "tap-open " + opened.conversationKey)
+        }
         try {
             currentPendingIntent?.send() ?: currentPackageName?.let { pkg ->
                 packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -6392,7 +6440,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1500 (binding self-heal: pkg-replace/boot/app-open listener rebind + ConversationStackSignature readiness) era")
+        TraceLog.morph("v2 build marker: b1501 (Round-I P1 seen-watermark: chains A/B/C die by per-message clock; legacy guards now report CONFLICTs) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

@@ -168,6 +168,27 @@ object NotificationContentExtractor {
         return raw.mapNotNull { it as? Bundle }
     }
 
+    /** b1501 / Round-I P1-2: per-message clock for the seen-watermark (MessagingStyle ONLY).
+     *  EXTRA_MESSAGES + EXTRA_HISTORIC_MESSAGES, in style order (our watermark sorts by ts itself). */
+    fun messageStamps(sbn: StatusBarNotification): List<V2SeenWatermark.MsgStamp> {
+        val extras = sbn.notification?.extras ?: return emptyList()
+        val bundles = ArrayList<Bundle>()
+        bundles.addAll(extractMessagingBundles(extras))
+        try {
+            @Suppress("DEPRECATION")
+            extras.getParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES)
+                ?.mapNotNullTo(bundles) { it as? Bundle }
+        } catch (_: Exception) {}
+        val out = ArrayList<V2SeenWatermark.MsgStamp>(bundles.size)
+        for (b in bundles) {
+            val ts = readMessageTime(b)
+            val text = readMessageText(b)
+            if (text.isBlank()) continue        // empty padding entries (capture seq 85) carry no identity
+            out.add(V2SeenWatermark.MsgStamp(ts, text, readMessageSender(b).trim()))
+        }
+        return out
+    }
+
     private fun readConversationTitle(extras: Bundle): String {
         return (extras.getCharSequence("android.conversationTitle")
             ?: extras.getCharSequence(Notification.EXTRA_TITLE)
