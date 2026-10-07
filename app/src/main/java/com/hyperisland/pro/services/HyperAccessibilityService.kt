@@ -837,7 +837,10 @@ class HyperAccessibilityService : AccessibilityService() {
         runCatching { wakeReceiver?.let { unregisterReceiver(it) } }
         wakeReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (!AppSettings.isIslandEnabled(context) || lastRing < 0) return
+                // No ring guard: pre-b1003 behaviour was "island exists whenever enabled";
+                // his complaint was post-lock EVERYTHING (pill included) gone. showIsland's own
+                // lifecycle decides what the pill draws; we only wake it.
+                if (!AppSettings.isIslandEnabled(context)) return
                 mainHandler.post { if (visualRoot == null || visualRoot?.visibility != View.VISIBLE) postShowIsland() }
             }
         }
