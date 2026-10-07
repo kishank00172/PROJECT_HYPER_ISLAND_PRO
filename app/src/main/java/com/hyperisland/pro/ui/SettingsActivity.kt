@@ -8,6 +8,7 @@ import android.widget.Button
 import android.widget.SeekBar
 import android.widget.Switch
 import android.hardware.display.DisplayManager
+import android.view.Display
 import android.widget.TextView
 import com.hyperisland.pro.R
 import com.hyperisland.pro.core.AppSettings
