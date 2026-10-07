@@ -819,6 +819,13 @@ class HyperAccessibilityService : AccessibilityService() {
         }
     }
 
+    // b1510 (his: "phone on karo lockscreen pe, pill se sabkuchh gayab bina shade kholiye"):
+    // the keyguard machinery left with cleanup-era; once locked, NOTHING re-woke the island
+    // and it sat dead until the next notification reposted. Wake it ourselves on
+    // SCREEN_ON / USER_PRESENT if the ring still owns content (no ghost wake on empty ring -
+    // showIsland's own guards decide that).
+    private var wakeReceiver: BroadcastReceiver? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -826,6 +833,23 @@ class HyperAccessibilityService : AccessibilityService() {
         startTracing()
         if (BuildConfig.DEBUG) {
             runCatching { registerReceiver(debugCmdReceiver, IntentFilter(DEBUG_CMD_ACTION), Context.RECEIVER_EXPORTED) }
+        }
+        runCatching { wakeReceiver?.let { unregisterReceiver(it) } }
+        wakeReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (!AppSettings.isIslandEnabled(context) || lastRing < 0) return
+                mainHandler.post { if (visualRoot == null || visualRoot?.visibility != View.VISIBLE) postShowIsland() }
+            }
+        }
+        runCatching {
+            registerReceiver(
+                wakeReceiver,
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_USER_PRESENT)
+                },
+                Context.RECEIVER_NOT_EXPORTED,
+            )
         }
         if (AppSettings.isIslandEnabled(this)) postShowIsland()
     }
@@ -6560,7 +6584,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1508 (lag autopsy of MY OWN stalls: shelf-probe+prune now worker-only; freeze pref per-morph; appIcon LRU; panel Hz printed per morph flight) era")
+        TraceLog.morph("v2 build marker: b1510 (wake receiver: SCREEN_ON/USER_PRESENT re-shows the island after lock; before, only a NEW notification could) + b1508 stall autopsy retained era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
