@@ -321,6 +321,11 @@ object AppSettings {
     /** b1513: expanded card shows the sender's real DP (rounded) + launcher-badge corner.
      *  Default ON - he picked this visual; the flag exists only as a one-line kill switch. */
     fun isAvatarDpCardEnabled(context: Context) = prefs(context).getBoolean("avatar_dp_card", true)
+
+    /** b1514 (his trio-pick flow): DP style. 0=off, 1=aura (glow halo around DP), 2=shell
+     *  (existing card ambient glow only), 3=badge-ring (glow hairline on the launcher badge). */
+    fun getAvatarDpStyle(context: Context) = prefs(context).getInt("avatar_dp_style", 1).coerceIn(0, 3)
+    fun setAvatarDpStyle(context: Context, v: Int) { prefs(context).edit().putInt("avatar_dp_style", v.coerceIn(0, 3)).apply() }
     fun setAutoRebindListenerEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_AUTO_REBIND_LISTENER, on).apply() }
 
     // ---- b1499 durable shade guards (Base64 lines; emoji/unicode-safe, no JSON dependency) ----

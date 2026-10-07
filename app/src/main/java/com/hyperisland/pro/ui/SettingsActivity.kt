@@ -68,6 +68,16 @@ class SettingsActivity : Activity() {
             }
         }
 
+        // b1514: Sender DP style cycler (his pick-pending trio: aura / shell / badge-ring)
+        val dpStyleLbl = findViewById<TextView>(R.id.txtAvatarDpStyle)
+        fun dpStyleText(v: Int) = when (v) { 0 -> "Off (one-line kill switch)"; 1 -> "Aura - glow ring DP ke peeche"; 2 -> "Shell - card ambient glow hi rehta hai"; else -> "Badge-ring - glow hairline launcher badge pe" }
+        dpStyleLbl?.text = dpStyleText(AppSettings.getAvatarDpStyle(this))
+        findViewById<android.view.View>(R.id.rowAvatarDpStyle)?.setOnClickListener {
+            val next = (AppSettings.getAvatarDpStyle(this) + 1) % 4
+            AppSettings.setAvatarDpStyle(this, next)
+            dpStyleLbl?.text = dpStyleText(next)
+        }
+
         txtWidth = findViewById(R.id.txtWidthValue)
         txtStage2Width = findViewById(R.id.txtStage2WidthValue)
         txtExpandedWidth = findViewById(R.id.txtExpandedWidthValue)

@@ -690,6 +690,8 @@ class HyperAccessibilityService : AccessibilityService() {
     private var dpAvatarView: ImageView? = null
     private var dpBadgeView: ImageView? = null
     private var dpAvatarBmp: android.graphics.Bitmap? = null
+    private var dpStyleNow = 1
+    private var ambientGlowMuted = false
     /** The pull lives on expands of the spring styles only; set per morph, read by the tween and the carry. */
     private var morphV2On = false
     private var v2HapticDone = false
@@ -1636,6 +1638,8 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(null)
         dpAvatarBmp = null
+        ambientGlowMuted = false
+        mainHandler.removeCallbacks(dpSettleRunnable)
         dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f; dpAvatarView?.setImageBitmap(null)
         dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f; dpBadgeView?.setImageDrawable(null)
         appIconView?.alpha = 1f // b1513: undo the settle-fade so the next pill flight looks normal
@@ -5691,7 +5695,7 @@ class HyperAccessibilityService : AccessibilityService() {
              * invisible (a 30% blue over black IS ~4% luminance). SCREEN vs black renders the gradient as
              * written, still no new dependency, still one Paint, shader keyed by (colour, centre). */
             private fun drawAmbientGlow(canvas: Canvas, l: Float, t: Float) = runCatching {
-                if (glowColor == 0 || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return@runCatching
+                if (glowColor == 0 || ambientGlowMuted || !AppSettings.getUiV2LayoutAEnabled(this@HyperAccessibilityService)) return@runCatching
                 // b1454 issue #6: the glow is the expanded card's ambience only - the pill never wears the
                 // last notification's colour (the leak was gridRoot.alpha staying 1.0 while gone).
                 if (currentStage != IslandStage.STAGE3_FULL || gridRoot?.visibility != View.VISIBLE) return@runCatching
@@ -6345,27 +6349,48 @@ class HyperAccessibilityService : AccessibilityService() {
     // and the next notification bind restores it. INVISIBLE (not GONE) keeps the 0.2 weight so the
     // text column never shifts - changing layout weights mid-morph is exactly how the old jumps began.
     private fun configureSenderDp(model: NotificationModel) {
-        val enabled = AppSettings.isAvatarDpCardEnabled(this)
-        val bmp = if (enabled) com.hyperisland.pro.core.AvatarStore.get(model.conversationKey, "${model.packageName}|${'$'}{model.title}", model.title, model.packageName) else null
+        val style = AppSettings.getAvatarDpStyle(this)
+        dpStyleNow = style
+        val bmp = if (style > 0) com.hyperisland.pro.core.AvatarStore.get(
+            model.conversationKey,
+            model.packageName + "|" + model.title,
+            model.title, model.packageName
+        ) else null
         dpAvatarBmp = bmp
+        ambientGlowMuted = (style == 3)        // style 3: all drama moves to the badge hairline
         if (bmp == null) {
             dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f
             dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f
             return
         }
         dpAvatarView?.setImageBitmap(bmp)
+        val ringColor = when (style) { 1 -> if (glowColor != 0) glowColor else 0x66FFFFFF.toInt(); else -> 0x33FFFFFF.toInt() }
+        (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(2), ringColor)
+        val badgeRing = if (style == 3 && glowColor != 0) glowColor else 0x88FFFFFF.toInt()
+        (dpBadgeView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(if (style == 3) 2 else 1), badgeRing)
         dpBadgeView?.setImageDrawable(loadAppIcon(model.packageName))
-        // start hidden; settle choreography after the morph lands
+        // b1514: b1513's single 380ms gate fired mid-flight (morph ~1s) and vetoed the settle - his
+        // "nahi kaam kiya" evidence. Retry until STAGE3_FULL, up to 4 tries.
         dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 0f
         dpAvatarView?.scaleX = 0.6f; dpAvatarView?.scaleY = 0.6f
         dpBadgeView?.visibility = View.VISIBLE; dpBadgeView?.alpha = 0f
         dpBadgeView?.scaleX = 0.3f; dpBadgeView?.scaleY = 0.3f
-        mainHandler.postDelayed({
-            if (currentStage != IslandStage.STAGE3_FULL) return@postDelayed
+        dpSettleTries = 0
+        mainHandler.postDelayed(dpSettleRunnable, 380L)
+    }
+
+    private var dpSettleTries = 0
+    private val dpSettleRunnable = object : Runnable {
+        override fun run() {
+            if (dpAvatarBmp == null) return
+            if (currentStage != IslandStage.STAGE3_FULL) {
+                if (++dpSettleTries < 4) mainHandler.postDelayed(this, 350L)
+                return
+            }
             appIconView?.animate()?.alpha(0f)?.setDuration(160L)?.start()
             dpAvatarView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
             dpBadgeView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(260L)?.setInterpolator(android.view.animation.OvershootInterpolator(1.6f))?.start()
-        }, 380L)
+        }
     }
 
     private fun syncBandIconForContent(hasContent: Boolean) {
@@ -6694,7 +6719,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1513 (sender DP card: MessagingStyle Person.icon → rounded DP at band + launcher-icon corner badge, settles 380ms after morph; pill flight untouched; kill switch avatar_dp_card) era")
+        TraceLog.morph("v2 build marker: b1514 (DP card 3 styles for his pick: aura/shell/badge-ring via avatar_dp_style; settle retry loop fixes the stage-guard veto he caught) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

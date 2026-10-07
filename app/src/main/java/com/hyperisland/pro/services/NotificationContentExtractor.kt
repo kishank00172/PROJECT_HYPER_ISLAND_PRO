@@ -158,9 +158,15 @@ object NotificationContentExtractor {
     fun latestSenderAvatar(context: Context, sbn: StatusBarNotification): android.graphics.Bitmap? = try {
         val extras = sbn.notification?.extras ?: return null
         val msgs = extractMessagingBundles(extras)
-        val latest = msgs.lastOrNull() ?: return null
-        val person = latest.get("sender_person") ?: return null
-        val icon = person.javaClass.methods.firstOrNull { it.name == "getIcon" && it.parameterCount == 0 }?.invoke(person)
+        if (msgs.isEmpty()) return null
+        // b1514: walk backwards for the last icon-bearing sender (skips silent self/icon-less tails).
+        var person: Any? = null; var icon: Any? = null
+        for (i in msgs.size - 1 downTo 0) {
+            val p = msgs[i].get("sender_person") ?: continue
+            val ic = p.javaClass.methods.firstOrNull { it.name == "getIcon" && it.parameterCount == 0 }?.invoke(p)
+            if (ic != null) { person = p; icon = ic; break }
+        }
+        if (person == null) return null
         val d = when (icon) {
             is android.graphics.drawable.Icon -> icon.loadDrawable(context)
             else -> null
