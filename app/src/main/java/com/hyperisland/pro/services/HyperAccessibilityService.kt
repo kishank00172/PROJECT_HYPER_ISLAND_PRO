@@ -6048,7 +6048,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         scaleType = ImageView.ScaleType.CENTER_CROP
                         background = android.graphics.drawable.GradientDrawable().apply {
                             shape = android.graphics.drawable.GradientDrawable.OVAL
-                            setColor(android.graphics.Color.BLACK.copy(alpha = 0.35f).toInt())
+                            setColor(0x3A000000)
                             setStroke(dp(1), 0x88FFFFFF.toInt())
                         }
                         outlineProvider = ViewOutlineProvider.BACKGROUND
