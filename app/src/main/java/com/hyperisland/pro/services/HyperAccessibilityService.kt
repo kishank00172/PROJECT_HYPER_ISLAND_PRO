@@ -21,7 +21,6 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Outline
 import android.graphics.Paint
-import android.graphics.Outline
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
