@@ -21,6 +21,7 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Outline
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
@@ -825,6 +826,9 @@ class HyperAccessibilityService : AccessibilityService() {
     // SCREEN_ON / USER_PRESENT if the ring still owns content (no ghost wake on empty ring -
     // showIsland's own guards decide that).
     private var wakeReceiver: BroadcastReceiver? = null
+    private var shadeWipeGraceUntilMs = 0L
+    // b1511: radius the idle HW outline uses; updateIslandLayout syncs it every wake/resize.
+    private var islandOutlineRadius = 0f
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -841,6 +845,9 @@ class HyperAccessibilityService : AccessibilityService() {
                 // his complaint was post-lock EVERYTHING (pill included) gone. showIsland's own
                 // lifecycle decides what the pill draws; we only wake it.
                 if (!AppSettings.isIslandEnabled(context)) return
+                // Unlock/wake ghost windows must not count as "he read the shelf" for 1.5 s.
+                shadeWipeGraceUntilMs = SystemClock.elapsedRealtime() + 1_500L
+                TraceLog.line("WAKE", "wake receiver: action=${intent.action} visualRoot?=${visualRoot != null} visible?=${visualRoot?.visibility == View.VISIBLE}")
                 mainHandler.post { if (visualRoot == null || visualRoot?.visibility != View.VISIBLE) postShowIsland() }
             }
         }
@@ -937,6 +944,16 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun markIslandNotificationsSeenFromShade() {
+        // b1511 (his: "lockscreen pe BINA shade kholiye message gayab"): MIUI flashes transient
+        // systemui windows when waking/unlocking; the >=35% heuristic read that as "shade open"
+        // and the wipes policy murdered his ring. A locked keyguard CANNOT deliberately open a
+        // shelf, and 1.5 s after wake covers the unlock race.
+        val keyguardNow = runCatching { (getSystemService("keyguard") as? android.app.KeyguardManager)?.isKeyguardLocked == true }.getOrDefault(false)
+        val inGrace = SystemClock.elapsedRealtime() < shadeWipeGraceUntilMs
+        if (keyguardNow || inGrace) {
+            TraceLog.line("TOUCH", "shade-wipe VETO: keyguard=$keyguardNow grace=$inGrace (lockscreen ghost window)")
+            return
+        }
         // Opening the shelf used to mean "everything was read": the ring was emptied here, and separately every
         // notification that arrived while the shade was open was refused at the listener's door. During a
         // notification rain those two rules together are exactly what he saw - "kholta bhi nahi aur notification
@@ -3774,6 +3791,8 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun updateIslandLayout(w: Int, h: Int, r: Float) {
+        islandOutlineRadius = r.coerceAtLeast(0f)
+        if (morphV2On) islandView?.invalidateOutline()
         val lp = islandLayoutParams
         if (lp != null && lp.width == w && lp.height == h && outlineRadius == r) {
             // Nothing changed, and "calling it anyway" is not free: a layoutParams write requests a layout
@@ -5553,9 +5572,25 @@ class HyperAccessibilityService : AccessibilityService() {
             private var morphRadius = 0f
             private val morphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
             private val morphClipPath = Path()
+            // b1511: canvas.clipPath(non-rect) is NOT hardware-accelerated - it forced an offscreen
+            // SOFTWARE composite of the whole card every morph frame, and the upload is what stalled
+            // nSyncAndDrawFrame for 64-279 ms in his 16:47 expand. SDK 33+ clips the identical
+            // silhouette inside the RenderNode via Outline.setPath = free. A hwOutlineClip=false
+            // escape hatch keeps the old software path if the ROM misbehaves.
+            private val hwOutlineClip = true
 
             init {
                 setWillNotDraw(false)
+                if (hwOutlineClip) {
+                    outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(view: View, outline: Outline) {
+                            val f = morphFrame
+                            if (f != null) outline.setPath(morphClipPath)
+                            else outline.setRoundRect(0, 0, view.width.coerceAtLeast(1), view.height.coerceAtLeast(1), islandOutlineRadius)
+                        }
+                    }
+                    clipToOutline = true
+                }
             }
 
             /**
@@ -5609,7 +5644,10 @@ class HyperAccessibilityService : AccessibilityService() {
                 morphFrame = frame
                 morphRadius = cornerRadius
                 if (background != null) background = null
-                if (clipToOutline) clipToOutline = false
+                // The silhouette is rebuilt ONCE per frame right here, then the HW outline owns the
+                // clip for both onDraw and the children (was: rebuilt twice and clipPath'd in SW).
+                fillMorphSilhouette(frame, morphClipPath)
+                if (hwOutlineClip) invalidateOutline() else if (clipToOutline) clipToOutline = false
                 for (i in 0 until childCount) getChildAt(i).translationY = frame.contentOffsetY.toFloat()
                 val d = IslandMorphFrame.dirtyBounds(previous, frame)
                 invalidate(d[0], d[1], d[2], d[3])
@@ -5837,7 +5875,6 @@ class HyperAccessibilityService : AccessibilityService() {
 
             override fun onDraw(canvas: Canvas) {
                 val f = morphFrame ?: run { super.onDraw(canvas); drawAmbientGlow(canvas, 0f, 0f); return }
-                fillMorphSilhouette(f, morphClipPath)
                 canvas.drawPath(morphClipPath, morphPaint)
                 val layer = canvas.save()
                 canvas.clipPath(morphClipPath)
@@ -5852,14 +5889,16 @@ class HyperAccessibilityService : AccessibilityService() {
                     if (t0 != 0L) frameWatch.noteDrawNanos(System.nanoTime() - t0)
                     return
                 }
-                // Content stays inside the drawn box, which is what clipToOutline was doing for us. It is a
-                // containment clip on a subtree that is fading, not a mask that reveals it - the reveal
-                // look that was rejected earlier is a different thing and stays out.
-                fillMorphSilhouette(f, morphClipPath)
-                val layer = canvas.save()
-                canvas.clipPath(morphClipPath)
-                super.dispatchDraw(canvas)
-                canvas.restoreToCount(layer)
+                // Containment clip: free via the HW outline on this device; the software clipPath
+                // stays as the escape path behind hwOutlineClip=false.
+                if (hwOutlineClip) {
+                    super.dispatchDraw(canvas)
+                } else {
+                    val layer = canvas.save()
+                    canvas.clipPath(morphClipPath)
+                    super.dispatchDraw(canvas)
+                    canvas.restoreToCount(layer)
+                }
                 // Only our own slice of the frame, so "the renderer was busy" and "we were slow" stop being
                 // the same number. The RenderThread's side is still invisible to us - said so in the log.
                 if (t0 != 0L) frameWatch.noteDrawNanos(System.nanoTime() - t0)
@@ -6587,7 +6626,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1510 (wake receiver: SCREEN_ON/USER_PRESENT re-shows the island after lock; before, only a NEW notification could) + b1508 stall autopsy retained era")
+        TraceLog.morph("v2 build marker: b1511 (butter round 2: morph silhouette clipped by HW Outline.setPath - kills the per-frame software composite + 64-279ms syncAndDraw stalls; shade-wipe VETO while keyguard locked + 1.5s post-wake grace (his locked-message-vanish); wake receiver now trace-logged) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
