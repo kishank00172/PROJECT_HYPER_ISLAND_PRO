@@ -684,6 +684,12 @@ class HyperAccessibilityService : AccessibilityService() {
     }
     /** The card's icon cell: the rigid asset of his hierarchy (no stretch, the smaller bob). */
     private var gridIconSec: android.view.View? = null
+    /** b1513 (his spec): expanded card shows the sender DP (rounded) where the app icon sits, with
+     * the launcher icon shrunk to a bottom-right badge. Pill->card flight is untouched; the swap
+     * choreographs AFTER the morph settles - zero risk to the proven morph stack. */
+    private var dpAvatarView: ImageView? = null
+    private var dpBadgeView: ImageView? = null
+    private var dpAvatarBmp: android.graphics.Bitmap? = null
     /** The pull lives on expands of the spring styles only; set per morph, read by the tween and the carry. */
     private var morphV2On = false
     private var v2HapticDone = false
@@ -1629,6 +1635,10 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(null)
+        dpAvatarBmp = null
+        dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f; dpAvatarView?.setImageBitmap(null)
+        dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f; dpBadgeView?.setImageDrawable(null)
+        appIconView?.alpha = 1f // b1513: undo the settle-fade so the next pill flight looks normal
         // b1504 + b1507 (his correction, verbatim: "maine jo bola tha wo CONDITIONAL tha - live
         // card pe buttons chahiye, sirf mar chuke message ke buttons maro"):
         //   - footerActions.removeAllViews() stays: its CHILDREN re-bind per card in
@@ -1899,6 +1909,9 @@ class HyperAccessibilityService : AccessibilityService() {
         if (model.packageName != lastIconPkg) {
             lastIconPkg = model.packageName
             appIconView?.setImageDrawable(loadAppIcon(model.packageName)); syncBandIconForContent(true)
+            // b1513: sender DP swap. The pill flight still lands on the appIconView tile; ~380 ms later
+            // (morph settle) the DP fades/scales in and the launcher icon springs into its badge corner.
+            runCatching { configureSenderDp(model) }
             // issue-C: a mid-morph content switch OWNS the icon now - never let the carry/restore re-stamp the
             // previous page's drawable (morphIconLauncher snapshot was taken at morph begin, i.e. page-1's icon).
             if (morphV2On) { morphIconLauncher = null; morphIconPill = null }
@@ -6018,7 +6031,33 @@ class HyperAccessibilityService : AccessibilityService() {
             this@HyperAccessibilityService.islandMorph = this
             this@HyperAccessibilityService.gridRoot = LinearLayout(this@HyperAccessibilityService).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(1), dp(1), dp(1), dp(1)); visibility = View.GONE; alpha = 0f; weightSum = 1f
-                val iconSec = FrameLayout(context).also { this@HyperAccessibilityService.gridIconSec = it }.apply { this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }; addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) }
+                val iconSec = FrameLayout(context).also { this@HyperAccessibilityService.gridIconSec = it }.apply {
+                    clipChildren = false; clipToPadding = false
+                    this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+                    addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
+                    // b1513: DP + launcher badge layer (invisible until a MessagingStyle DP arrives)
+                    dpAvatarView = ImageView(context).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        outlineProvider = ViewOutlineProvider.BACKGROUND
+                        background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL }
+                        clipToOutline = true
+                        visibility = View.GONE; alpha = 0f
+                    }
+                    addView(dpAvatarView, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+                    dpBadgeView = ImageView(context).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor(android.graphics.Color.BLACK.copy(alpha = 0.35f).toInt())
+                            setStroke(dp(1), 0x88FFFFFF.toInt())
+                        }
+                        outlineProvider = ViewOutlineProvider.BACKGROUND
+                        clipToOutline = true
+                        elevation = 2f
+                        visibility = View.GONE; alpha = 0f; scaleX = 0.3f; scaleY = 0.3f
+                    }
+                    addView(dpBadgeView, FrameLayout.LayoutParams(dp(14), dp(14), Gravity.BOTTOM or Gravity.END).apply { marginEnd = dp(-1); bottomMargin = dp(-1) })
+                }
                 val contentSec = LinearLayout(context).also { this@HyperAccessibilityService.gridContentSec = it }.apply {
                     orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0)
                     val header = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -6305,6 +6344,30 @@ class HyperAccessibilityService : AccessibilityService() {
     // visibility now belongs to CONTENT, not to layout - an empty ring hides slot + halo together,
     // and the next notification bind restores it. INVISIBLE (not GONE) keeps the 0.2 weight so the
     // text column never shifts - changing layout weights mid-morph is exactly how the old jumps began.
+    private fun configureSenderDp(model: NotificationModel) {
+        val enabled = AppSettings.isAvatarDpCardEnabled(this)
+        val bmp = if (enabled) com.hyperisland.pro.core.AvatarStore.get(model.conversationKey, "${model.packageName}|${'$'}{model.title}", model.title, model.packageName) else null
+        dpAvatarBmp = bmp
+        if (bmp == null) {
+            dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f
+            dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f
+            return
+        }
+        dpAvatarView?.setImageBitmap(bmp)
+        dpBadgeView?.setImageDrawable(loadAppIcon(model.packageName))
+        // start hidden; settle choreography after the morph lands
+        dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 0f
+        dpAvatarView?.scaleX = 0.6f; dpAvatarView?.scaleY = 0.6f
+        dpBadgeView?.visibility = View.VISIBLE; dpBadgeView?.alpha = 0f
+        dpBadgeView?.scaleX = 0.3f; dpBadgeView?.scaleY = 0.3f
+        mainHandler.postDelayed({
+            if (currentStage != IslandStage.STAGE3_FULL) return@postDelayed
+            appIconView?.animate()?.alpha(0f)?.setDuration(160L)?.start()
+            dpAvatarView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
+            dpBadgeView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(260L)?.setInterpolator(android.view.animation.OvershootInterpolator(1.6f))?.start()
+        }, 380L)
+    }
+
     private fun syncBandIconForContent(hasContent: Boolean) {
         gridIconSec?.visibility = if (hasContent) View.VISIBLE else View.INVISIBLE
         if (!hasContent) { appIconView?.setImageDrawable(null); glowPalette = null; glowColor = 0 }
@@ -6631,7 +6694,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1512 (REVERT of b1511 HW outline clip - it mangled the concave neck on MIUI; b1510 visuals restored. Kept: silhouette once/frame, keyguard wipe VETO, wake receiver) era")
+        TraceLog.morph("v2 build marker: b1513 (sender DP card: MessagingStyle Person.icon → rounded DP at band + launcher-icon corner badge, settles 380ms after morph; pill flight untouched; kill switch avatar_dp_card) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

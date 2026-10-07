@@ -317,6 +317,10 @@ object AppSettings {
     fun getAutoRebindListenerEnabled(context: Context) = prefs(context).getBoolean(KEY_AUTO_REBIND_LISTENER, true)
     fun getIslandHighRefreshEnabled(context: Context) = prefs(context).getBoolean("island_high_refresh", false)   // b1506: his call - user opts in (battery)
     fun setIslandHighRefreshEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean("island_high_refresh", on).apply() }
+
+    /** b1513: expanded card shows the sender's real DP (rounded) + launcher-badge corner.
+     *  Default ON - he picked this visual; the flag exists only as a one-line kill switch. */
+    fun isAvatarDpCardEnabled(context: Context) = prefs(context).getBoolean("avatar_dp_card", true)
     fun setAutoRebindListenerEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_AUTO_REBIND_LISTENER, on).apply() }
 
     // ---- b1499 durable shade guards (Base64 lines; emoji/unicode-safe, no JSON dependency) ----

@@ -152,6 +152,37 @@ object NotificationContentExtractor {
         ""
     }
 
+    /** b1513: latest MessagingStyle sender's Person.icon as a circular 96 px bitmap (sender DP).
+     *  Person.getIcon() is a plain public API (the lab export proved the field survives the
+     *  binder both ways). Returns null when the app shipped no icon or any step fails. */
+    fun latestSenderAvatar(context: Context, sbn: StatusBarNotification): android.graphics.Bitmap? = try {
+        val extras = sbn.notification?.extras ?: return null
+        val msgs = extractMessagingBundles(extras)
+        val latest = msgs.lastOrNull() ?: return null
+        val person = latest.get("sender_person") ?: return null
+        val icon = person.javaClass.methods.firstOrNull { it.name == "getIcon" && it.parameterCount == 0 }?.invoke(person)
+        val d = when (icon) {
+            is android.graphics.drawable.Icon -> icon.loadDrawable(context)
+            else -> null
+        } ?: return null
+        val size = 96
+        val out = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(out)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
+        val path = android.graphics.Path().apply {
+            addCircle(size / 2f, size / 2f, size / 2f, android.graphics.Path.Direction.CW)
+        }
+        canvas.clipPath(path)
+        val src = if (d is android.graphics.drawable.BitmapDrawable) d.bitmap else null
+        if (src != null) {
+            val dest = android.graphics.Rect(0, 0, size, size)
+            canvas.drawBitmap(src, null, dest, paint)
+        } else {
+            d.setBounds(0, 0, size, size); d.draw(canvas)
+        }
+        out
+    } catch (_: Exception) { null }
+
     /** MessagingStyle.Message.time, or 0 when the app did not set one. */
     private fun readMessageTime(bundle: Bundle): Long = try {
         bundle.getLong("time")
