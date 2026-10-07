@@ -315,7 +315,8 @@ object AppSettings {
     fun getUiV2LayoutAEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_LAYOUT_A, true)
     fun getUiV2PagerDialEnabled(context: Context) = prefs(context).getBoolean(KEY_UI_V2_PAGER_DIAL, true)
     fun getAutoRebindListenerEnabled(context: Context) = prefs(context).getBoolean(KEY_AUTO_REBIND_LISTENER, true)
-    fun getIslandHighRefreshEnabled(context: Context) = prefs(context).getBoolean("island_high_refresh", true)
+    fun getIslandHighRefreshEnabled(context: Context) = prefs(context).getBoolean("island_high_refresh", false)   // b1506: his call - user opts in (battery)
+    fun setIslandHighRefreshEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean("island_high_refresh", on).apply() }
     fun setAutoRebindListenerEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_AUTO_REBIND_LISTENER, on).apply() }
 
     // ---- b1499 durable shade guards (Base64 lines; emoji/unicode-safe, no JSON dependency) ----

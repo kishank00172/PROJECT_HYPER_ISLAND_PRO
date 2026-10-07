@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.SeekBar
 import android.widget.Switch
+import android.hardware.display.DisplayManager
 import android.widget.TextView
 import com.hyperisland.pro.R
 import com.hyperisland.pro.core.AppSettings
@@ -45,6 +46,26 @@ class SettingsActivity : Activity() {
         val developer = findViewById<Switch>(R.id.switchDeveloper)
         developer.isChecked = AppSettings.isDeveloperMode(this)
         developer.setOnCheckedChangeListener { _, isChecked -> AppSettings.setDeveloperMode(this, isChecked) }
+
+        // b1506 / Island Boost: rate vote by Display.modeId (b1505); here is his user-visible switch.
+        val note = findViewById<TextView>(R.id.txtHighRefreshNote)
+        val peakHz = runCatching {
+            getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+                ?.supportedModes?.maxByOrNull { it.refreshRate }?.refreshRate ?: 0f
+        }.getOrDefault(0f)
+        note?.text = if (peakHz > 60.5f) "Experimental · buttery morphs; thodi zyada battery (panel: ${peakHz.toInt()}Hz)"
+                     else "Experimental · is phone me sirf ${peakHz.toInt()}Hz panel mila"
+        val boost = findViewById<Switch>(R.id.switchHighRefresh)
+        boost.isChecked = AppSettings.getIslandHighRefreshEnabled(this)
+        boost.setOnCheckedChangeListener { _, isChecked ->
+            AppSettings.setIslandHighRefreshEnabled(this, isChecked)
+            note?.text = when {
+                peakHz <= 60.5f -> "Experimental · is phone me sirf ${peakHz.toInt()}Hz panel mila"
+                isChecked && peakHz >= 119f -> "Experimental · 120Hz island vote ON (restart mat maangta; agla island wake se asar)"
+                isChecked -> "Experimental · island vote ON (peak panel: ${peakHz.toInt()}Hz; thodi zyada battery)"
+                else -> "Experimental · buttery morphs; thodi zyada battery (panel: ${peakHz.toInt()}Hz)"
+            }
+        }
 
         txtWidth = findViewById(R.id.txtWidthValue)
         txtStage2Width = findViewById(R.id.txtStage2WidthValue)

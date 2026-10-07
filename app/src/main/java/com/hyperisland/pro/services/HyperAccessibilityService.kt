@@ -572,6 +572,12 @@ class HyperAccessibilityService : AccessibilityService() {
     private var outsideWatcherView: FrameLayout? = null
     private var morphAnimator: Animator? = null
     private var morphMeter: MorphJankMeter? = null
+    // b1506: MEASURED morph smoothness, per flight - ticks vs wall clock vs layout-call count.
+    // His verdict words were qualitative ("frame drop feel hota hai"); the number ends the arguing.
+    private var morphTickCount = 0
+    private var morphLayoutCallCount = 0
+    private var morphStartNs = 0L
+
     private var morphLayoutW = -1
     private var morphLayoutH = -1
     /** The card view, seen as the thing that can draw its own morph box (null = use the old resize path). */
@@ -4160,6 +4166,7 @@ class HyperAccessibilityService : AccessibilityService() {
      * window keyed to it is sampled once, past its peak.
      */
     private fun updateIslandLayoutForMorph(w: Int, h: Int, r: Float, t: Float, rawT: Float = t) {
+        morphTickCount++
         // round-G ITEM 2: keep the last 8 frame-samples of THIS morph (dumped by endMorphPerf)
         if (morphV2On) {
             v2TeleportFrame++
@@ -4314,6 +4321,7 @@ class HyperAccessibilityService : AccessibilityService() {
         }
         if (bw == morphLayoutW && bh == morphLayoutH) return
         morphLayoutW = bw; morphLayoutH = bh
+        morphLayoutCallCount++
         updateIslandLayout(bw, bh, br)
     }
 
@@ -4573,6 +4581,7 @@ class HyperAccessibilityService : AccessibilityService() {
     ) {
         morphLayoutW = -1; morphLayoutH = -1
         morphFinalW = toW; morphFinalH = toH; morphFinalR = toR
+        morphTickCount = 0; morphLayoutCallCount = 0; morphStartNs = System.nanoTime()
         armFrameWatch()
         // The budget is the period this panel is actually running at, not a hardcoded 16: at 120 Hz a 16 ms
         // gap is two dropped frames and the old constant would have called that clean.
@@ -5205,6 +5214,13 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun endMorphPerf(label: String) {
         if (morphV2On && AppSettings.getDebugMorphFreezeP(this) in 0f..1f) {
             TraceLog.morph("v2 freeze: holding frame - restore skipped; set debug_morph_freeze_p to -1 to resume"); return
+        }
+        runCatching {
+            val wallMs = ((System.nanoTime() - morphStartNs) / 1_000_000L).coerceAtLeast(1L)
+            if (morphTickCount > 0 && wallMs < 10_000L) {
+                val fps = (morphTickCount * 1000L) / wallMs
+                TraceLog.morph("morph fps: ticks=$morphTickCount wall=${wallMs}ms eff_fps≈$fps layoutCalls=$morphLayoutCallCount dir=$label")
+            }
         }
         if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
         teleportDirWord = if (morphTowardCard) "expand" else "collapse"
@@ -6525,7 +6541,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1505 (smooth pack: 120Hz preferredDisplayModeId vote + icon cache LRU + glyph verdict cache + gcStat 1s diet) era")
+        TraceLog.morph("v2 build marker: b1506 (Island Boost: user-selected 120 FPS (default OFF, Settings > Experimental) + morph fps meter: ticks/wall/layout per flight) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
