@@ -155,7 +155,8 @@ object NotificationContentExtractor {
     /** b1513: latest MessagingStyle sender's Person.icon as a circular 96 px bitmap (sender DP).
      *  Person.getIcon() is a plain public API (the lab export proved the field survives the
      *  binder both ways). Returns null when the app shipped no icon or any step fails. */
-    fun latestSenderAvatar(context: Context, sbn: StatusBarNotification): android.graphics.Bitmap? = try {
+    fun latestSenderAvatar(context: Context, sbn: StatusBarNotification): android.graphics.Bitmap? {
+        return try {
         val extras = sbn.notification?.extras ?: return null
         val msgs = extractMessagingBundles(extras)
         if (msgs.isEmpty()) return null
@@ -187,7 +188,8 @@ object NotificationContentExtractor {
             d.setBounds(0, 0, size, size); d.draw(canvas)
         }
         out
-    } catch (_: Exception) { null }
+        } catch (_: Exception) { null }
+    }
 
     /** MessagingStyle.Message.time, or 0 when the app did not set one. */
     private fun readMessageTime(bundle: Bundle): Long = try {
