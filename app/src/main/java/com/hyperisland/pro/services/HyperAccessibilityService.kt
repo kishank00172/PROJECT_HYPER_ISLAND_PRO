@@ -1585,14 +1585,15 @@ class HyperAccessibilityService : AccessibilityService() {
         pillPreviewIcon?.imageTintList = null
         pillPreviewIcon?.clearColorFilter()
         pillPreviewIcon?.setImageDrawable(null)
-        // b1504 (his: "content gaya, bas quick action bach ja raha hai"): the action strip's CHILD
-        // VIEWS survive a wipe (footerActions re-renders only inside updateNotificationContent, which
-        // never runs on empty ring) - the murdered message left its Reply/Open buttons hanging there.
+        // b1504 + b1507 (his correction, verbatim: "maine jo bola tha wo CONDITIONAL tha - live
+        // card pe buttons chahiye, sirf mar chuke message ke buttons maro"):
+        //   - footerActions.removeAllViews() stays: its CHILDREN re-bind per card in
+        //     updateNotificationContent, so a ghost wipe kills them and the next live card revives them.
+        //   - actionScroll.removeAllViews() was the over-kill: it DETACHED footerActions itself from
+        //     the card, and every later addView silently rendered into an orphan layout -> live cards
+        //     lost their Reply/Open buttons (his 13:10 screenshot). Chips were never ghost-residue:
+        //     they're design chrome rebuilt with the island; leave them alone.
         footerActions?.removeAllViews()
-        actionScroll?.removeAllViews()
-        chipsRow?.removeAllViews()
-        chipReply = null
-        chipOpen = null
     }
 
     /**
@@ -6541,7 +6542,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1506 (Island Boost: user-selected 120 FPS (default OFF, Settings > Experimental) + morph fps meter: ticks/wall/layout per flight) era")
+        TraceLog.morph("v2 build marker: b1507 (over-cure undo: wipe kills ghost buttons via footerActions children only; live cards keep their quick actions) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
