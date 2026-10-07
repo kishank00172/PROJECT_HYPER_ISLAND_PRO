@@ -578,6 +578,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var morphLayoutCallCount = 0
     private var morphStartNs = 0L
 
+    private var morphFreezeCached = -1f
     private var morphLayoutW = -1
     private var morphLayoutH = -1
     /** The card view, seen as the thing that can draw its own morph box (null = use the old resize path). */
@@ -4199,7 +4200,7 @@ class HyperAccessibilityService : AccessibilityService() {
             // Round A2 item-0 (his acceptance-need: deterministic screenshots at any progress p - String pref,
             // adb-writable; -1 = off). After p the funnel stops writing: the island itself freezes at p and
             // endMorphPerf skips the restore (below), so a frozen frame survives for the screenshot.
-            val fz = AppSettings.getDebugMorphFreezeP(this)
+            val fz = morphFreezeCached
             if (fz in 0f..1f && rawT > fz) return
         }
         if (!v2GateLogged && morphPinH != null) {
@@ -4583,6 +4584,8 @@ class HyperAccessibilityService : AccessibilityService() {
         morphLayoutW = -1; morphLayoutH = -1
         morphFinalW = toW; morphFinalH = toH; morphFinalR = toR
         morphTickCount = 0; morphLayoutCallCount = 0; morphStartNs = System.nanoTime()
+        // b1508: freeze pref was parsed per morph FRAME (his STALL: 25ms mid-flight). Once per morph.
+        morphFreezeCached = AppSettings.getDebugMorphFreezeP(this)
         armFrameWatch()
         // The budget is the period this panel is actually running at, not a hardcoded 16: at 120 Hz a 16 ms
         // gap is two dropped frames and the old constant would have called that clean.
@@ -5213,14 +5216,15 @@ class HyperAccessibilityService : AccessibilityService() {
     }
 
     private fun endMorphPerf(label: String) {
-        if (morphV2On && AppSettings.getDebugMorphFreezeP(this) in 0f..1f) {
+        if (morphV2On && morphFreezeCached in 0f..1f) {
             TraceLog.morph("v2 freeze: holding frame - restore skipped; set debug_morph_freeze_p to -1 to resume"); return
         }
         runCatching {
             val wallMs = ((System.nanoTime() - morphStartNs) / 1_000_000L).coerceAtLeast(1L)
             if (morphTickCount > 0 && wallMs < 10_000L) {
                 val fps = (morphTickCount * 1000L) / wallMs
-                TraceLog.morph("morph fps: ticks=$morphTickCount wall=${wallMs}ms eff_fps≈$fps layoutCalls=$morphLayoutCallCount dir=$label")
+                val panelHz = runCatching { visualRoot?.display?.mode?.refreshRate ?: -1f }.getOrDefault(-1f)
+                TraceLog.morph("morph fps: ticks=$morphTickCount wall=${wallMs}ms eff_fps≈$fps layoutCalls=$morphLayoutCallCount dir=$label panel=${"%.0f".format(panelHz)}Hz")
             }
         }
         if (v2TraceFrames > 0) TraceLog.morph("v2 trajectory: frames=" + v2TraceFrames + " " + v2TraceSamples)
@@ -6234,18 +6238,32 @@ class HyperAccessibilityService : AccessibilityService() {
         gridIconSec?.visibility = if (hasContent) View.VISIBLE else View.INVISIBLE
         if (!hasContent) { appIconView?.setImageDrawable(null); glowPalette = null; glowColor = 0 }
     }
-    private fun loadAppIcon(pkg: String) = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
+    private fun loadAppIcon(pkg: String): Drawable? {
+        synchronized(appIconCache) { appIconCache[pkg]?.let { return it.newDrawable() } }
+        val d = try { packageManager.getApplicationIcon(pkg) } catch (_: Exception) { null }
+        d?.constantState?.let { cs ->
+            synchronized(appIconCache) {
+                appIconCache[pkg] = cs
+                while (appIconCache.size > 48) appIconCache.remove(appIconCache.keys.first())
+            }
+        }
+        return d
+    }
 
-    // b1505: updatePillBadge repaints every tick; the full resolver chain (resource loads + glyph
-    // probe + tint) used to run per repaint on the main thread. 5 s cooldown + LRU 24 kills that.
+    // b1505+b1508: updatePillBadge repaints every tick; the full resolver chain (resource loads +
+    // glyph probe + tint + launcher-icon IO) used to run per repaint on the main thread. LRU 24 with
+    // a 60 s cooldown kills it (his stall chains erased: 527 ms IO -> amortized once per minute).
     private val pillFinalIconCache = java.util.LinkedHashMap<String, Pair<Long, Drawable.ConstantState>>(16, 0.75f, true)
+    // b1508: launcher-icon IO on main was a 527 ms hit in his log (loadAppIcon inside the AUTO chain).
+    // Icons flip only on app update (changes our process via MY_PACKAGE_REPLACED on OUR side anyway).
+    private val appIconCache = java.util.LinkedHashMap<String, Drawable.ConstantState>(48, 0.75f, true)
 
     private fun loadPillNotificationIconCached(pkg: String, smallIcon: Icon?): Drawable? {
         val key = AppSettings.getPillIconRenderMode(this).toString() + "|" + pkg + "|" + getPillIconTint(pkg)
         val now = System.currentTimeMillis()
         synchronized(pillFinalIconCache) {
             val hit = pillFinalIconCache[key]
-            if (hit != null && now - hit.first < 5_000L) return hit.second.newDrawable()
+            if (hit != null && now - hit.first < 60_000L) return hit.second.newDrawable()
         }
         val drawn = loadPillNotificationIcon(pkg, smallIcon)
         val cs = drawn?.constantState
@@ -6542,7 +6560,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1507 (over-cure undo: wipe kills ghost buttons via footerActions children only; live cards keep their quick actions) era")
+        TraceLog.morph("v2 build marker: b1508 (lag autopsy of MY OWN stalls: shelf-probe+prune now worker-only; freeze pref per-morph; appIcon LRU; panel Hz printed per morph flight) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

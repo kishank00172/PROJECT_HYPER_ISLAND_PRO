@@ -76,7 +76,10 @@ object V2SeenEngine {
         stamps.forEach { model.markSeen(it, now) }
         TraceLog.line("V2SEEN", "markSeen n=${stamps.size} because=$why")
         persistNow(context)
-        runCatching { activeKeysSupplier?.invoke() }?.onSuccess { it?.let { keys -> model.prune(keys, now) } }
+        // b1508: shelf probe + prune ride the writer thread - never the animation main thread.
+        workerHandler?.post {
+            runCatching { activeKeysSupplier?.invoke() }?.onSuccess { keys -> keys?.let { model.prune(it, now) } }
+        }
     }
 
     fun connectBaseline(context: Context, actives: List<V2SeenWatermark.SeenStamp>): Triple<Int, Int, Int> {

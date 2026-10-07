@@ -131,7 +131,6 @@ class HyperNotificationListenerService : NotificationListenerService() {
     private val v2StatsRunnable = object : Runnable {
         override fun run() {
             TraceLog.line("V2SEEN", V2SeenEngine.stats())
-            runCatching { V2SeenEngine.activeKeysSupplier?.invoke() }?.onSuccess { }
             mainHandler.postDelayed(this, 60_000L)
         }
     }
