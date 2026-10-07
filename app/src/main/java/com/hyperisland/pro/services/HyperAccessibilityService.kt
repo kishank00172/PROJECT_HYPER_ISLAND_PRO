@@ -5576,7 +5576,13 @@ class HyperAccessibilityService : AccessibilityService() {
             // nSyncAndDrawFrame for 64-279 ms in his 16:47 expand. SDK 33+ clips the identical
             // silhouette inside the RenderNode via Outline.setPath = free. A hwOutlineClip=false
             // escape hatch keeps the old software path if the ROM misbehaves.
-            private val hwOutlineClip = true
+            // b1512 (his slap, verbatim: "animation pura kharab ho gya"): the concave neck silhouette
+            // did not survive RenderNode clip-to-path on MIUI/HyperOS - visually torn neck, admission:
+            // field flipped OFF = b1510's proven software clipPath everywhere again. The once-per-frame
+            // silhouette build stays (pure win, no visual change); the keyguard wipe VETO + wake
+            // receiver stay. Round 3 of butter will target the draw-spikes a DIFFERENT way (frame
+            // pacing), never this clip again without HIS screenshot approval of a prototype first.
+            private val hwOutlineClip = false
 
             init {
                 setWillNotDraw(false)
@@ -6625,7 +6631,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1511 (butter round 2: morph silhouette clipped by HW Outline.setPath - kills the per-frame software composite + 64-279ms syncAndDraw stalls; shade-wipe VETO while keyguard locked + 1.5s post-wake grace (his locked-message-vanish); wake receiver now trace-logged) era")
+        TraceLog.morph("v2 build marker: b1512 (REVERT of b1511 HW outline clip - it mangled the concave neck on MIUI; b1510 visuals restored. Kept: silhouette once/frame, keyguard wipe VETO, wake receiver) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
