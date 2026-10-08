@@ -6723,7 +6723,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1515 (configure OUT of the icon-cache branch - his "koi change nahi" traced to same-app expand skipping the bind; DP pipeline now trace-logged end to end) era")
+        TraceLog.morph("v2 build marker: b1515 (configure OUT of the icon-cache branch - his 'koi change nahi' traced to same-app expand skipping the bind; DP pipeline now trace-logged end to end) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
