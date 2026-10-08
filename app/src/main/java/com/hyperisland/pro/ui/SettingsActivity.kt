@@ -68,14 +68,19 @@ class SettingsActivity : Activity() {
             }
         }
 
-        // b1514: Sender DP style cycler (his pick-pending trio: aura / shell / badge-ring)
-        val dpStyleLbl = findViewById<TextView>(R.id.txtAvatarDpStyle)
-        fun dpStyleText(v: Int) = when (v) { 0 -> "Off (one-line kill switch)"; 1 -> "Aura - glow ring DP ke peeche"; 2 -> "Shell - card ambient glow hi rehta hai"; else -> "Badge-ring - glow hairline launcher badge pe" }
-        dpStyleLbl?.text = dpStyleText(AppSettings.getAvatarDpStyle(this))
-        findViewById<android.view.View>(R.id.rowAvatarDpStyle)?.setOnClickListener {
-            val next = (AppSettings.getAvatarDpStyle(this) + 1) % 4
-            AppSettings.setAvatarDpStyle(this, next)
-            dpStyleLbl?.text = dpStyleText(next)
+        // b1516 (his slam: cycler = feel nahi aata): 4 visible pills, selected one lights up blue.
+        val dpBtns = listOf(
+            findViewById<android.widget.Button>(R.id.btnDpOff),
+            findViewById<android.widget.Button>(R.id.btnDpAura),
+            findViewById<android.widget.Button>(R.id.btnDpShell),
+            findViewById<android.widget.Button>(R.id.btnDpBadge),
+        )
+        fun paintDpChoice(v: Int) {
+            dpBtns.forEachIndexed { i, b -> b?.setTextColor(if (i == v) 0xFF4DA3FF.toInt() else 0xFFAAAAAA.toInt()) }
+        }
+        paintDpChoice(AppSettings.getAvatarDpStyle(this))
+        dpBtns.forEachIndexed { i, b ->
+            b?.setOnClickListener { AppSettings.setAvatarDpStyle(this, i); paintDpChoice(i) }
         }
 
         txtWidth = findViewById(R.id.txtWidthValue)

@@ -6352,14 +6352,14 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun configureSenderDp(model: NotificationModel) {
         val style = AppSettings.getAvatarDpStyle(this)
         dpStyleNow = style
-        TraceLog.line("DP", "configure: style=$style model=[${'$'}{model.packageName}|${'$'}{model.title.take(18)}]")
+        TraceLog.line("DP", "configure: style=$style pkg=" + model.packageName + " title=" + model.title.take(18) + " conv=" + model.conversationKey.take(28))
         val bmp = if (style > 0) com.hyperisland.pro.core.AvatarStore.get(
             model.conversationKey,
             model.packageName + "|" + model.title,
             model.title, model.packageName
         ) else null
         dpAvatarBmp = bmp
-        TraceLog.line("DP", "configure result: bmp?=${'$'}{bmp != null} style=$style")
+        TraceLog.line("DP", "configure result: bmp?=" + (bmp != null) + " style=" + style)
         ambientGlowMuted = (style == 3)        // style 3: all drama moves to the badge hairline
         if (bmp == null) {
             dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f
