@@ -690,6 +690,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var dpAvatarView: ImageView? = null
     private var dpBadgeView: ImageView? = null
     private var dpAvatarBmp: android.graphics.Bitmap? = null
+    private var dpHaloView: android.view.View? = null
     private var dpStyleNow = 1
     private var ambientGlowMuted = false
     /** The pull lives on expands of the spring styles only; set per morph, read by the tween and the carry. */
@@ -1640,6 +1641,7 @@ class HyperAccessibilityService : AccessibilityService() {
         dpAvatarBmp = null
         ambientGlowMuted = false
         mainHandler.removeCallbacks(dpSettleRunnable)
+        dpHaloView?.visibility = View.GONE; dpHaloView?.alpha = 0f; dpHaloView?.background = null
         dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f; dpAvatarView?.setImageBitmap(null)
         dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f; dpBadgeView?.setImageDrawable(null)
         appIconView?.alpha = 1f // b1513: undo the settle-fade so the next pill flight looks normal
@@ -6041,6 +6043,12 @@ class HyperAccessibilityService : AccessibilityService() {
                     this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
                     addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
                     // b1513: DP + launcher badge layer (invisible until a MessagingStyle DP arrives)
+                    dpHaloView = android.view.View(context).apply {
+                        visibility = View.GONE; alpha = 0f
+                        outlineProvider = ViewOutlineProvider.BACKGROUND
+                        clipToOutline = false
+                    }
+                    addView(dpHaloView, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
                     dpAvatarView = ImageView(context).apply {
                         scaleType = ImageView.ScaleType.CENTER_CROP
                         outlineProvider = ViewOutlineProvider.BACKGROUND
@@ -6367,25 +6375,42 @@ class HyperAccessibilityService : AccessibilityService() {
             return
         }
         dpAvatarView?.setImageBitmap(bmp)
-        // b1517 (his: "difference hai kaha?"): pick-phase differences made LOUD on purpose -
-        // after his choice the winner gets toned down to production size.
-        val ringColor: Int
-        val ringDpW: Float
+        // b1518 theory-matched trio (his correction: "design match nahi hua theory se"):
+        //   Aura  = VISIBLE halo bloom behind the DP + bright color ring (glow lightened toward white)
+        //   Shell = ringless DP resting on the plain ambient glow
+        //   Badge = DP white circle + bright glow hairline ON the launcher badge, ambient glow muted
+        fun lightened(c: Int, f: Float): Int {
+            val r = (android.graphics.Color.red(c) + ((255 - android.graphics.Color.red(c)) * f)).toInt().coerceIn(0, 255)
+            val g = (android.graphics.Color.green(c) + ((255 - android.graphics.Color.green(c)) * f)).toInt().coerceIn(0, 255)
+            val b = (android.graphics.Color.blue(c) + ((255 - android.graphics.Color.blue(c)) * f)).toInt().coerceIn(0, 255)
+            return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        val glow = if (glowColor != 0) glowColor else 0xFF6EA8FF.toInt()
         when (style) {
-            1 -> { ringColor = if (glowColor != 0) glowColor else 0x66FFFFFF.toInt(); ringDpW = 3f }       // Aura: thick colored ring, big DP
-            2 -> { ringColor = 0x00FFFFFF; ringDpW = 1f }                                                  // Shell: no ring at all
-            else -> { ringColor = 0xCCFFFFFF.toInt(); ringDpW = 1.5f }                                     // Badge: crisp white DP ring
+            1 -> {
+                (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(2), lightened(glow, 0.55f))
+                dpHaloView?.background = android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(glow and 0x33FFFFFF, 0x00000000)
+                ).apply { gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT; shape = android.graphics.drawable.GradientDrawable.OVAL }
+                dpHaloView?.visibility = View.VISIBLE
+            }
+            2 -> {
+                (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(0, 0)
+                dpHaloView?.visibility = View.GONE
+            }
+            else -> {
+                (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(1.5f.toInt()), 0xCCFFFFFF.toInt())
+                dpHaloView?.visibility = View.GONE
+            }
         }
-        (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(ringDpW.toInt()), ringColor)
         dpAvatarView?.layoutParams = (dpAvatarView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
-            val sz = if (style == 1) 44 else 36
+            val sz = if (style == 1) 40 else 36
             lp.width = dp(sz); lp.height = dp(sz)
         }
-        val badgeRing = if (style == 3 && glowColor != 0) glowColor else 0x88FFFFFF.toInt()
-        (dpBadgeView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(if (style == 3) 3 else 1), badgeRing)
+        val badgeRing = if (style == 3) lightened(glow, 0.35f) else 0x88FFFFFF.toInt()
+        (dpBadgeView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(if (style == 3) 2 else 1), badgeRing)
         dpBadgeView?.layoutParams = (dpBadgeView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
-            val sz = if (style == 3) 18 else 14
-            lp.width = dp(sz); lp.height = dp(sz)
+            lp.width = dp(14); lp.height = dp(14)
         }
         dpBadgeView?.setImageDrawable(loadAppIcon(model.packageName))
         // b1514: b1513's single 380ms gate fired mid-flight (morph ~1s) and vetoed the settle - his
@@ -6409,6 +6434,7 @@ class HyperAccessibilityService : AccessibilityService() {
             TraceLog.line("DP", "settle firing")
             appIconView?.animate()?.alpha(0f)?.setDuration(160L)?.start()
             dpAvatarView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
+            dpHaloView?.animate()?.alpha(1f)?.setDuration(300L)?.start()
             dpBadgeView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(260L)?.setInterpolator(android.view.animation.OvershootInterpolator(1.6f))?.start()
         }
     }
@@ -6739,7 +6765,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1517 (LOUD style diffs for his pick: Aura=big DP+3dp app-color ring; Shell=ringless; Badge=18dp badge+glow ring+glow-muted; Settings note explains 'applies on next message') era")
+        TraceLog.morph("v2 build marker: b1518 (theory-matched trio per his verdict: Aura=halo bloom + lightened ring + free overflow; Shell=ringless shell; Badge=bright badge hairline + muted glow) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
@@ -6794,7 +6820,9 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentGrid = gridRoot as? LinearLayout
         if (contentGrid != null) {
             val sqIcon = dp(32) * 0.30f
-            val band = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            // b1518: DP overflow is INTENTIONAL (Aura's halo spreads past the 32dp cell); band must not
+            // clip children, or the halo visually dies at the cell edge (his "position galat" evidence).
+            val band = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; clipChildren = false; clipToPadding = false }
             val trail = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END }
             for (v in listOf(gridIconSec, appNameText, pagerRow, pagerDialView, timeStampText)) (v?.parent as? ViewGroup)?.removeView(v)
             for (v in listOf(titleText, messageText, actionScroll, replyBar)) (v?.parent as? ViewGroup)?.removeView(v)
