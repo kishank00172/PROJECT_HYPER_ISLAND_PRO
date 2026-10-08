@@ -1913,13 +1913,14 @@ class HyperAccessibilityService : AccessibilityService() {
         if (model.packageName != lastIconPkg) {
             lastIconPkg = model.packageName
             appIconView?.setImageDrawable(loadAppIcon(model.packageName)); syncBandIconForContent(true)
-            // b1513: sender DP swap. The pill flight still lands on the appIconView tile; ~380 ms later
-            // (morph settle) the DP fades/scales in and the launcher icon springs into its badge corner.
-            runCatching { configureSenderDp(model) }
             // issue-C: a mid-morph content switch OWNS the icon now - never let the carry/restore re-stamp the
             // previous page's drawable (morphIconLauncher snapshot was taken at morph begin, i.e. page-1's icon).
             if (morphV2On) { morphIconLauncher = null; morphIconPill = null }
         }
+        // b1515 (his slap: "koi change nahi hua"): b1513 parked configureSenderDp INSIDE the
+        // icon-cache-refresh conditional above. Same-app expands (the normal case - the ping bind
+        // already set lastIconPkg) never reached it. It MUST run per bind.
+        runCatching { configureSenderDp(model) }
         if (UpdateGate.textChanged(lastAppNameShown, model.appName)) {
             lastAppNameShown = model.appName
             appNameText?.text = model.appName
@@ -6351,12 +6352,14 @@ class HyperAccessibilityService : AccessibilityService() {
     private fun configureSenderDp(model: NotificationModel) {
         val style = AppSettings.getAvatarDpStyle(this)
         dpStyleNow = style
+        TraceLog.line("DP", "configure: style=$style model=[${'$'}{model.packageName}|${'$'}{model.title.take(18)}]")
         val bmp = if (style > 0) com.hyperisland.pro.core.AvatarStore.get(
             model.conversationKey,
             model.packageName + "|" + model.title,
             model.title, model.packageName
         ) else null
         dpAvatarBmp = bmp
+        TraceLog.line("DP", "configure result: bmp?=${'$'}{bmp != null} style=$style")
         ambientGlowMuted = (style == 3)        // style 3: all drama moves to the badge hairline
         if (bmp == null) {
             dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f
@@ -6387,6 +6390,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (++dpSettleTries < 4) mainHandler.postDelayed(this, 350L)
                 return
             }
+            TraceLog.line("DP", "settle firing")
             appIconView?.animate()?.alpha(0f)?.setDuration(160L)?.start()
             dpAvatarView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
             dpBadgeView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(260L)?.setInterpolator(android.view.animation.OvershootInterpolator(1.6f))?.start()
@@ -6719,7 +6723,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1514 (DP card 3 styles for his pick: aura/shell/badge-ring via avatar_dp_style; settle retry loop fixes the stage-guard veto he caught) era")
+        TraceLog.morph("v2 build marker: b1515 (configure OUT of the icon-cache branch - his "koi change nahi" traced to same-app expand skipping the bind; DP pipeline now trace-logged end to end) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

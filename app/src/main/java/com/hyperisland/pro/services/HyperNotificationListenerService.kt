@@ -235,9 +235,9 @@ class HyperNotificationListenerService : NotificationListenerService() {
             ?: return drop("extractor-null-empty-notification", sbn)
         // b1513: sender DP for the expanded card, off the same MessagingStyle bundle (zero extra cost).
         if (extracted.isMessagingStyle) {
-            runCatching { NotificationContentExtractor.latestSenderAvatar(this, sbn) }?.getOrNull()?.let { bmp ->
-                com.hyperisland.pro.core.AvatarStore.put(extracted.conversationKey, "$pkg|${extracted.conversationTitle}", extracted.conversationTitle, pkg, bmp = bmp)
-            }
+            val bmp = runCatching { NotificationContentExtractor.latestSenderAvatar(this, sbn) }.getOrNull()
+            TraceLog.line("DP", "avatar feed: pkg=$pkg conv=${extracted.conversationTitle.take(18)} bmp?=${bmp != null}")
+            bmp?.let { com.hyperisland.pro.core.AvatarStore.put(extracted.conversationKey, "$pkg|${extracted.conversationTitle}", extracted.conversationTitle, pkg, bmp = it) }
         }
         val appName = extracted.appName
         val title = extracted.conversationTitle
