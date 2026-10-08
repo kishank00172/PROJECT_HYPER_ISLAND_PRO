@@ -6367,10 +6367,26 @@ class HyperAccessibilityService : AccessibilityService() {
             return
         }
         dpAvatarView?.setImageBitmap(bmp)
-        val ringColor = when (style) { 1 -> if (glowColor != 0) glowColor else 0x66FFFFFF.toInt(); else -> 0x33FFFFFF.toInt() }
-        (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(2), ringColor)
+        // b1517 (his: "difference hai kaha?"): pick-phase differences made LOUD on purpose -
+        // after his choice the winner gets toned down to production size.
+        val ringColor: Int
+        val ringDpW: Float
+        when (style) {
+            1 -> { ringColor = if (glowColor != 0) glowColor else 0x66FFFFFF.toInt(); ringDpW = 3f }       // Aura: thick colored ring, big DP
+            2 -> { ringColor = 0x00FFFFFF; ringDpW = 1f }                                                  // Shell: no ring at all
+            else -> { ringColor = 0xCCFFFFFF.toInt(); ringDpW = 1.5f }                                     // Badge: crisp white DP ring
+        }
+        (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(ringDpW.toInt()), ringColor)
+        dpAvatarView?.layoutParams = (dpAvatarView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
+            val sz = if (style == 1) 44 else 36
+            lp.width = dp(sz); lp.height = dp(sz)
+        }
         val badgeRing = if (style == 3 && glowColor != 0) glowColor else 0x88FFFFFF.toInt()
-        (dpBadgeView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(if (style == 3) 2 else 1), badgeRing)
+        (dpBadgeView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(if (style == 3) 3 else 1), badgeRing)
+        dpBadgeView?.layoutParams = (dpBadgeView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
+            val sz = if (style == 3) 18 else 14
+            lp.width = dp(sz); lp.height = dp(sz)
+        }
         dpBadgeView?.setImageDrawable(loadAppIcon(model.packageName))
         // b1514: b1513's single 380ms gate fired mid-flight (morph ~1s) and vetoed the settle - his
         // "nahi kaam kiya" evidence. Retry until STAGE3_FULL, up to 4 tries.
@@ -6723,7 +6739,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1515 (configure OUT of the icon-cache branch - his 'koi change nahi' traced to same-app expand skipping the bind; DP pipeline now trace-logged end to end) era")
+        TraceLog.morph("v2 build marker: b1517 (LOUD style diffs for his pick: Aura=big DP+3dp app-color ring; Shell=ringless; Badge=18dp badge+glow ring+glow-muted; Settings note explains 'applies on next message') era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
