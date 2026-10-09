@@ -6439,8 +6439,11 @@ class HyperAccessibilityService : AccessibilityService() {
         lastDpIdentity = newIdentity
         // b1514: b1513's single 380ms gate fired mid-flight (morph ~1s) and vetoed the settle - his
         // "nahi kaam kiya" evidence. Retry until STAGE3_FULL, up to 4 tries.
-        dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 0f
-        dpAvatarView?.scaleX = 0.6f; dpAvatarView?.scaleY = 0.6f
+        // b1521 (his order: "dp fixed chahiye - ye animation/morph badge pe daal do"): the DP never
+        // animates again - it binds at final pose here; the pop/overshoot drama moves to the badge.
+        dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 1f
+        dpAvatarView?.scaleX = 1f; dpAvatarView?.scaleY = 1f
+        if (style == 1) { dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f }
         dpBadgeView?.visibility = View.VISIBLE; dpBadgeView?.alpha = 0f
         dpBadgeView?.scaleX = 0.3f; dpBadgeView?.scaleY = 0.3f
         dpSettleTries = 0
@@ -6459,8 +6462,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             TraceLog.line("DP", "settle firing")
             appIconView?.animate()?.alpha(0f)?.setDuration(160L)?.start()
-            dpAvatarView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
-            dpHaloView?.animate()?.alpha(1f)?.setDuration(300L)?.start()
+            // b1521: DP and halo are already at final pose (bound in configure) - badge pops alone.
             dpBadgeView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(260L)?.setInterpolator(android.view.animation.OvershootInterpolator(1.6f))?.start()
             // b1519: animator-race insurance - force final states 340 ms later; a raced chain in
             // page-swaps left the badge at alpha 0 forever (his frame-3 evidence).
@@ -6802,7 +6804,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1520 (his screenshot evidence: avatar-less pages were borrowing appIcon alpha=0 from the DP settle - icons vanished; alpha now restored in the no-avatar branch; halo bounded inside band) era")
+        TraceLog.morph("v2 build marker: b1521 (his order: DP fixed/binds static at final pose - the pop/overshoot morph moved onto the badge; no more small-to-big DP on page changes) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
