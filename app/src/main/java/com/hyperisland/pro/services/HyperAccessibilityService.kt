@@ -1642,6 +1642,7 @@ class HyperAccessibilityService : AccessibilityService() {
         ambientGlowMuted = false
         mainHandler.removeCallbacks(dpSettleRunnable)
         dpHaloView?.visibility = View.GONE; dpHaloView?.alpha = 0f; dpHaloView?.background = null
+        lastDpIdentity = null
         dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f; dpAvatarView?.setImageBitmap(null)
         dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f; dpBadgeView?.setImageDrawable(null)
         appIconView?.alpha = 1f // b1513: undo the settle-fade so the next pill flight looks normal
@@ -6389,9 +6390,16 @@ class HyperAccessibilityService : AccessibilityService() {
         when (style) {
             1 -> {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(2), lightened(glow, 0.55f))
-                dpHaloView?.background = android.graphics.drawable.GradientDrawable(
-                    android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(glow and 0x33FFFFFF, 0x00000000)
-                ).apply { gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT; shape = android.graphics.drawable.GradientDrawable.OVAL }
+                // b1519 (his frame-proof: halo invisible): a RADIAL gradient with gradientRadius
+                // unset paints NOTHING. Radius + warmer center now.
+                val haloPx = dp(24).toFloat()
+                dpHaloView?.background = android.graphics.drawable.GradientDrawable().apply {
+                    gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setGradientCenter(0.5f, 0.5f)
+                    gradientRadius = haloPx
+                    colors = intArrayOf(glow and 0x66FFFFFF, glow and 0x22FFFFFF, 0x00000000)
+                }
                 dpHaloView?.visibility = View.VISIBLE
             }
             2 -> {
@@ -6413,6 +6421,15 @@ class HyperAccessibilityService : AccessibilityService() {
             lp.width = dp(14); lp.height = dp(14)
         }
         dpBadgeView?.setImageDrawable(loadAppIcon(model.packageName))
+        // b1519 (his video proof: DP+badge ghosted after a page swipe): identity gate - same
+        // conversation already settled = skip the whole reset/settle cycle, zero flicker.
+        mainHandler.removeCallbacks(dpSettleRunnable)
+        val newIdentity = model.conversationKey
+        if (newIdentity == lastDpIdentity && (dpAvatarView?.alpha ?: 0f) > 0.9f) {
+            TraceLog.line("DP", "configure: same identity settled - skip flicker cycle")
+            return
+        }
+        lastDpIdentity = newIdentity
         // b1514: b1513's single 380ms gate fired mid-flight (morph ~1s) and vetoed the settle - his
         // "nahi kaam kiya" evidence. Retry until STAGE3_FULL, up to 4 tries.
         dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 0f
@@ -6422,6 +6439,8 @@ class HyperAccessibilityService : AccessibilityService() {
         dpSettleTries = 0
         mainHandler.postDelayed(dpSettleRunnable, 380L)
     }
+
+    private var lastDpIdentity: String? = null
 
     private var dpSettleTries = 0
     private val dpSettleRunnable = object : Runnable {
@@ -6436,6 +6455,17 @@ class HyperAccessibilityService : AccessibilityService() {
             dpAvatarView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
             dpHaloView?.animate()?.alpha(1f)?.setDuration(300L)?.start()
             dpBadgeView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(260L)?.setInterpolator(android.view.animation.OvershootInterpolator(1.6f))?.start()
+            // b1519: animator-race insurance - force final states 340 ms later; a raced chain in
+            // page-swaps left the badge at alpha 0 forever (his frame-3 evidence).
+            mainHandler.postDelayed({
+                if (dpAvatarBmp == null) return@postDelayed
+                dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 1f
+                dpAvatarView?.scaleX = 1f; dpAvatarView?.scaleY = 1f
+                dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f
+                dpBadgeView?.visibility = View.VISIBLE; dpBadgeView?.alpha = 1f
+                dpBadgeView?.scaleX = 1f; dpBadgeView?.scaleY = 1f
+                TraceLog.line("DP", "settle verified: av=" + dpAvatarView?.alpha + " halo=" + dpHaloView?.alpha + " badge=" + dpBadgeView?.alpha)
+            }, 340L)
         }
     }
 
@@ -6765,7 +6795,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1518 (theory-matched trio per his verdict: Aura=halo bloom + lightened ring + free overflow; Shell=ringless shell; Badge=bright badge hairline + muted glow) era")
+        TraceLog.morph("v2 build marker: b1519 (video-evidence fixes: halo gradientRadius set (was unset=invisible), identity-skip = no badge flicker on page swaps, force-final-state insurance vs animator races) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
