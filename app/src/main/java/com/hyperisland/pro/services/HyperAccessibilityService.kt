@@ -6049,7 +6049,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         outlineProvider = ViewOutlineProvider.BACKGROUND
                         clipToOutline = false
                     }
-                    addView(dpHaloView, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
+                    addView(dpHaloView, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
                     dpAvatarView = ImageView(context).apply {
                         scaleType = ImageView.ScaleType.CENTER_CROP
                         outlineProvider = ViewOutlineProvider.BACKGROUND
@@ -6371,8 +6371,15 @@ class HyperAccessibilityService : AccessibilityService() {
         TraceLog.line("DP", "configure result: bmp?=" + (bmp != null) + " style=" + style)
         ambientGlowMuted = (style == 3)        // style 3: all drama moves to the badge hairline
         if (bmp == null) {
+            // b1520 (his screenshot: "dusre apps ke icons band"): the DP settle fades the flight
+            // tile to alpha 0; an avatar-less page MUST restore it or every no-avatar app renders
+            // an invisible icon. (Meta-AI settle left it at 0; Cashify pages borrowed that corpse.)
+            appIconView?.animate()?.cancel()
+            appIconView?.alpha = 1f
             dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f
             dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f
+            dpHaloView?.visibility = View.GONE; dpHaloView?.alpha = 0f
+            lastDpIdentity = null
             return
         }
         dpAvatarView?.setImageBitmap(bmp)
@@ -6390,9 +6397,9 @@ class HyperAccessibilityService : AccessibilityService() {
         when (style) {
             1 -> {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(2), lightened(glow, 0.55f))
-                // b1519 (his frame-proof: halo invisible): a RADIAL gradient with gradientRadius
-                // unset paints NOTHING. Radius + warmer center now.
-                val haloPx = dp(24).toFloat()
+                // b1520: halo STILL invisible - overflow past the 38dp band was clipped by the outer
+                // containers (gridRoot/contentGrid); bounded to 36dp inside the slot, no surgery.
+                val haloPx = dp(18).toFloat()
                 dpHaloView?.background = android.graphics.drawable.GradientDrawable().apply {
                     gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
                     shape = android.graphics.drawable.GradientDrawable.OVAL
@@ -6795,7 +6802,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1519 (video-evidence fixes: halo gradientRadius set (was unset=invisible), identity-skip = no badge flicker on page swaps, force-final-state insurance vs animator races) era")
+        TraceLog.morph("v2 build marker: b1520 (his screenshot evidence: avatar-less pages were borrowing appIcon alpha=0 from the DP settle - icons vanished; alpha now restored in the no-avatar branch; halo bounded inside band) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
