@@ -6049,7 +6049,7 @@ class HyperAccessibilityService : AccessibilityService() {
                         outlineProvider = ViewOutlineProvider.BACKGROUND
                         clipToOutline = false
                     }
-                    addView(dpHaloView, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+                    addView(dpHaloView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)) // b1522: band-exact halo span
                     dpAvatarView = ImageView(context).apply {
                         scaleType = ImageView.ScaleType.CENTER_CROP
                         outlineProvider = ViewOutlineProvider.BACKGROUND
@@ -6399,7 +6399,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(2), lightened(glow, 0.55f))
                 // b1520: halo STILL invisible - overflow past the 38dp band was clipped by the outer
                 // containers (gridRoot/contentGrid); bounded to 36dp inside the slot, no surgery.
-                val haloPx = dp(18).toFloat()
+                val haloPx = dp(19).toFloat() // b1522: halo span is 38dp now (fills the band)
                 dpHaloView?.background = android.graphics.drawable.GradientDrawable().apply {
                     gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
                     shape = android.graphics.drawable.GradientDrawable.OVAL
@@ -6419,7 +6419,7 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }
         dpAvatarView?.layoutParams = (dpAvatarView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
-            val sz = if (style == 1) 40 else 36
+            val sz = if (style == 1) 34 else 36 // b1522: 40dp DP clipped its own ring against the 38dp band
             lp.width = dp(sz); lp.height = dp(sz)
         }
         val badgeRing = if (style == 3) lightened(glow, 0.35f) else 0x88FFFFFF.toInt()
@@ -6470,7 +6470,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 if (dpAvatarBmp == null) return@postDelayed
                 dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 1f
                 dpAvatarView?.scaleX = 1f; dpAvatarView?.scaleY = 1f
-                dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f
+                if (dpStyleNow == 1) { dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f } // b1522: style-gated, was leaking into Shell/Badge
                 dpBadgeView?.visibility = View.VISIBLE; dpBadgeView?.alpha = 1f
                 dpBadgeView?.scaleX = 1f; dpBadgeView?.scaleY = 1f
                 TraceLog.line("DP", "settle verified: av=" + dpAvatarView?.alpha + " halo=" + dpHaloView?.alpha + " badge=" + dpBadgeView?.alpha)
@@ -6804,7 +6804,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1521 (his order: DP fixed/binds static at final pose - the pop/overshoot morph moved onto the badge; no more small-to-big DP on page changes) era")
+        TraceLog.morph("v2 build marker: b1522 (Aura geometry repaired: 34dp DP so the ring never clips against the 38dp band + 38dp band-exact halo that finally blooms past the DP + force-final halo now style-gated, Shell/Badge leak closed) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
