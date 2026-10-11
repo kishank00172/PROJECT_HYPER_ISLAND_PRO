@@ -6396,7 +6396,16 @@ class HyperAccessibilityService : AccessibilityService() {
         val glow = if (glowColor != 0) glowColor else 0xFF6EA8FF.toInt()
         when (style) {
             1 -> {
-                (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(2), lightened(glow, 0.55f))
+                (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(0, 0)
+                // b1523 (his order: "dp size wahi rahega, ring ko bada karo"): the ring lived BEHIND
+                // the photo (background stroke) - full-bleed DPs like skylord swallowed it whole,
+                // and the WhatsApp Meta AI strip only showed because that bitmap is inset. The ring
+                // is now a bright FOREGROUND overlay drawn on top of the photo: visible on every DP,
+                // independent of bitmap padding/content. DP size untouched (34dp).
+                dpAvatarView?.foreground = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setStroke(dp(3), lightened(glow, 0.65f))
+                }
                 // b1520: halo STILL invisible - overflow past the 38dp band was clipped by the outer
                 // containers (gridRoot/contentGrid); bounded to 36dp inside the slot, no surgery.
                 val haloPx = dp(19).toFloat() // b1522: halo span is 38dp now (fills the band)
@@ -6411,10 +6420,12 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             2 -> {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(0, 0)
+                dpAvatarView?.foreground = null // b1523: shell = clean DP, no overlay ring
                 dpHaloView?.visibility = View.GONE
             }
             else -> {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(1.5f.toInt()), 0xCCFFFFFF.toInt())
+                dpAvatarView?.foreground = null // b1523
                 dpHaloView?.visibility = View.GONE
             }
         }
@@ -6804,7 +6815,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1522 (Aura geometry repaired: 34dp DP so the ring never clips against the 38dp band + 38dp band-exact halo that finally blooms past the DP + force-final halo now style-gated, Shell/Badge leak closed) era")
+        TraceLog.morph("v2 build marker: b1523 (his order: DP size wahi, ring bada - the ring moved from behind-photo background stroke to a bright 3dp foreground overlay, visible on every DP incl full-bleed photos; Shell/Badge overlays cleared) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
