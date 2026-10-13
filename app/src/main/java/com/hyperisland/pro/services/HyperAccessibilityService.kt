@@ -6402,10 +6402,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 // and the WhatsApp Meta AI strip only showed because that bitmap is inset. The ring
                 // is now a bright FOREGROUND overlay drawn on top of the photo: visible on every DP,
                 // independent of bitmap padding/content. DP size untouched (34dp).
-                dpAvatarView?.foreground = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setStroke(dp(3), lightened(glow, 0.65f))
-                }
+                dpAvatarView?.foreground = null // b1524: ring moved OFF the photo onto the halo layer
                 // b1520: halo STILL invisible - overflow past the 38dp band was clipped by the outer
                 // containers (gridRoot/contentGrid); bounded to 36dp inside the slot, no surgery.
                 val haloPx = dp(19).toFloat() // b1522: halo span is 38dp now (fills the band)
@@ -6414,18 +6411,34 @@ class HyperAccessibilityService : AccessibilityService() {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
                     setGradientCenter(0.5f, 0.5f)
                     gradientRadius = haloPx
-                    colors = intArrayOf(glow and 0x66FFFFFF, glow and 0x22FFFFFF, 0x00000000)
+                    colors = intArrayOf(glow and 0x55FFFFFF, glow and 0x22FFFFFF, 0x00000000)
                 }
+                // b1524 (his correction: ring ka RADIUS bada, motai nahi - aur "glow to abhi bhi nahi
+                // hai"): the old radial could never show - its bright center hides behind the 34dp
+                // photo and the gradient is already ~transparent at the only visible rim. The ring
+                // now lives on the halo view's FOREGROUND at the 38dp view edge (r~17.5dp, outside
+                // the photo radius 17dp), with a soft 6dp aura stroke under it for the bloom feel.
+                val ringSoft = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setStroke(dp(6), glow and 0x40FFFFFF)
+                }
+                val ringCore = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setStroke(dp(3), lightened(glow, 0.65f))
+                }
+                dpHaloView?.foreground = android.graphics.drawable.LayerDrawable(arrayOf(ringSoft, ringCore))
                 dpHaloView?.visibility = View.VISIBLE
             }
             2 -> {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(0, 0)
                 dpAvatarView?.foreground = null // b1523: shell = clean DP, no overlay ring
+                dpHaloView?.foreground = null // b1524
                 dpHaloView?.visibility = View.GONE
             }
             else -> {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(1.5f.toInt()), 0xCCFFFFFF.toInt())
                 dpAvatarView?.foreground = null // b1523
+                dpHaloView?.foreground = null // b1524
                 dpHaloView?.visibility = View.GONE
             }
         }
@@ -6815,7 +6828,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1523 (his order: DP size wahi, ring bada - the ring moved from behind-photo background stroke to a bright 3dp foreground overlay, visible on every DP incl full-bleed photos; Shell/Badge overlays cleared) era")
+        TraceLog.morph("v2 build marker: b1524 (his correction: ring ka RADIUS bada, motai nahi - ring now on the 38dp halo foreground at r~17.5dp, OUTSIDE the 34dp photo; soft 6dp aura stroke under it = the glow that could never render before) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
