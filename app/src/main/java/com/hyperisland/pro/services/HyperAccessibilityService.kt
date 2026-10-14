@@ -5510,8 +5510,9 @@ class HyperAccessibilityService : AccessibilityService() {
                                     val slop = android.view.ViewConfiguration.get(this@HyperAccessibilityService).scaledTouchSlop.toFloat()
                                     val tapped = (dx * dx + dy * dy) <= (3f * slop * slop) && (event.eventTime - outsideDownAt) <= 280L
                                     if (tapped) {
-                                        TraceLog.gesture("outside TAP (pure tap " + kotlin.math.hypot(dx, dy).toInt() + "px) -> " + (if (isReplyMode) "exitReply" else "collapse"))
-                                        if (isReplyMode) exitReplyMode() else postSwipeUpIsland()
+                                        val pinOn = AppSettings.getIslandPinEnabled(this@HyperAccessibilityService)
+                                        TraceLog.gesture("outside TAP (pure tap " + kotlin.math.hypot(dx, dy).toInt() + "px) -> " + (if (isReplyMode) "exitReply" else if (pinOn) "pin-keep" else "collapse"))
+                                        if (isReplyMode) exitReplyMode() else if (!pinOn) postSwipeUpIsland()
                                     } else {
                                         TraceLog.gesture("outside touch released as DRAG (" + kotlin.math.hypot(dx, dy).toInt() + "px, " + (event.eventTime - outsideDownAt) + "ms) - island kept alive, stream untouched")
                                     }
@@ -5560,11 +5561,20 @@ class HyperAccessibilityService : AccessibilityService() {
                             region.setEmpty()
 
                             if (isReplyMode || currentStage == IslandStage.STAGE3_FULL) {
+                                if (!isReplyMode && AppSettings.getIslandPinEnabled(this@HyperAccessibilityService)) {
+                                    // b1529 pin mode (his: "touch/swipe pichhe bhejo"): expanded island
+                                    // keeps ONLY its own bounds touchable; the rest of the screen belongs
+                                    // to the app below natively - no fullscreen interception, no outside tap.
+                                    val rect = Rect()
+                                    this@HyperAccessibilityService.islandView?.getGlobalVisibleRect(rect)
+                                    if (!rect.isEmpty()) region.set(rect)
+                                } else {
                                 // Full screen interception during Reply or Expanded mode:
                                 // root dispatchTouchEvent handles outside-tap collapse/exit without a second watcher window stealing child taps.
                                 val rootW = resources.displayMetrics.widthPixels
                                 val rootH = resources.displayMetrics.heightPixels
                                 region.set(0, 0, rootW, rootH)
+                                }
                             } else {
                                 // Normal/Pill island bounds — Touch Pass-through
                                 val rect = Rect()
@@ -6857,7 +6867,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1527 (Island Pin mode switch: expanded island pins; outside tap/swipe passes through to the app below without collapsing; island tap collapses, app-open blocked) era")
+        TraceLog.morph("v2 build marker: b1529 (Island Pin round 2: pin mode keeps ONLY island bounds touchable in expanded state - outside tap/swipe reaches the app below natively; outside-tap collapse re-gated with a pin-keep trace; island tap collapses, app-open blocked) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
