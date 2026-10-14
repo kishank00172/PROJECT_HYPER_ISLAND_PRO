@@ -5415,6 +5415,8 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun openCurrentNotification() {
         if (isReplyMode) return
+        // b1527 (his ask: pin mode me "tap se open block, island pe tap se collapse ho"):
+        if (AppSettings.getIslandPinEnabled(this)) { postCollapseIsland(); return }
         val openedKey = getCurrentRingModel()?.conversationKey
         // b1501 / Round-I P1-4c: tap-to-open = read THIS conversation (R2: its messages judge ECHO now).
         getCurrentRingModel()?.let { opened ->
@@ -6240,7 +6242,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // Main visualRoot + reflection touch region already handle pass-through/off-switch behavior.
         removeOutsideWatcher()
     }
-    private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) postCollapseIsland() ; false } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 4096 or 512 or 256, -3).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
+    private fun ensureOutsideWatcher() { if (outsideWatcherView != null) return; outsideWatcherView = FrameLayout(this).apply { setBackgroundColor(0); setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_OUTSIDE) { if (!AppSettings.getIslandPinEnabled(this@HyperAccessibilityService)) postCollapseIsland() } ; false // b1527: pin mode - outside touches go to the app below, island stays } }; try { windowManager?.addView(outsideWatcherView, WindowManager.LayoutParams(-1, -1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 16777216 or 8 or 4096 or 512 or 256, -3).apply { gravity = Gravity.TOP or Gravity.START; title = "HyperIslandProOutside" }) } catch (_: Exception) {} }
     private fun removeOutsideWatcher() { try { windowManager?.removeViewImmediate(outsideWatcherView!!) } catch (_: Exception) {}; outsideWatcherView = null }
     private var regionUpdateDeferred = false
 
@@ -6854,7 +6856,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1525+b1526 (quick fixes: squircle placeholder frame killed under DP + app-icon hard-hidden on settle; DP Style Lab sliders drive photo/ring-view/ring-thickness/brightness/glow/glow-alpha/badge live) era")
+        TraceLog.morph("v2 build marker: b1527 (Island Pin mode switch: expanded island pins; outside tap/swipe passes through to the app below without collapsing; island tap collapses, app-open blocked) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

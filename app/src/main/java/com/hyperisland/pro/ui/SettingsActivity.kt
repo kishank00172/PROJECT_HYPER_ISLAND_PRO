@@ -58,6 +58,9 @@ class SettingsActivity : Activity() {
                      else "Experimental · is phone me sirf ${peakHz.toInt()}Hz panel mila"
         val boost = findViewById<Switch>(R.id.switchHighRefresh)
         boost.isChecked = AppSettings.getIslandHighRefreshEnabled(this)
+        val pin = findViewById<Switch>(R.id.switchIslandPin)
+        pin.isChecked = AppSettings.getIslandPinEnabled(this)
+        pin.setOnCheckedChangeListener { _, isChecked -> AppSettings.setIslandPinEnabled(this, isChecked) } // b1527
         boost.setOnCheckedChangeListener { _, isChecked ->
             AppSettings.setIslandHighRefreshEnabled(this, isChecked)
             note?.text = when {

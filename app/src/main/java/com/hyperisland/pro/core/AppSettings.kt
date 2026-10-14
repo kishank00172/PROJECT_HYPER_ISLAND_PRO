@@ -340,6 +340,10 @@ object AppSettings {
     fun getDpLabGlowAlphaPct(c: Context) = prefs(c).getInt("dp_lab_glow_alpha", 25).coerceIn(0, 100)
     fun setDpLabGlowAlphaPct(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_glow_alpha", v.coerceIn(0, 100)).apply() }
     fun getDpLabBadgeDp(c: Context) = prefs(c).getInt("dp_lab_badge_dp", 14).coerceIn(10, 22)
+    // b1527 (his ask): Island Pin mode - expanded island stays put; outside tap/swipe passes to the
+    // app below and never collapses; island tap collapses instead of opening the app.
+    fun getIslandPinEnabled(c: Context) = prefs(c).getBoolean("island_pin_focus", false)
+    fun setIslandPinEnabled(c: Context, v: Boolean) { prefs(c).edit().putBoolean("island_pin_focus", v).apply() }
     fun setDpLabBadgeDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_badge_dp", v.coerceIn(10, 22)).apply() }
     fun setAutoRebindListenerEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_AUTO_REBIND_LISTENER, on).apply() }
 
