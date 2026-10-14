@@ -1915,6 +1915,7 @@ class HyperAccessibilityService : AccessibilityService() {
         // stall sampler caught the main thread sitting in `transactNative` 93 times for 23.3 s total.
         if (model.packageName != lastIconPkg) {
             lastIconPkg = model.packageName
+            appIconView?.visibility = View.VISIBLE // b1525: restore after a DP borrowed the slot
             appIconView?.setImageDrawable(loadAppIcon(model.packageName)); syncBandIconForContent(true)
             // issue-C: a mid-morph content switch OWNS the icon now - never let the carry/restore re-stamp the
             // previous page's drawable (morphIconLauncher snapshot was taken at morph begin, i.e. page-1's icon).
@@ -6375,7 +6376,14 @@ class HyperAccessibilityService : AccessibilityService() {
             // tile to alpha 0; an avatar-less page MUST restore it or every no-avatar app renders
             // an invisible icon. (Meta-AI settle left it at 0; Cashify pages borrowed that corpse.)
             appIconView?.animate()?.cancel()
+            appIconView?.visibility = View.VISIBLE
             appIconView?.alpha = 1f
+            // b1525: restore the squircle slot frame (hidden while a DP owns the slot)
+            gridIconSec?.background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                setColor(android.graphics.Color.TRANSPARENT); cornerRadius = dp(32) * 0.30f
+                setStroke(dp(1), 0x2EFFFFFF)
+            }
             dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f
             dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f
             dpHaloView?.visibility = View.GONE; dpHaloView?.alpha = 0f
@@ -6383,6 +6391,10 @@ class HyperAccessibilityService : AccessibilityService() {
             return
         }
         dpAvatarView?.setImageBitmap(bmp)
+        // b1525 (his point 3: "icon ke pichhe square rounded-corners placeholder khatakta hai - invisible
+        // karo"): the slot wears a faint white squircle outline at all times; while a DP owns the slot the
+        // frame is noise - drop it (no-avatar branch restores it).
+        gridIconSec?.background = null
         // b1518 theory-matched trio (his correction: "design match nahi hua theory se"):
         //   Aura  = VISIBLE halo bloom behind the DP + bright color ring (glow lightened toward white)
         //   Shell = ringless DP resting on the plain ambient glow
@@ -6396,6 +6408,12 @@ class HyperAccessibilityService : AccessibilityService() {
         val glow = if (glowColor != 0) glowColor else 0xFF6EA8FF.toInt()
         when (style) {
             1 -> {
+                val labPhoto = AppSettings.getDpLabPhotoDp(this)
+                val labRingV = AppSettings.getDpLabRingViewDp(this)
+                val labRingStroke = AppSettings.getDpLabRingStrokeDp(this)
+                val labBright = AppSettings.getDpLabRingBrightPct(this)
+                val labGlowStroke = AppSettings.getDpLabGlowStrokeDp(this)
+                val labGlowAlpha = AppSettings.getDpLabGlowAlphaPct(this)
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(0, 0)
                 // b1523 (his order: "dp size wahi rahega, ring ko bada karo"): the ring lived BEHIND
                 // the photo (background stroke) - full-bleed DPs like skylord swallowed it whole,
@@ -6405,7 +6423,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 dpAvatarView?.foreground = null // b1524: ring moved OFF the photo onto the halo layer
                 // b1520: halo STILL invisible - overflow past the 38dp band was clipped by the outer
                 // containers (gridRoot/contentGrid); bounded to 36dp inside the slot, no surgery.
-                val haloPx = dp(19).toFloat() // b1522: halo span is 38dp now (fills the band)
+                val haloPx = dp(labRingV / 2).toFloat() // b1526: lab-driven halo span
                 dpHaloView?.background = android.graphics.drawable.GradientDrawable().apply {
                     gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
                     shape = android.graphics.drawable.GradientDrawable.OVAL
@@ -6418,15 +6436,20 @@ class HyperAccessibilityService : AccessibilityService() {
                 // photo and the gradient is already ~transparent at the only visible rim. The ring
                 // now lives on the halo view's FOREGROUND at the 38dp view edge (r~17.5dp, outside
                 // the photo radius 17dp), with a soft 6dp aura stroke under it for the bloom feel.
+                val glowA = (labGlowAlpha * 255 / 100) shl 24
                 val ringSoft = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setStroke(dp(6), glow and 0x40FFFFFF)
+                    setStroke(dp(labGlowStroke.coerceAtLeast(1)), (glow and 0x00FFFFFF) or glowA)
                 }
                 val ringCore = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setStroke(dp(3), lightened(glow, 0.65f))
+                    setStroke(dp(labRingStroke), lightened(glow, labBright / 100f))
                 }
                 dpHaloView?.foreground = android.graphics.drawable.LayerDrawable(arrayOf(ringSoft, ringCore))
+                // b1526: halo/ring layer span from the lab (chain is clip-free end to end)
+                dpHaloView?.layoutParams = (dpHaloView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
+                    lp.width = dp(labRingV); lp.height = dp(labRingV)
+                }
                 dpHaloView?.visibility = View.VISIBLE
             }
             2 -> {
@@ -6443,13 +6466,14 @@ class HyperAccessibilityService : AccessibilityService() {
             }
         }
         dpAvatarView?.layoutParams = (dpAvatarView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
-            val sz = if (style == 1) 34 else 36 // b1522: 40dp DP clipped its own ring against the 38dp band
+            val sz = if (style == 1) AppSettings.getDpLabPhotoDp(this) else 36 // b1526: lab-driven
             lp.width = dp(sz); lp.height = dp(sz)
         }
         val badgeRing = if (style == 3) lightened(glow, 0.35f) else 0x88FFFFFF.toInt()
         (dpBadgeView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(if (style == 3) 2 else 1), badgeRing)
         dpBadgeView?.layoutParams = (dpBadgeView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
-            lp.width = dp(14); lp.height = dp(14)
+            val bsz = if (style == 3) AppSettings.getDpLabBadgeDp(this) + 4 else AppSettings.getDpLabBadgeDp(this) // b1526: Badge style badge is louder
+            lp.width = dp(bsz); lp.height = dp(bsz)
         }
         dpBadgeView?.setImageDrawable(loadAppIcon(model.packageName))
         // b1519 (his video proof: DP+badge ghosted after a page swipe): identity gate - same
@@ -6486,12 +6510,14 @@ class HyperAccessibilityService : AccessibilityService() {
             }
             TraceLog.line("DP", "settle firing")
             appIconView?.animate()?.alpha(0f)?.setDuration(160L)?.start()
+            appIconView?.visibility = View.INVISIBLE // b1525: hard-hide the flight tile while a DP owns the slot
             // b1521: DP and halo are already at final pose (bound in configure) - badge pops alone.
             dpBadgeView?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(260L)?.setInterpolator(android.view.animation.OvershootInterpolator(1.6f))?.start()
             // b1519: animator-race insurance - force final states 340 ms later; a raced chain in
             // page-swaps left the badge at alpha 0 forever (his frame-3 evidence).
             mainHandler.postDelayed({
                 if (dpAvatarBmp == null) return@postDelayed
+                appIconView?.visibility = View.INVISIBLE // b1525: keep the tile hidden in the verify pass too
                 dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 1f
                 dpAvatarView?.scaleX = 1f; dpAvatarView?.scaleY = 1f
                 if (dpStyleNow == 1) { dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f } // b1522: style-gated, was leaking into Shell/Badge
@@ -6828,7 +6854,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1524 (his correction: ring ka RADIUS bada, motai nahi - ring now on the 38dp halo foreground at r~17.5dp, OUTSIDE the 34dp photo; soft 6dp aura stroke under it = the glow that could never render before) era")
+        TraceLog.morph("v2 build marker: b1525+b1526 (quick fixes: squircle placeholder frame killed under DP + app-icon hard-hidden on settle; DP Style Lab sliders drive photo/ring-view/ring-thickness/brightness/glow/glow-alpha/badge live) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

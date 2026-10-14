@@ -83,6 +83,28 @@ class SettingsActivity : Activity() {
             b?.setOnClickListener { AppSettings.setAvatarDpStyle(this, i); paintDpChoice(i) }
         }
 
+        // b1526 DP Style Lab (his tuning board): live values; rebinding applies on next expand
+        fun labSeek(seekId: Int, txtId: Int, unit: String, off: Int, get: () -> Int, set: (Int) -> Unit) {
+            val sk = findViewById<SeekBar>(seekId) ?: return
+            val tv = findViewById<android.widget.TextView>(txtId)
+            fun paint(v: Int) { tv?.text = "$unit".let { u -> if (u == "%") "$v%" else "$v $u" } }
+            sk.max = 100
+            sk.progress = get() - off
+            paint(get())
+            sk.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) { set(off + p); paint(off + p) } }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        }
+        labSeek(R.id.seekDpLabPhoto, R.id.txtDpLabPhotoValue, "dp", 28, { AppSettings.getDpLabPhotoDp(this) }, { AppSettings.setDpLabPhotoDp(this, it) })
+        labSeek(R.id.seekDpLabRingView, R.id.txtDpLabRingViewValue, "dp", 34, { AppSettings.getDpLabRingViewDp(this) }, { AppSettings.setDpLabRingViewDp(this, it) })
+        labSeek(R.id.seekDpLabRingStroke, R.id.txtDpLabRingStrokeValue, "dp", 1, { AppSettings.getDpLabRingStrokeDp(this) }, { AppSettings.setDpLabRingStrokeDp(this, it) })
+        labSeek(R.id.seekDpLabRingBright, R.id.txtDpLabRingBrightValue, "%", 0, { AppSettings.getDpLabRingBrightPct(this) }, { AppSettings.setDpLabRingBrightPct(this, it) })
+        labSeek(R.id.seekDpLabGlowStroke, R.id.txtDpLabGlowStrokeValue, "dp", 0, { AppSettings.getDpLabGlowStrokeDp(this) }, { AppSettings.setDpLabGlowStrokeDp(this, it) })
+        labSeek(R.id.seekDpLabGlowAlpha, R.id.txtDpLabGlowAlphaValue, "%", 0, { AppSettings.getDpLabGlowAlphaPct(this) }, { AppSettings.setDpLabGlowAlphaPct(this, it) })
+        labSeek(R.id.seekDpLabBadge, R.id.txtDpLabBadgeValue, "dp", 10, { AppSettings.getDpLabBadgeDp(this) }, { AppSettings.setDpLabBadgeDp(this, it) })
+
         txtWidth = findViewById(R.id.txtWidthValue)
         txtStage2Width = findViewById(R.id.txtStage2WidthValue)
         txtExpandedWidth = findViewById(R.id.txtExpandedWidthValue)

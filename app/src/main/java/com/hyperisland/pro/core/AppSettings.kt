@@ -326,6 +326,21 @@ object AppSettings {
      *  (existing card ambient glow only), 3=badge-ring (glow hairline on the launcher badge). */
     fun getAvatarDpStyle(context: Context) = prefs(context).getInt("avatar_dp_style", 1).coerceIn(0, 3)
     fun setAvatarDpStyle(context: Context, v: Int) { prefs(context).edit().putInt("avatar_dp_style", v.coerceIn(0, 3)).apply() }
+    // b1526 DP Style Lab (his tuning board - he brings final numbers, we hard-bake them):
+    fun getDpLabPhotoDp(c: Context) = prefs(c).getInt("dp_lab_photo_dp", 34).coerceIn(28, 38)
+    fun setDpLabPhotoDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_photo_dp", v.coerceIn(28, 38)).apply() }
+    fun getDpLabRingViewDp(c: Context) = prefs(c).getInt("dp_lab_ring_view_dp", 38).coerceIn(34, 42)
+    fun setDpLabRingViewDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_ring_view_dp", v.coerceIn(34, 42)).apply() }
+    fun getDpLabRingStrokeDp(c: Context) = prefs(c).getInt("dp_lab_ring_stroke_dp", 3).coerceIn(1, 6)
+    fun setDpLabRingStrokeDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_ring_stroke_dp", v.coerceIn(1, 6)).apply() }
+    fun getDpLabRingBrightPct(c: Context) = prefs(c).getInt("dp_lab_ring_bright", 65).coerceIn(0, 100)
+    fun setDpLabRingBrightPct(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_ring_bright", v.coerceIn(0, 100)).apply() }
+    fun getDpLabGlowStrokeDp(c: Context) = prefs(c).getInt("dp_lab_glow_stroke_dp", 5).coerceIn(0, 10)
+    fun setDpLabGlowStrokeDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_glow_stroke_dp", v.coerceIn(0, 10)).apply() }
+    fun getDpLabGlowAlphaPct(c: Context) = prefs(c).getInt("dp_lab_glow_alpha", 25).coerceIn(0, 100)
+    fun setDpLabGlowAlphaPct(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_glow_alpha", v.coerceIn(0, 100)).apply() }
+    fun getDpLabBadgeDp(c: Context) = prefs(c).getInt("dp_lab_badge_dp", 14).coerceIn(10, 22)
+    fun setDpLabBadgeDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_badge_dp", v.coerceIn(10, 22)).apply() }
     fun setAutoRebindListenerEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_AUTO_REBIND_LISTENER, on).apply() }
 
     // ---- b1499 durable shade guards (Base64 lines; emoji/unicode-safe, no JSON dependency) ----
