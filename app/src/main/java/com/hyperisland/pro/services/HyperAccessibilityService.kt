@@ -6382,7 +6382,10 @@ class HyperAccessibilityService : AccessibilityService() {
             model.title, model.packageName
         ) else null
         dpAvatarBmp = bmp
-        TraceLog.line("DP", "configure result: bmp?=" + (bmp != null) + " style=" + style)
+        TraceLog.line("DP", "configure result: bmp?=" + (bmp != null) + " style=" + style +
+            " lab=" + AppSettings.getDpLabPhotoDp(this) + "/" + AppSettings.getDpLabRingViewDp(this) + "/" +
+            AppSettings.getDpLabRingStrokeDp(this) + "/" + AppSettings.getDpLabRingBrightPct(this) + "/" +
+            AppSettings.getDpLabGlowStrokeDp(this) + "/" + AppSettings.getDpLabGlowAlphaPct(this) + "/" + AppSettings.getDpLabBadgeDp(this))  // b1530
         ambientGlowMuted = (style == 3)        // style 3: all drama moves to the badge hairline
         if (bmp == null) {
             // b1520 (his screenshot: "dusre apps ke icons band"): the DP settle fades the flight
@@ -6867,7 +6870,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1529 (Island Pin round 2: pin mode keeps ONLY island bounds touchable in expanded state - outside tap/swipe reaches the app below natively; outside-tap collapse re-gated with a pin-keep trace; island tap collapses, app-open blocked) era")
+        TraceLog.morph("v2 build marker: b1530 (DP Lab sliders fixed: per-slider max spans so drag+label stay inside real ranges - was hardcoded 100 with silent coercion; configure trace now prints the live lab values) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
