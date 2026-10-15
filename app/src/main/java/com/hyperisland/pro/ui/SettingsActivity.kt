@@ -95,7 +95,7 @@ class SettingsActivity : Activity() {
             sk.progress = get() - off
             paint(get())
             sk.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) { set(off + p); paint(off + p) } }
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) { set(off + p); paint(off + p); refreshOverlayIfRunning() } } // b1531: live-apply (lab sliders never refreshed before)
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
                 override fun onStopTrackingTouch(sb: SeekBar?) {}
             })

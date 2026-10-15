@@ -1221,7 +1221,15 @@ class HyperAccessibilityService : AccessibilityService() {
 
     private fun postShowIsland() = mainHandler.post { showIslandInternal() }
     private fun postHideIsland() = mainHandler.post { hideIslandInternal() }
-    private fun postUpdateIsland() = mainHandler.post { ensureIslandAwake(); updateAllToCurrentState() }
+    private fun postUpdateIsland() = mainHandler.post {
+        // b1531 (his: "live changes kyu nahi hota hai"): prove the chain in the log, and make the DP
+        // Lab sliders live too - re-running configure on the expanded card applies photo/ring/glow/badge now.
+        TraceLog.line("LIVE", "settings refresh arrived: stage=" + currentStage)
+        ensureIslandAwake(); updateAllToCurrentState()
+        if (currentStage == IslandStage.STAGE3_FULL) {
+            getCurrentRingModel()?.let { configureSenderDp(it); TraceLog.line("LIVE", "DP reconfigure live-applied (style lab)") }
+        }
+    }
     private fun postExpandIsland() = mainHandler.post { setStageAnimated(IslandStage.STAGE3_FULL, ExpandReason.MANUAL_USER) }
     /** Remember which app should take the foreground after a quick action, so the card comes down when it does. */
     private fun markActionTakeoverWait(pkg: String?) {
@@ -6870,7 +6878,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1530 (DP Lab sliders fixed: per-slider max spans so drag+label stay inside real ranges - was hardcoded 100 with silent coercion; configure trace now prints the live lab values) era")
+        TraceLog.morph("v2 build marker: b1531 (live-apply round: settings refresh now traced AND re-runs DP configure on the expanded card - lab sliders update the DP live; dimension sliders same path) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }
