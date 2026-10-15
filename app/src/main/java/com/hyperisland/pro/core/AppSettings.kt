@@ -342,6 +342,9 @@ object AppSettings {
     fun getDpLabBadgeDp(c: Context) = prefs(c).getInt("dp_lab_badge_dp", 14).coerceIn(10, 22)
     // b1527 (his ask): Island Pin mode - expanded island stays put; outside tap/swipe passes to the
     // app below and never collapses; island tap collapses instead of opening the app.
+    // b1532 (his: glow ko apna alag radius chahiye - ring se bandha nahi):
+    fun getDpLabGlowRadiusDp(c: Context) = prefs(c).getInt("dp_lab_glow_radius_dp", 44).coerceIn(0, 80)
+    fun setDpLabGlowRadiusDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_glow_radius_dp", v.coerceIn(0, 80)).apply() }
     fun getIslandPinEnabled(c: Context) = prefs(c).getBoolean("island_pin_focus", false)
     fun setIslandPinEnabled(c: Context, v: Boolean) { prefs(c).edit().putBoolean("island_pin_focus", v).apply() }
     fun setDpLabBadgeDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_badge_dp", v.coerceIn(10, 22)).apply() }

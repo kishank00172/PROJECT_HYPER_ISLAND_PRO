@@ -308,7 +308,7 @@
             <SeekBar android:id="@+id/seekDpLabPhoto" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
 
             <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ring+glow layer size" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ring layer size" android:textColor="@color/text_secondary" android:textSize="13sp" />
                 <TextView android:id="@+id/txtDpLabRingViewValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="38 dp" android:textColor="@color/white" android:textSize="13sp" />
             </RelativeLayout>
             <SeekBar android:id="@+id/seekDpLabRingView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
@@ -326,8 +326,8 @@
             <SeekBar android:id="@+id/seekDpLabRingBright" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
 
             <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Glow width" android:textColor="@color/text_secondary" android:textSize="13sp" />
-                <TextView android:id="@+id/txtDpLabGlowStrokeValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="5 dp" android:textColor="@color/white" android:textSize="13sp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Glow radius (alag, ring se bada kar sakte ho)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:id="@+id/txtDpLabGlowStrokeValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="44 dp" android:textColor="@color/white" android:textSize="13sp" />
             </RelativeLayout>
             <SeekBar android:id="@+id/seekDpLabGlowStroke" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
 

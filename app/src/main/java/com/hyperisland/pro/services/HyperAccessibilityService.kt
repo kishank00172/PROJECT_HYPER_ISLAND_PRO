@@ -691,6 +691,7 @@ class HyperAccessibilityService : AccessibilityService() {
     private var dpBadgeView: ImageView? = null
     private var dpAvatarBmp: android.graphics.Bitmap? = null
     private var dpHaloView: android.view.View? = null
+    private var dpGlowView: android.view.View? = null  // b1532: glow is its OWN circle now (his: ring aur glow alag alag ho)
     private var dpStyleNow = 1
     private var ambientGlowMuted = false
     /** The pull lives on expands of the spring styles only; set per morph, read by the tween and the carry. */
@@ -6065,6 +6066,10 @@ class HyperAccessibilityService : AccessibilityService() {
                     this@HyperAccessibilityService.appIconView = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
                     addView(this@HyperAccessibilityService.appIconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
                     // b1513: DP + launcher badge layer (invisible until a MessagingStyle DP arrives)
+                    dpGlowView = android.view.View(context).apply {
+                        visibility = View.GONE; alpha = 0f; clipToOutline = false
+                    }
+                    addView(dpGlowView, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER)) // b1532: own radius
                     dpHaloView = android.view.View(context).apply {
                         visibility = View.GONE; alpha = 0f
                         outlineProvider = ViewOutlineProvider.BACKGROUND
@@ -6393,7 +6398,7 @@ class HyperAccessibilityService : AccessibilityService() {
         TraceLog.line("DP", "configure result: bmp?=" + (bmp != null) + " style=" + style +
             " lab=" + AppSettings.getDpLabPhotoDp(this) + "/" + AppSettings.getDpLabRingViewDp(this) + "/" +
             AppSettings.getDpLabRingStrokeDp(this) + "/" + AppSettings.getDpLabRingBrightPct(this) + "/" +
-            AppSettings.getDpLabGlowStrokeDp(this) + "/" + AppSettings.getDpLabGlowAlphaPct(this) + "/" + AppSettings.getDpLabBadgeDp(this))  // b1530
+            AppSettings.getDpLabGlowStrokeDp(this) + "/" + AppSettings.getDpLabGlowAlphaPct(this) + "/" + AppSettings.getDpLabBadgeDp(this) + "/gR" + AppSettings.getDpLabGlowRadiusDp(this))  // b1530/b1532
         ambientGlowMuted = (style == 3)        // style 3: all drama moves to the badge hairline
         if (bmp == null) {
             // b1520 (his screenshot: "dusre apps ke icons band"): the DP settle fades the flight
@@ -6411,6 +6416,7 @@ class HyperAccessibilityService : AccessibilityService() {
             dpAvatarView?.visibility = View.GONE; dpAvatarView?.alpha = 0f
             dpBadgeView?.visibility = View.GONE; dpBadgeView?.alpha = 0f
             dpHaloView?.visibility = View.GONE; dpHaloView?.alpha = 0f
+            dpGlowView?.visibility = View.GONE; dpGlowView?.alpha = 0f // b1532
             lastDpIdentity = null
             return
         }
@@ -6436,7 +6442,6 @@ class HyperAccessibilityService : AccessibilityService() {
                 val labRingV = AppSettings.getDpLabRingViewDp(this)
                 val labRingStroke = AppSettings.getDpLabRingStrokeDp(this)
                 val labBright = AppSettings.getDpLabRingBrightPct(this)
-                val labGlowStroke = AppSettings.getDpLabGlowStrokeDp(this)
                 val labGlowAlpha = AppSettings.getDpLabGlowAlphaPct(this)
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(0, 0)
                 // b1523 (his order: "dp size wahi rahega, ring ko bada karo"): the ring lived BEHIND
@@ -6447,29 +6452,36 @@ class HyperAccessibilityService : AccessibilityService() {
                 dpAvatarView?.foreground = null // b1524: ring moved OFF the photo onto the halo layer
                 // b1520: halo STILL invisible - overflow past the 38dp band was clipped by the outer
                 // containers (gridRoot/contentGrid); bounded to 36dp inside the slot, no surgery.
-                val haloPx = dp(labRingV / 2).toFloat() // b1526: lab-driven halo span
-                dpHaloView?.background = android.graphics.drawable.GradientDrawable().apply {
-                    gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setGradientCenter(0.5f, 0.5f)
-                    gradientRadius = haloPx
-                    colors = intArrayOf(glow and 0x55FFFFFF, glow and 0x22FFFFFF, 0x00000000)
-                }
+                dpHaloView?.background = null // b1532: ring-only view; the bloom moved out to dpGlowView
                 // b1524 (his correction: ring ka RADIUS bada, motai nahi - aur "glow to abhi bhi nahi
                 // hai"): the old radial could never show - its bright center hides behind the 34dp
                 // photo and the gradient is already ~transparent at the only visible rim. The ring
                 // now lives on the halo view's FOREGROUND at the 38dp view edge (r~17.5dp, outside
                 // the photo radius 17dp), with a soft 6dp aura stroke under it for the bloom feel.
-                val glowA = (labGlowAlpha * 255 / 100) shl 24
-                val ringSoft = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setStroke(dp(labGlowStroke.coerceAtLeast(1)), (glow and 0x00FFFFFF) or glowA)
-                }
-                val ringCore = android.graphics.drawable.GradientDrawable().apply {
+                // b1532 (his: "ring hi glow ka radius decide kar rahi hai - dono alag alag hone
+                // chahiye"): ring + glow decoupled. The halo carries ONLY the crisp ring now; the
+                // bloom lives in dpGlowView with its OWN radius (can bloom way past the ring).
+                dpHaloView?.foreground = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
                     setStroke(dp(labRingStroke), lightened(glow, labBright / 100f))
                 }
-                dpHaloView?.foreground = android.graphics.drawable.LayerDrawable(arrayOf(ringSoft, ringCore))
+                val glowR = AppSettings.getDpLabGlowRadiusDp(this)
+                if (glowR <= 0) {
+                    dpGlowView?.visibility = View.GONE
+                } else {
+                    val ga = labGlowAlpha * 255 / 100
+                    dpGlowView?.layoutParams = (dpGlowView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
+                        lp.width = dp(glowR); lp.height = dp(glowR)
+                    }
+                    dpGlowView?.background = android.graphics.drawable.GradientDrawable().apply {
+                        gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setGradientCenter(0.5f, 0.5f)
+                        gradientRadius = dp(glowR / 2).toFloat()
+                        colors = intArrayOf((glow and 0x00FFFFFF) or (ga shl 24), (glow and 0x00FFFFFF) or ((ga / 2) shl 24), 0x00000000)
+                    }
+                    dpGlowView?.visibility = View.VISIBLE; dpGlowView?.alpha = 1f
+                }
                 // b1526: halo/ring layer span from the lab (chain is clip-free end to end)
                 dpHaloView?.layoutParams = (dpHaloView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
                     lp.width = dp(labRingV); lp.height = dp(labRingV)
@@ -6481,12 +6493,14 @@ class HyperAccessibilityService : AccessibilityService() {
                 dpAvatarView?.foreground = null // b1523: shell = clean DP, no overlay ring
                 dpHaloView?.foreground = null // b1524
                 dpHaloView?.visibility = View.GONE
+                dpGlowView?.visibility = View.GONE // b1532
             }
             else -> {
                 (dpAvatarView?.background as? android.graphics.drawable.GradientDrawable)?.setStroke(dp(1.5f.toInt()), 0xCCFFFFFF.toInt())
                 dpAvatarView?.foreground = null // b1523
                 dpHaloView?.foreground = null // b1524
                 dpHaloView?.visibility = View.GONE
+                dpGlowView?.visibility = View.GONE // b1532
             }
         }
         dpAvatarView?.layoutParams = (dpAvatarView?.layoutParams as? FrameLayout.LayoutParams)?.also { lp ->
@@ -6516,6 +6530,7 @@ class HyperAccessibilityService : AccessibilityService() {
         dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 1f
         dpAvatarView?.scaleX = 1f; dpAvatarView?.scaleY = 1f
         if (style == 1) { dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f }
+        if (style == 1 && AppSettings.getDpLabGlowRadiusDp(this) > 0) { dpGlowView?.visibility = View.VISIBLE; dpGlowView?.alpha = 1f } // b1532
         dpBadgeView?.visibility = View.VISIBLE; dpBadgeView?.alpha = 0f
         dpBadgeView?.scaleX = 0.3f; dpBadgeView?.scaleY = 0.3f
         dpSettleTries = 0
@@ -6544,7 +6559,7 @@ class HyperAccessibilityService : AccessibilityService() {
                 appIconView?.visibility = View.INVISIBLE // b1525: keep the tile hidden in the verify pass too
                 dpAvatarView?.visibility = View.VISIBLE; dpAvatarView?.alpha = 1f
                 dpAvatarView?.scaleX = 1f; dpAvatarView?.scaleY = 1f
-                if (dpStyleNow == 1) { dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f } // b1522: style-gated, was leaking into Shell/Badge
+                if (dpStyleNow == 1) { dpHaloView?.visibility = View.VISIBLE; dpHaloView?.alpha = 1f; if (AppSettings.getDpLabGlowRadiusDp(this@HyperAccessibilityService) > 0) { dpGlowView?.visibility = View.VISIBLE; dpGlowView?.alpha = 1f } } // b1532 // b1522: style-gated, was leaking into Shell/Badge
                 dpBadgeView?.visibility = View.VISIBLE; dpBadgeView?.alpha = 1f
                 dpBadgeView?.scaleX = 1f; dpBadgeView?.scaleY = 1f
                 TraceLog.line("DP", "settle verified: av=" + dpAvatarView?.alpha + " halo=" + dpHaloView?.alpha + " badge=" + dpBadgeView?.alpha)
@@ -6878,7 +6893,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1531 (live-apply round: settings refresh now traced AND re-runs DP configure on the expanded card - lab sliders update the DP live; dimension sliders same path) era")
+        TraceLog.morph("v2 build marker: b1532 (his: ring aur glow alag alag ho - glow is now its OWN circle with its own radius slider, blooming past the ring; halo view carries only the crisp ring) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

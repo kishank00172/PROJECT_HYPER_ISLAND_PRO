@@ -104,7 +104,7 @@ class SettingsActivity : Activity() {
         labSeek(R.id.seekDpLabRingView, R.id.txtDpLabRingViewValue, "dp", 34, 8, { AppSettings.getDpLabRingViewDp(this) }, { AppSettings.setDpLabRingViewDp(this, it) })
         labSeek(R.id.seekDpLabRingStroke, R.id.txtDpLabRingStrokeValue, "dp", 1, 5, { AppSettings.getDpLabRingStrokeDp(this) }, { AppSettings.setDpLabRingStrokeDp(this, it) })
         labSeek(R.id.seekDpLabRingBright, R.id.txtDpLabRingBrightValue, "%", 0, 100, { AppSettings.getDpLabRingBrightPct(this) }, { AppSettings.setDpLabRingBrightPct(this, it) })
-        labSeek(R.id.seekDpLabGlowStroke, R.id.txtDpLabGlowStrokeValue, "dp", 0, 10, { AppSettings.getDpLabGlowStrokeDp(this) }, { AppSettings.setDpLabGlowStrokeDp(this, it) })
+        labSeek(R.id.seekDpLabGlowStroke, R.id.txtDpLabGlowStrokeValue, "dp", 0, 80, { AppSettings.getDpLabGlowRadiusDp(this) }, { AppSettings.setDpLabGlowRadiusDp(this, it) }) // b1532: glow ka apna radius
         labSeek(R.id.seekDpLabGlowAlpha, R.id.txtDpLabGlowAlphaValue, "%", 0, 100, { AppSettings.getDpLabGlowAlphaPct(this) }, { AppSettings.setDpLabGlowAlphaPct(this, it) })
         labSeek(R.id.seekDpLabBadge, R.id.txtDpLabBadgeValue, "dp", 10, 12, { AppSettings.getDpLabBadgeDp(this) }, { AppSettings.setDpLabBadgeDp(this, it) })
 
