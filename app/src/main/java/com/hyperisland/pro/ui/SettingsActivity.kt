@@ -82,8 +82,9 @@ class SettingsActivity : Activity() {
             dpBtns.forEachIndexed { i, b -> b?.setTextColor(if (i == v) 0xFF4DA3FF.toInt() else 0xFFAAAAAA.toInt()) }
         }
         paintDpChoice(AppSettings.getAvatarDpStyle(this))
+        var refreshDpLabUI: (() -> Unit)? = null
         dpBtns.forEachIndexed { i, b ->
-            b?.setOnClickListener { AppSettings.setAvatarDpStyle(this, i); paintDpChoice(i) }
+            b?.setOnClickListener { AppSettings.setAvatarDpStyle(this, i); paintDpChoice(i); refreshDpLabUI?.invoke() } // b1533: repaint lab for the newly-picked style
         }
 
         // b1526 DP Style Lab (his tuning board): live values; rebinding applies on next expand
@@ -100,13 +101,74 @@ class SettingsActivity : Activity() {
                 override fun onStopTrackingTouch(sb: SeekBar?) {}
             })
         }
-        labSeek(R.id.seekDpLabPhoto, R.id.txtDpLabPhotoValue, "dp", 28, 10, { AppSettings.getDpLabPhotoDp(this) }, { AppSettings.setDpLabPhotoDp(this, it) })
-        labSeek(R.id.seekDpLabRingView, R.id.txtDpLabRingViewValue, "dp", 34, 8, { AppSettings.getDpLabRingViewDp(this) }, { AppSettings.setDpLabRingViewDp(this, it) })
-        labSeek(R.id.seekDpLabRingStroke, R.id.txtDpLabRingStrokeValue, "dp", 1, 5, { AppSettings.getDpLabRingStrokeDp(this) }, { AppSettings.setDpLabRingStrokeDp(this, it) })
-        labSeek(R.id.seekDpLabRingBright, R.id.txtDpLabRingBrightValue, "%", 0, 100, { AppSettings.getDpLabRingBrightPct(this) }, { AppSettings.setDpLabRingBrightPct(this, it) })
-        labSeek(R.id.seekDpLabGlowStroke, R.id.txtDpLabGlowStrokeValue, "dp", 0, 80, { AppSettings.getDpLabGlowRadiusDp(this) }, { AppSettings.setDpLabGlowRadiusDp(this, it) }) // b1532: glow ka apna radius
-        labSeek(R.id.seekDpLabGlowAlpha, R.id.txtDpLabGlowAlphaValue, "%", 0, 100, { AppSettings.getDpLabGlowAlphaPct(this) }, { AppSettings.setDpLabGlowAlphaPct(this, it) })
-        labSeek(R.id.seekDpLabBadge, R.id.txtDpLabBadgeValue, "dp", 10, 12, { AppSettings.getDpLabBadgeDp(this) }, { AppSettings.setDpLabBadgeDp(this, it) })
+        labSeek(R.id.seekDpLabPhoto, R.id.txtDpLabPhotoValue, "dp", 28, 10, { AppSettings.getDpLabPhotoDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabPhotoDp(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabRingView, R.id.txtDpLabRingViewValue, "dp", 34, 8, { AppSettings.getDpLabRingViewDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabRingViewDp(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabRingStroke, R.id.txtDpLabRingStrokeValue, "dp", 1, 5, { AppSettings.getDpLabRingStrokeDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabRingStrokeDp(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabRingBright, R.id.txtDpLabRingBrightValue, "%", 0, 100, { AppSettings.getDpLabRingBrightPct(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabRingBrightPct(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabGlowStroke, R.id.txtDpLabGlowStrokeValue, "dp", 0, 80, { AppSettings.getDpLabGlowRadiusDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabGlowRadiusDp(this, AppSettings.getAvatarDpStyle(this), it) }) // b1532: glow ka apna radius
+        labSeek(R.id.seekDpLabGlowAlpha, R.id.txtDpLabGlowAlphaValue, "%", 0, 100, { AppSettings.getDpLabGlowAlphaPct(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabGlowAlphaPct(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabBadge, R.id.txtDpLabBadgeValue, "dp", 10, 12, { AppSettings.getDpLabBadgeDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabBadgeDp(this, AppSettings.getAvatarDpStyle(this), it) })
+
+        // b1533 (his: "ye setting har mode ke liye alag alag hoga na"): style badalte hi sliders usi
+        // style ki values dikhayein; glow/ring rows sirf AURA ke hain (baaki styles par photo+badge).
+        fun syncDpLabVisibility() {
+            val st = AppSettings.getAvatarDpStyle(this)
+            val auraOnly = listOf(R.id.rowDpLabRingView, R.id.rowDpLabRingStroke, R.id.rowDpLabRingBright, R.id.rowDpLabGlowStroke, R.id.rowDpLabGlowAlpha)
+            val photoBadge = listOf(R.id.rowDpLabPhoto, R.id.rowDpLabBadge)
+            auraOnly.forEach { findViewById<android.view.View>(it)?.visibility = if (st == 1) android.view.View.VISIBLE else android.view.View.GONE }
+            photoBadge.forEach { findViewById<android.view.View>(it)?.visibility = if (st == 0) android.view.View.GONE else android.view.View.VISIBLE }
+        }
+        refreshDpLabUI = {
+            syncDpLabVisibility()
+            // sliders ko nayi style ki values pe re-sync karo (progress reset -> label paint live hota hai)
+            val pairs = listOf(
+                R.id.seekDpLabPhoto to { AppSettings.getDpLabPhotoDp(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabRingView to { AppSettings.getDpLabRingViewDp(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabRingStroke to { AppSettings.getDpLabRingStrokeDp(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabRingBright to { AppSettings.getDpLabRingBrightPct(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabGlowStroke to { AppSettings.getDpLabGlowRadiusDp(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabGlowAlpha to { AppSettings.getDpLabGlowAlphaPct(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabBadge to { AppSettings.getDpLabBadgeDp(this, AppSettings.getAvatarDpStyle(this)) }
+            )
+            val mins = intArrayOf(28, 34, 1, 0, 0, 0, 10)
+            pairs.forEachIndexed { idx, (id, getv) ->
+                findViewById<android.widget.SeekBar>(id)?.let { sk -> if (sk.progress != getv() - mins[idx]) sk.progress = getv() - mins[idx] }
+            }
+        }
+        syncDpLabVisibility()
+
+        // b1533 (his point 1: export karne wala button): DP Lab section me button -> Downloads me file.
+        findViewById<android.widget.Button>(R.id.btnExportDpLab)?.setOnClickListener {
+            if (android.os.Build.VERSION.SDK_INT < 29) {
+                android.widget.Toast.makeText(this, "Export ke liye Android 10+ chahiye", android.widget.Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            try {
+                val names = arrayOf("OFF", "AURA", "SHELL", "BADGE")
+                val sb2 = StringBuilder("HIP DP Style Lab export\n")
+                for (sty in 0..3) {
+                    sb2.append("[" + names[sty] + "] photo=" + AppSettings.getDpLabPhotoDp(this, sty) +
+                        " ringView=" + AppSettings.getDpLabRingViewDp(this, sty) +
+                        " ringStroke=" + AppSettings.getDpLabRingStrokeDp(this, sty) +
+                        " ringBright=" + AppSettings.getDpLabRingBrightPct(this, sty) +
+                        " glowRadius=" + AppSettings.getDpLabGlowRadiusDp(this, sty) +
+                        " glowAlpha=" + AppSettings.getDpLabGlowAlphaPct(this, sty) +
+                        " badge=" + AppSettings.getDpLabBadgeDp(this, sty) + "\n")
+                }
+                sb2.append("currentStyle=" + names[AppSettings.getAvatarDpStyle(this)] + "\n")
+                val fn = "HIP-DPLab-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date()) + ".txt"
+                val cv = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fn)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)
+                if (uri != null) contentResolver.openOutputStream(uri)?.use { it.write(sb2.toString().toByteArray()) }
+                android.widget.Toast.makeText(this, "Saved: Downloads/" + fn, android.widget.Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(this, "Export fail: " + e.message, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
 
         txtWidth = findViewById(R.id.txtWidthValue)
         txtStage2Width = findViewById(R.id.txtStage2WidthValue)
