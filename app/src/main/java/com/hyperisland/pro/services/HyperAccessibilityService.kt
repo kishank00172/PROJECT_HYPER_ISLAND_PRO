@@ -6913,7 +6913,7 @@ class HyperAccessibilityService : AccessibilityService() {
         val contentSec = gridContentSec as? LinearLayout ?: return
         val ctx: android.content.Context = this
         layoutAApplied = true
-        TraceLog.morph("v2 build marker: b1533 (per-style DP Lab values + export-to-file button + Aura bloom on icon-only pages too) era")
+        TraceLog.morph("v2 build marker: b1534 (DP Lab hide/show ab label+slider dono saath - non-AURA styles me na-munna showpiece sliders khatam) era")
 
         appNameText?.apply { setAllCaps(true); letterSpacing = 0.03f }   // "0.3sp" as an em fraction of 11sp
         timeStampText?.apply { setTextColor(0x73FFFFFF.toInt()); textSize = 11f; setPadding(0, 0, 0, 0) }

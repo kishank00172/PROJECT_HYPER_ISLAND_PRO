@@ -113,8 +113,17 @@ class SettingsActivity : Activity() {
         // style ki values dikhayein; glow/ring rows sirf AURA ke hain (baaki styles par photo+badge).
         fun syncDpLabVisibility() {
             val st = AppSettings.getAvatarDpStyle(this)
-            val auraOnly = listOf(R.id.rowDpLabRingView, R.id.rowDpLabRingStroke, R.id.rowDpLabRingBright, R.id.rowDpLabGlowStroke, R.id.rowDpLabGlowAlpha)
-            val photoBadge = listOf(R.id.rowDpLabPhoto, R.id.rowDpLabBadge)
+            // b1534 (his: "baaki styles me sliders showpiece hain, name bhi nahi"): pichla patch sirf
+            // LABEL row chhupata tha - neeche ka SeekBar bina naam ke pada reh jata tha. Ab label+slider
+            // dono saath hide/show hote hain.
+            val auraOnly = listOf(
+                R.id.rowDpLabRingView, R.id.seekDpLabRingView,
+                R.id.rowDpLabRingStroke, R.id.seekDpLabRingStroke,
+                R.id.rowDpLabRingBright, R.id.seekDpLabRingBright,
+                R.id.rowDpLabGlowStroke, R.id.seekDpLabGlowStroke,
+                R.id.rowDpLabGlowAlpha, R.id.seekDpLabGlowAlpha
+            )
+            val photoBadge = listOf(R.id.rowDpLabPhoto, R.id.seekDpLabPhoto, R.id.rowDpLabBadge, R.id.seekDpLabBadge)
             auraOnly.forEach { findViewById<android.view.View>(it)?.visibility = if (st == 1) android.view.View.VISIBLE else android.view.View.GONE }
             photoBadge.forEach { findViewById<android.view.View>(it)?.visibility = if (st == 0) android.view.View.GONE else android.view.View.VISIBLE }
         }
