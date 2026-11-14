@@ -343,7 +343,7 @@
             </RelativeLayout>
             <SeekBar android:id="@+id/seekDpLabBadge" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="4dp" />
 
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:text="Values is style ke liye save hote hain - har mode ke apne. Glow/ring wale rows sirf AURA me dikhte hain (kaam bhi sirf wahi karte hain)." android:textColor="@color/text_secondary" android:textSize="11sp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:text="Har style ke apne 7 sliders - aura, shell, badge teeno me sab kaam karte hain. OFF me DP hi off hai." android:textColor="@color/text_secondary" android:textSize="11sp" />
 
             <Button
                 android:id="@+id/btnExportDpLab"

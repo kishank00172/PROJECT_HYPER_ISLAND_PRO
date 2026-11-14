@@ -332,19 +332,19 @@ object AppSettings {
     fun setDpLabPhotoDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_photo", v.coerceIn(28, 38)).apply() }
     fun getDpLabRingViewDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_view", prefs(c).getInt("dp_lab_ring_view_dp", 38)).coerceIn(34, 42)
     fun setDpLabRingViewDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_ring_view", v.coerceIn(34, 42)).apply() }
-    fun getDpLabRingStrokeDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_stroke", prefs(c).getInt("dp_lab_ring_stroke_dp", 3)).coerceIn(1, 6)
+    fun getDpLabRingStrokeDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_stroke", prefs(c).getInt("dp_lab_ring_stroke_dp", if (st != 1) 2 else 3)).coerceIn(1, 6)
     fun setDpLabRingStrokeDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_ring_stroke", v.coerceIn(1, 6)).apply() }
-    fun getDpLabRingBrightPct(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_bright", prefs(c).getInt("dp_lab_ring_bright", 65)).coerceIn(0, 100)
+    fun getDpLabRingBrightPct(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_bright", prefs(c).getInt("dp_lab_ring_bright", if (st == 2) 45 else if (st == 3) 55 else 65)).coerceIn(0, 100)
     fun setDpLabRingBrightPct(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_ring_bright", v.coerceIn(0, 100)).apply() }
     fun getDpLabGlowStrokeDp(c: Context) = prefs(c).getInt("dp_lab_glow_stroke_dp", 5).coerceIn(0, 10)
     fun setDpLabGlowStrokeDp(c: Context, v: Int) { prefs(c).edit().putInt("dp_lab_glow_stroke_dp", v.coerceIn(0, 10)).apply() }
-    fun getDpLabGlowAlphaPct(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_glow_alpha", prefs(c).getInt("dp_lab_glow_alpha", 25)).coerceIn(0, 100)
+    fun getDpLabGlowAlphaPct(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_glow_alpha", prefs(c).getInt("dp_lab_glow_alpha", if (st == 2) 40 else 25)).coerceIn(0, 100)
     fun setDpLabGlowAlphaPct(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_glow_alpha", v.coerceIn(0, 100)).apply() }
     fun getDpLabBadgeDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_badge", prefs(c).getInt("dp_lab_badge_dp", 14)).coerceIn(10, 22)
     // b1527 (his ask): Island Pin mode - expanded island stays put; outside tap/swipe passes to the
     // app below and never collapses; island tap collapses instead of opening the app.
     // b1532 (his: glow ko apna alag radius chahiye - ring se bandha nahi):
-    fun getDpLabGlowRadiusDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_glow_radius", prefs(c).getInt("dp_lab_glow_radius_dp", 44)).coerceIn(0, 80)
+    fun getDpLabGlowRadiusDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_glow_radius", prefs(c).getInt("dp_lab_glow_radius_dp", if (st == 2) 50 else if (st == 3) 0 else 44)).coerceIn(0, 80)
     fun setDpLabGlowRadiusDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_glow_radius", v.coerceIn(0, 80)).apply() }
     fun getIslandPinEnabled(c: Context) = prefs(c).getBoolean("island_pin_focus", false)
     fun setIslandPinEnabled(c: Context, v: Boolean) { prefs(c).edit().putBoolean("island_pin_focus", v).apply() }
