@@ -307,6 +307,12 @@
             </RelativeLayout>
             <SeekBar android:id="@+id/seekDpLabPhoto" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
 
+            <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabWhiteStroke">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DP white circle motai (0 = off)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:id="@+id/txtDpLabWhiteStrokeValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="0 dp" android:textColor="@color/white" android:textSize="13sp" />
+            </RelativeLayout>
+            <SeekBar android:id="@+id/seekDpLabWhiteStroke" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
+
             <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabRingView">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ring layer size" android:textColor="@color/text_secondary" android:textSize="13sp" />
                 <TextView android:id="@+id/txtDpLabRingViewValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="38 dp" android:textColor="@color/white" android:textSize="13sp" />
@@ -337,11 +343,38 @@
             </RelativeLayout>
             <SeekBar android:id="@+id/seekDpLabGlowAlpha" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
 
+            <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabGlowSoft">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Glow softness (fade kitna broad)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:id="@+id/txtDpLabGlowSoftValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="50%" android:textColor="@color/white" android:textSize="13sp" />
+            </RelativeLayout>
+            <SeekBar android:id="@+id/seekDpLabGlowSoft" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
+
             <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabBadge">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Badge size" android:textColor="@color/text_secondary" android:textSize="13sp" />
                 <TextView android:id="@+id/txtDpLabBadgeValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="14 dp" android:textColor="@color/white" android:textSize="13sp" />
             </RelativeLayout>
             <SeekBar android:id="@+id/seekDpLabBadge" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="4dp" />
+
+            <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabBadgeGlowW">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Badge hairline width (0 = off)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:id="@+id/txtDpLabBadgeGlowWValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="2 dp" android:textColor="@color/white" android:textSize="13sp" />
+            </RelativeLayout>
+            <SeekBar android:id="@+id/seekDpLabBadgeGlowW" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
+            <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabBadgeGlowBright">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Badge hairline brightness" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:id="@+id/txtDpLabBadgeGlowBrightValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="35%" android:textColor="@color/white" android:textSize="13sp" />
+            </RelativeLayout>
+            <SeekBar android:id="@+id/seekDpLabBadgeGlowBright" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
+            <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabBadgeCorner">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Badge corner (0 neeche-right, 1 upar-right, 2 neeche-left, 3 upar-left)" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:id="@+id/txtDpLabBadgeCornerValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="0" android:textColor="@color/white" android:textSize="13sp" />
+            </RelativeLayout>
+            <SeekBar android:id="@+id/seekDpLabBadgeCorner" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
+            <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/rowDpLabPopSpeed">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Badge pop speed" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                <TextView android:id="@+id/txtDpLabPopSpeedValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="50%" android:textColor="@color/white" android:textSize="13sp" />
+            </RelativeLayout>
+            <SeekBar android:id="@+id/seekDpLabPopSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
 
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="6dp" android:text="Har style ke apne 7 sliders - aura, shell, badge teeno me sab kaam karte hain. OFF me DP hi off hai." android:textColor="@color/text_secondary" android:textSize="11sp" />
 

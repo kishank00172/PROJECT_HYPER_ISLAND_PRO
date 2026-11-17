@@ -103,28 +103,46 @@ class SettingsActivity : Activity() {
         }
         labSeek(R.id.seekDpLabPhoto, R.id.txtDpLabPhotoValue, "dp", 28, 10, { AppSettings.getDpLabPhotoDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabPhotoDp(this, AppSettings.getAvatarDpStyle(this), it) })
         labSeek(R.id.seekDpLabRingView, R.id.txtDpLabRingViewValue, "dp", 34, 8, { AppSettings.getDpLabRingViewDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabRingViewDp(this, AppSettings.getAvatarDpStyle(this), it) })
-        labSeek(R.id.seekDpLabRingStroke, R.id.txtDpLabRingStrokeValue, "dp", 1, 5, { AppSettings.getDpLabRingStrokeDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabRingStrokeDp(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabRingStroke, R.id.txtDpLabRingStrokeValue, "dp", 0, 6, // b1536: 0 = ring off { AppSettings.getDpLabRingStrokeDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabRingStrokeDp(this, AppSettings.getAvatarDpStyle(this), it) })
         labSeek(R.id.seekDpLabRingBright, R.id.txtDpLabRingBrightValue, "%", 0, 100, { AppSettings.getDpLabRingBrightPct(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabRingBrightPct(this, AppSettings.getAvatarDpStyle(this), it) })
         labSeek(R.id.seekDpLabGlowStroke, R.id.txtDpLabGlowStrokeValue, "dp", 0, 80, { AppSettings.getDpLabGlowRadiusDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabGlowRadiusDp(this, AppSettings.getAvatarDpStyle(this), it) }) // b1532: glow ka apna radius
         labSeek(R.id.seekDpLabGlowAlpha, R.id.txtDpLabGlowAlphaValue, "%", 0, 100, { AppSettings.getDpLabGlowAlphaPct(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabGlowAlphaPct(this, AppSettings.getAvatarDpStyle(this), it) })
         labSeek(R.id.seekDpLabBadge, R.id.txtDpLabBadgeValue, "dp", 10, 12, { AppSettings.getDpLabBadgeDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabBadgeDp(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabWhiteStroke, R.id.txtDpLabWhiteStrokeValue, "dp", 0, 4, { AppSettings.getDpLabWhiteStrokeDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabWhiteStrokeDp(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabGlowSoft, R.id.txtDpLabGlowSoftValue, "%", 0, 100, { AppSettings.getDpLabGlowSoftPct(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabGlowSoftPct(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabBadgeGlowW, R.id.txtDpLabBadgeGlowWValue, "dp", 0, 6, { AppSettings.getDpLabBadgeGlowWidthDp(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabBadgeGlowWidthDp(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabBadgeGlowBright, R.id.txtDpLabBadgeGlowBrightValue, "%", 0, 100, { AppSettings.getDpLabBadgeGlowBrightPct(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabBadgeGlowBrightPct(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabBadgeCorner, R.id.txtDpLabBadgeCornerValue, "", 0, 3, { AppSettings.getDpLabBadgeCorner(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabBadgeCorner(this, AppSettings.getAvatarDpStyle(this), it) })
+        labSeek(R.id.seekDpLabPopSpeed, R.id.txtDpLabPopSpeedValue, "%", 0, 100, { AppSettings.getDpLabPopSpeed(this, AppSettings.getAvatarDpStyle(this)) }, { AppSettings.setDpLabPopSpeed(this, AppSettings.getAvatarDpStyle(this), it) })
 
         // b1533 (his: "ye setting har mode ke liye alag alag hoga na"): style badalte hi sliders usi
         // style ki values dikhayein; glow/ring rows sirf AURA ke hain (baaki styles par photo+badge).
         fun syncDpLabVisibility() {
             val st = AppSettings.getAvatarDpStyle(this)
-            // b1535 (his: "har style me full customization chahiye - do slider se khelun kya?"): saare 7
-            // rows har on-style me dikhte hain aur kaam bhi karte hain; sirf OFF me sab chhupte hain.
-            val all = listOf(
-                R.id.rowDpLabPhoto, R.id.seekDpLabPhoto,
+            // b1536 (his: "FULLY tune karna hai - mat poochho"): har on-style ka poora tuning set.
+            // Badge ka matlab photo pe ring/glow NAHI (woh jaan badge ke hairline ki hai) - baaki sab jaga
+            // har slider live hai. OFF = DP hi nahi, to kuch nahi.
+            val ringGlowRows = listOf(
                 R.id.rowDpLabRingView, R.id.seekDpLabRingView,
                 R.id.rowDpLabRingStroke, R.id.seekDpLabRingStroke,
                 R.id.rowDpLabRingBright, R.id.seekDpLabRingBright,
                 R.id.rowDpLabGlowStroke, R.id.seekDpLabGlowStroke,
                 R.id.rowDpLabGlowAlpha, R.id.seekDpLabGlowAlpha,
-                R.id.rowDpLabBadge, R.id.seekDpLabBadge
+                R.id.rowDpLabGlowSoft, R.id.seekDpLabGlowSoft
             )
-            all.forEach { findViewById<android.view.View>(it)?.visibility = if (st == 0) android.view.View.GONE else android.view.View.VISIBLE }
+            val alwaysRows = listOf(
+                R.id.rowDpLabPhoto, R.id.seekDpLabPhoto,
+                R.id.rowDpLabWhiteStroke, R.id.seekDpLabWhiteStroke,
+                R.id.rowDpLabBadge, R.id.seekDpLabBadge,
+                R.id.rowDpLabBadgeGlowW, R.id.seekDpLabBadgeGlowW,
+                R.id.rowDpLabBadgeCorner, R.id.seekDpLabBadgeCorner,
+                R.id.rowDpLabPopSpeed, R.id.seekDpLabPopSpeed
+            )
+            alwaysRows.forEach { findViewById<android.view.View>(it)?.visibility = if (st == 0) android.view.View.GONE else android.view.View.VISIBLE }
+            ringGlowRows.forEach { findViewById<android.view.View>(it)?.visibility = if (st == 1 || st == 2) android.view.View.VISIBLE else android.view.View.GONE }
+            // Badge style ka hairline brightness sirf Badge me (baaki styles ka hairline white fixed)
+            findViewById<android.view.View>(R.id.rowDpLabBadgeGlowBright)?.visibility = if (st == 3) android.view.View.VISIBLE else android.view.View.GONE
+            findViewById<android.view.View>(R.id.seekDpLabBadgeGlowBright)?.visibility = if (st == 3) android.view.View.VISIBLE else android.view.View.GONE
         }
         refreshDpLabUI = {
             syncDpLabVisibility()
@@ -136,9 +154,15 @@ class SettingsActivity : Activity() {
                 R.id.seekDpLabRingBright to { AppSettings.getDpLabRingBrightPct(this, AppSettings.getAvatarDpStyle(this)) },
                 R.id.seekDpLabGlowStroke to { AppSettings.getDpLabGlowRadiusDp(this, AppSettings.getAvatarDpStyle(this)) },
                 R.id.seekDpLabGlowAlpha to { AppSettings.getDpLabGlowAlphaPct(this, AppSettings.getAvatarDpStyle(this)) },
-                R.id.seekDpLabBadge to { AppSettings.getDpLabBadgeDp(this, AppSettings.getAvatarDpStyle(this)) }
+                R.id.seekDpLabBadge to { AppSettings.getDpLabBadgeDp(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabWhiteStroke to { AppSettings.getDpLabWhiteStrokeDp(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabGlowSoft to { AppSettings.getDpLabGlowSoftPct(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabBadgeGlowW to { AppSettings.getDpLabBadgeGlowWidthDp(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabBadgeGlowBright to { AppSettings.getDpLabBadgeGlowBrightPct(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabBadgeCorner to { AppSettings.getDpLabBadgeCorner(this, AppSettings.getAvatarDpStyle(this)) },
+                R.id.seekDpLabPopSpeed to { AppSettings.getDpLabPopSpeed(this, AppSettings.getAvatarDpStyle(this)) }
             )
-            val mins = intArrayOf(28, 34, 1, 0, 0, 0, 10)
+            val mins = intArrayOf(28, 34, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0) // b1536: 13 sliders
             pairs.forEachIndexed { idx, (id, getv) ->
                 findViewById<android.widget.SeekBar>(id)?.let { sk -> if (sk.progress != getv() - mins[idx]) sk.progress = getv() - mins[idx] }
             }
@@ -161,7 +185,13 @@ class SettingsActivity : Activity() {
                         " ringBright=" + AppSettings.getDpLabRingBrightPct(this, sty) +
                         " glowRadius=" + AppSettings.getDpLabGlowRadiusDp(this, sty) +
                         " glowAlpha=" + AppSettings.getDpLabGlowAlphaPct(this, sty) +
-                        " badge=" + AppSettings.getDpLabBadgeDp(this, sty) + "\n")
+                        " badge=" + AppSettings.getDpLabBadgeDp(this, sty) +
+                        " whiteStroke=" + AppSettings.getDpLabWhiteStrokeDp(this, sty) +
+                        " glowSoft=" + AppSettings.getDpLabGlowSoftPct(this, sty) +
+                        " badgeGlowW=" + AppSettings.getDpLabBadgeGlowWidthDp(this, sty) +
+                        " badgeGlowBright=" + AppSettings.getDpLabBadgeGlowBrightPct(this, sty) +
+                        " badgeCorner=" + AppSettings.getDpLabBadgeCorner(this, sty) +
+                        " popSpeed=" + AppSettings.getDpLabPopSpeed(this, sty) + "\n")
                 }
                 sb2.append("currentStyle=" + names[AppSettings.getAvatarDpStyle(this)] + "\n")
                 val fn = "HIP-DPLab-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date()) + ".txt"

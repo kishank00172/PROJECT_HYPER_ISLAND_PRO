@@ -332,8 +332,21 @@ object AppSettings {
     fun setDpLabPhotoDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_photo", v.coerceIn(28, 38)).apply() }
     fun getDpLabRingViewDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_view", prefs(c).getInt("dp_lab_ring_view_dp", 38)).coerceIn(34, 42)
     fun setDpLabRingViewDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_ring_view", v.coerceIn(34, 42)).apply() }
-    fun getDpLabRingStrokeDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_stroke", prefs(c).getInt("dp_lab_ring_stroke_dp", if (st != 1) 2 else 3)).coerceIn(1, 6)
-    fun setDpLabRingStrokeDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_ring_stroke", v.coerceIn(1, 6)).apply() }
+    fun getDpLabRingStrokeDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_stroke", prefs(c).getInt("dp_lab_ring_stroke_dp", if (st == 1) 3 else 0)).coerceIn(0, 6) // b1536: 0 = ring off (Shell/Badge default ringless)
+    fun setDpLabRingStrokeDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_ring_stroke", v.coerceIn(0, 6)).apply() }
+    // b1536 (his: "fully tune karna hai - mat poochho kya dena chahiye"): har style ka har pehlu per-style tunable.
+    fun getDpLabGlowSoftPct(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_glow_soft", 50).coerceIn(0, 100)
+    fun setDpLabGlowSoftPct(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_glow_soft", v.coerceIn(0, 100)).apply() }
+    fun getDpLabWhiteStrokeDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_white_stroke", if (st == 3) 2 else 0).coerceIn(0, 4)
+    fun setDpLabWhiteStrokeDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_white_stroke", v.coerceIn(0, 4)).apply() }
+    fun getDpLabBadgeGlowWidthDp(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_badge_glow_w", if (st == 3) 2 else 1).coerceIn(0, 6)
+    fun setDpLabBadgeGlowWidthDp(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_badge_glow_w", v.coerceIn(0, 6)).apply() }
+    fun getDpLabBadgeGlowBrightPct(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_badge_glow_bright", 35).coerceIn(0, 100)
+    fun setDpLabBadgeGlowBrightPct(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_badge_glow_bright", v.coerceIn(0, 100)).apply() }
+    fun getDpLabBadgeCorner(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_badge_corner", 0).coerceIn(0, 3)
+    fun setDpLabBadgeCorner(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_badge_corner", v.coerceIn(0, 3)).apply() }
+    fun getDpLabPopSpeed(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_pop_speed", 50).coerceIn(0, 100)
+    fun setDpLabPopSpeed(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_pop_speed", v.coerceIn(0, 100)).apply() }
     fun getDpLabRingBrightPct(c: Context, st: Int) = prefs(c).getInt("dp_lab_s" + st + "_ring_bright", prefs(c).getInt("dp_lab_ring_bright", if (st == 2) 45 else if (st == 3) 55 else 65)).coerceIn(0, 100)
     fun setDpLabRingBrightPct(c: Context, st: Int, v: Int) { prefs(c).edit().putInt("dp_lab_s" + st + "_ring_bright", v.coerceIn(0, 100)).apply() }
     fun getDpLabGlowStrokeDp(c: Context) = prefs(c).getInt("dp_lab_glow_stroke_dp", 5).coerceIn(0, 10)
